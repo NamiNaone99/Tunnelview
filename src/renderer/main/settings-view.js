@@ -7,7 +7,10 @@
  * actually persisted, and focus/scroll position survive saves.
  */
 import { h, icon, toast, applyTheme, timeAgo, safeText } from '../shared/ui.js';
-import { api, store, subscribe, saveSettings, PROTO, errMsg, peerName, copyText, OS_NAMES, securityLocked, isTaggedTrust } from './store.js';
+import {
+  api, store, subscribe, saveSettings, PROTO, errMsg, peerName, copyText, OS_NAMES, securityLocked, isTaggedTrust,
+  hasIdentityApi, resetIdentity, retryIdentity,
+} from './store.js';
 import { pushLayer, openPasswordDialog, removePassword, confirmDialog } from './dialogs.js';
 
 const SECTIONS = [
@@ -53,6 +56,7 @@ export function createSettingsView() {
   }
   subscribe('settings', sync);
   subscribe('state', sync);
+  subscribe('identity', sync);
   subscribe('peers', () => { if (built) built.updateSuggestions(); });
 
   /* ------------------------------------------------------------------ controls */
@@ -330,9 +334,78 @@ export function createSettingsView() {
       numberInput({ min: 10, max: 300, step: 5, label: 'Approval timeout', unit: 'sec', get: (s) => s.promptTimeoutSec, set: (v) => saveSettings({ promptTimeoutSec: v }) }));
 
     return {
-      el: section('security', 'Security', 'shield', lockBanner(), hostRow, modeRow, whoRow, autoRow, pwRow, trustedRow, permRow, timeoutRow),
+      el: section('security', 'Security', 'shield', lockBanner(), hostRow, modeRow, whoRow, autoRow, pwRow, trustedRow, permRow, timeoutRow, identityRow()),
       updateSuggestions,
     };
+  }
+
+  /**
+   * This computer's ID for phones (identity.js fingerprint). Resetting it is locked during an
+   * incoming session like the other security settings; Retry only reloads the file, so it is not.
+   */
+  function identityRow() {
+    const ID_ERRORS = {
+      CORRUPT: 'The identity file is damaged.',
+      READ_FAILED: 'The identity file can’t be read.',
+      VERSION: 'The identity file was written by a newer version of Tunnelview.',
+      WRITE_FAILED: 'A new identity couldn’t be saved.',
+      MISSING: 'The identity file and its backup are gone. Put them back and Retry, or reset the identity.',
+    };
+    const fpEl = h('span', { class: 'mono selectable' });
+    const copyBtn = h('button', {
+      class: 'btn btn-ghost btn-icon btn-sm', type: 'button', title: 'Copy this computer’s ID', 'aria-label': 'Copy this computer’s ID',
+      onClick: () => copyText(store.identity && store.identity.fingerprint, 'ID'),
+    }, icon('copy'));
+    const title = h('div', { class: 'set-title id-title' }, "This computer's ID: ", fpEl, copyBtn);
+    const confirmReset = async () => {
+      const ok = await confirmDialog({
+        title: 'Reset this computer’s identity?',
+        message: 'Tunnelview makes a new ID for this computer. Phones paired with it will stop connecting until you pair them again. Connections from computers are not affected.',
+        confirmLabel: 'Reset identity',
+        danger: true,
+        iconName: 'key',
+      });
+      if (ok && await resetIdentity()) toast('This computer has a new ID. Pair your phones again.', { kind: 'ok', timeout: 5000 });
+    };
+    const resetBtn = h('button', { class: 'btn btn-sm btn-ghost text-danger', type: 'button', dataset: LOCK, onClick: confirmReset }, 'Reset identity…');
+    const errText = h('div', { class: 'dim' });
+    const retry = async (e) => {
+      const b = e && e.currentTarget;
+      if (b) b.disabled = true;
+      const ok = await retryIdentity();
+      if (b) b.disabled = false;
+      if (ok) toast('This computer’s identity is available again', { kind: 'ok' });
+      else toast('Still unavailable', { kind: 'warn' });
+    };
+    const unavailable = h('div', { class: 'banner banner-danger small id-banner', role: 'alert', hidden: true },
+      icon('alert'),
+      h('div', { class: 'grow' },
+        h('div', { class: 'strong' }, "This computer can't prove its identity to phones right now"),
+        errText,
+        h('div', { class: 'dim' }, 'Phones keep their pairing. Retry once the cause is fixed, or reset the identity so phones pair again.'),
+        h('div', { class: 'row gap-4 id-actions' },
+          h('button', { class: 'btn btn-sm', type: 'button', onClick: retry }, icon('refresh'), 'Retry'),
+          h('button', { class: 'btn btn-sm btn-ghost text-danger', type: 'button', dataset: LOCK, onClick: confirmReset }, 'Reset identity…'))));
+    const wasReset = h('div', { class: 'banner banner-warn small', role: 'status', hidden: true },
+      icon('info'), h('div', { class: 'grow' }, 'Phones paired with this computer must pair again'));
+    const desc = h('div', { class: 'set-desc' }, 'Phones you pair check this ID every time they connect, so they only talk to this computer.');
+    const el = h('div', { class: 'set-row stack id-row', hidden: true },
+      h('div', { class: 'row gap-16 id-head' }, h('div', { class: 'set-text grow' }, title, desc), h('div', { class: 'set-ctl' }, resetBtn)),
+      unavailable,
+      wasReset);
+    bind(() => {
+      const id = store.identity;
+      el.hidden = !hasIdentityApi() || !id;
+      if (el.hidden) return;
+      fpEl.textContent = id.available ? id.fingerprint : 'unavailable';
+      copyBtn.hidden = !id.available;
+      resetBtn.hidden = !id.available;
+      unavailable.hidden = id.available;
+      errText.textContent = ID_ERRORS[id.error] || '';
+      errText.hidden = !ID_ERRORS[id.error];
+      wasReset.hidden = !id.wasReset;
+    });
+    return el;
   }
 
   async function removeTrusted(stableId) {

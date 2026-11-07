@@ -1,0 +1,1498 @@
+{
+  "about": "rtc.verifyTailnetPath(pc) for getStats() reports, from src/renderer/shared/rtc.js. args[0].stats is the report as an ordered list of stats objects keyed by id (order matters: the first match wins); args[0].getStatsFails means getStats() rejects. The phone applies a stricter local rule on top (its own tun IPs only); these vectors are the desktop rule. Regenerate with node scripts/make-mobile-fixtures.js.",
+  "format": 1,
+  "functions": {
+    "verifyTailnetPath": {
+      "about": "verifyTailnetPath(pc) -> {ok, local, remote, pair, protocol, localType, remoteType}. A present local address must be a Tailscale IP literal (a missing one is allowed); a remote IP literal must be a Tailscale IP; a remote with no address or a host name is unknown and allowed; anything else fails. No selected pair or a failing getStats -> ok with pair:false.",
+      "cases": [
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "getStats hides a peer-reflexive remote address: unknown, allowed",
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": true,
+            "pair": true,
+            "protocol": "udp",
+            "remote": null,
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "redacted-ip.invalid",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "Chromium's redacted peer-reflexive placeholder",
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": true,
+            "pair": true,
+            "protocol": "udp",
+            "remote": null,
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "100.101.102.103",
+                  "candidateType": "host",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": true,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "100.101.102.103",
+            "remoteType": "host"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "fd7a:115c:a1e0::1",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "[fd7a:115c:a1e0:ab12::2]",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "result": {
+            "local": "fd7a:115c:a1e0::1",
+            "localType": "host",
+            "ok": true,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "fd7a:115c:a1e0:ab12::2",
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "[100.64.0.2]",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": true,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "100.64.0.2",
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "192.168.1.5",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": false,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "192.168.1.5",
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "192.168.1.5",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "100.64.0.2",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "a LAN local end paired with a 100.x remote could reach a CGNAT impostor",
+          "result": {
+            "local": "192.168.1.5",
+            "localType": "host",
+            "ok": false,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "100.64.0.2",
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "abc.local",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "100.64.0.2",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "a local host name fails",
+          "result": {
+            "local": null,
+            "localType": "host",
+            "ok": false,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "100.64.0.2",
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "redacted-ip.invalid",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "100.64.0.2",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "result": {
+            "local": null,
+            "localType": "host",
+            "ok": false,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "100.64.0.2",
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "100.64.0.2",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "getStats may omit the local address",
+          "result": {
+            "local": null,
+            "localType": "host",
+            "ok": true,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "100.64.0.2",
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "100.64.0.2",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "result": {
+            "local": null,
+            "localType": "host",
+            "ok": true,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "100.64.0.2",
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "candidateType": "host",
+                  "id": "L",
+                  "ip": "10.1.2.3",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "legacy `ip` field",
+          "result": {
+            "local": "10.1.2.3",
+            "localType": "host",
+            "ok": false,
+            "pair": true,
+            "protocol": "udp",
+            "remote": null,
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "candidateType": "host",
+                  "id": "L",
+                  "ip": "100.64.0.5",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "ip": "100.64.0.6",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "result": {
+            "local": "100.64.0.5",
+            "localType": "host",
+            "ok": true,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "100.64.0.6",
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": null,
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "ip": "192.168.0.1",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "a null address falls back to `ip`",
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": false,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "192.168.0.1",
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "ip": "192.168.0.1",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "an empty address does not fall back to `ip`",
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": true,
+            "pair": true,
+            "protocol": "udp",
+            "remote": null,
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "abcd-1234.local",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "mDNS name: unknown, allowed",
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": true,
+            "pair": true,
+            "protocol": "udp",
+            "remote": null,
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "example.com.",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": true,
+            "pair": true,
+            "protocol": "udp",
+            "remote": null,
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "bad_name.local",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "not a host name: fails",
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": false,
+            "pair": true,
+            "protocol": "udp",
+            "remote": null,
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "1234",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "a host name needs a letter",
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": false,
+            "pair": true,
+            "protocol": "udp",
+            "remote": null,
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "100.64.0.01",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "malformed numeric address",
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": false,
+            "pair": true,
+            "protocol": "udp",
+            "remote": null,
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "fd7a::115c::1",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "malformed numeric address",
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": false,
+            "pair": true,
+            "protocol": "udp",
+            "remote": null,
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "fe80::1%en0",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": false,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "fe80::1",
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "fd7a:115c:a1e0::1%utun4",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "fd7a:115c:a1e0::2",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "result": {
+            "local": "fd7a:115c:a1e0::1",
+            "localType": "host",
+            "ok": true,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "fd7a:115c:a1e0::2",
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "100.128.0.1",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": false,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "100.128.0.1",
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "8.8.8.8",
+                  "candidateType": "srflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": false,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "8.8.8.8",
+            "remoteType": "srflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "relay",
+                  "id": "L",
+                  "protocol": "tcp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "100.64.0.2",
+                  "candidateType": "host",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "relay",
+            "ok": true,
+            "pair": true,
+            "protocol": "tcp",
+            "remote": "100.64.0.2",
+            "remoteType": "host"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "100.64.0.2",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "an empty protocol is reported as null",
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": true,
+            "pair": true,
+            "protocol": null,
+            "remote": "100.64.0.2",
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": []
+            }
+          ],
+          "result": {
+            "local": null,
+            "localType": null,
+            "ok": true,
+            "pair": false,
+            "protocol": null,
+            "remote": null,
+            "remoteType": null
+          }
+        },
+        {
+          "args": [
+            {
+              "getStatsFails": true
+            }
+          ],
+          "result": {
+            "local": null,
+            "localType": null,
+            "ok": true,
+            "pair": false,
+            "protocol": null,
+            "remote": null,
+            "remoteType": null
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "selected": true,
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "100.64.0.2",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "no transport: a pair with selected:true",
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": true,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "100.64.0.2",
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "nominated": true,
+                  "remoteCandidateId": "R",
+                  "state": "succeeded",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "100.64.0.2",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "no transport: a nominated, succeeded pair",
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": true,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "100.64.0.2",
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "nominated": true,
+                  "remoteCandidateId": "R",
+                  "state": "in-progress",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "192.168.1.5",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "not selected: not checked",
+          "result": {
+            "local": null,
+            "localType": null,
+            "ok": true,
+            "pair": false,
+            "protocol": null,
+            "remote": null,
+            "remoteType": null
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "MISSING",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "selected": true,
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "192.168.1.5",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "100.64.0.2",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "a dangling selectedCandidatePairId falls back to the selected pair",
+          "result": {
+            "local": "192.168.1.5",
+            "localType": "host",
+            "ok": false,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "100.64.0.2",
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "CP1",
+                  "localCandidateId": "L1",
+                  "nominated": true,
+                  "remoteCandidateId": "R1",
+                  "state": "succeeded",
+                  "type": "candidate-pair"
+                },
+                {
+                  "id": "CP2",
+                  "localCandidateId": "L2",
+                  "nominated": true,
+                  "remoteCandidateId": "R2",
+                  "state": "succeeded",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "192.168.1.5",
+                  "candidateType": "host",
+                  "id": "L1",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "100.64.0.2",
+                  "candidateType": "prflx",
+                  "id": "R1",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L2",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "100.64.0.2",
+                  "candidateType": "prflx",
+                  "id": "R2",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "two nominated pairs and no transport: the first in report order is checked",
+          "result": {
+            "local": "192.168.1.5",
+            "localType": "host",
+            "ok": false,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "100.64.0.2",
+            "remoteType": "prflx"
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                }
+              ]
+            }
+          ],
+          "note": "candidate stats missing from the report",
+          "result": {
+            "local": null,
+            "localType": null,
+            "ok": true,
+            "pair": true,
+            "protocol": null,
+            "remote": null,
+            "remoteType": null
+          }
+        },
+        {
+          "args": [
+            {
+              "stats": [
+                {
+                  "id": "C1",
+                  "mimeType": "video/H264",
+                  "type": "codec"
+                },
+                {
+                  "bytesReceived": 1000,
+                  "id": "I1",
+                  "kind": "video",
+                  "type": "inbound-rtp"
+                },
+                {
+                  "id": "T",
+                  "selectedCandidatePairId": "CP",
+                  "type": "transport"
+                },
+                {
+                  "id": "CP",
+                  "localCandidateId": "L",
+                  "remoteCandidateId": "R",
+                  "type": "candidate-pair"
+                },
+                {
+                  "address": "100.64.1.2",
+                  "candidateType": "host",
+                  "id": "L",
+                  "protocol": "udp",
+                  "type": "local-candidate"
+                },
+                {
+                  "address": "100.64.0.2",
+                  "candidateType": "prflx",
+                  "id": "R",
+                  "protocol": "udp",
+                  "type": "remote-candidate"
+                }
+              ]
+            }
+          ],
+          "note": "other stats are ignored",
+          "result": {
+            "local": "100.64.1.2",
+            "localType": "host",
+            "ok": true,
+            "pair": true,
+            "protocol": "udp",
+            "remote": "100.64.0.2",
+            "remoteType": "prflx"
+          }
+        }
+      ]
+    }
+  }
+}

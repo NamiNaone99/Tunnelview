@@ -31,6 +31,22 @@
  *                  // Tunnelview with another protocol version; error = anything else
  *   PublicSettings = settings (ARCHITECTURE §8) with `password` removed and `passwordSet: bool` added,
  *                    plus `effectiveDownloadDir: string`.
+ *   PairingOffer = { ok:true, offerId:string, link:string,   // tunnelview://pair/1/… (one offer's token)
+ *                    qr:{ size:number, bits:string },          // modules per side (no quiet zone); base64,
+ *                                                              // row-major, MSB first, 1 = dark
+ *                    expiresAt:number,                         // ms since the epoch (2 minutes)
+ *                    fingerprint:string,                       // TV-XXXX-XXXX-XXXX-XXXX-XXXX
+ *                    host:{ name:string, ips:string[], port:number } }   // what the link names
+ *                                                              // (name '' = no MagicDNS name in it)
+ *                | { ok:false, code:'SESSION_ACTIVE'|'HOSTING_OFF'|'TS_DOWN'|'NO_IDENTITY' }
+ *   PairingStatus = { offerId:string, phase:'paired'|'attempt-failed'|'expired'|'cancelled'|'failed',
+ *                     reason?:string,   // cancelled: cancelled|replaced|session|host-stopped|
+ *                                       // host-id-changed|identity-reset; failed: too-many-attempts
+ *                     peer?:{ name:string, login:string, os:string } }   // paired / attempt-failed:
+ *                                       // who tried, as Tailscale whois knows them
+ *   IdentityInfo = { available:bool, fingerprint:string|null, wasReset:bool,
+ *                    error?:string }   // while unavailable: CORRUPT|READ_FAILED|VERSION|WRITE_FAILED|MISSING|NOT_LOADED|…
+ *   The identity key itself never reaches this window.
  */
 const { contextBridge, ipcRenderer } = require('electron');
 
@@ -83,6 +99,33 @@ contextBridge.exposeInMainWorld('tunnelview', {
   setPassword: (password) => ipcRenderer.invoke('settings:set-password', password),
   /** Folder picker for incoming files; null when cancelled or while an incoming session is active. @returns {Promise<string|null>} */
   chooseDownloadDir: () => ipcRenderer.invoke('settings:choose-download-dir'),
+
+  /**
+   * Start a pairing offer for a phone (replaces any live one). Refused with a code while an
+   * incoming session is active, hosting is off / not listening, Tailscale is down, or the identity
+   * is unavailable. @returns {Promise<PairingOffer>}
+   */
+  startPairing: () => ipcRenderer.invoke('pairing:start'),
+  /** Withdraw that offer (only that one: a newer offer stays). @returns {Promise<{ok:boolean}>} */
+  cancelPairing: (offerId) => ipcRenderer.invoke('pairing:cancel', String(offerId)),
+  /** What happened to an offer. @param {(s: PairingStatus) => void} cb @returns unsubscribe fn */
+  onPairingStatus: (cb) => on('pairing:status', cb),
+  /** @returns {Promise<IdentityInfo>} */
+  getIdentity: () => ipcRenderer.invoke('security:identity'),
+  /**
+   * New identity key: every paired phone must pair again. Cancels a live pairing offer. Refused
+   * ({ok:false, code:'SESSION_ACTIVE', message:'Disconnect the remote session to change security
+   * settings.'}) while an incoming session is active; code 'WRITE_FAILED' when the new key could
+   * not be stored (the old one stays). `error` is always IdentityInfo's (the key's error code).
+   * @returns {Promise<{ok:boolean, code?:string, message?:string} & IdentityInfo>}
+   */
+  resetIdentity: () => ipcRenderer.invoke('security:reset-identity'),
+  /**
+   * Load the identity file again (after its cause was fixed). Never a new key once a key file has
+   * existed in this run: with both files gone the error is 'MISSING' (Reset identity… makes one).
+   * @returns {Promise<IdentityInfo>}
+   */
+  retryIdentity: () => ipcRenderer.invoke('security:retry-identity'),
 
   /**
    * macOS: trigger the system prompt. kind: 'screen'|'accessibility'. For 'screen' this also adds

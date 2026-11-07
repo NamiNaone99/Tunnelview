@@ -5,7 +5,8 @@
  *
  *   ipc.register(ctx)          ctx = { settings, tailscale, auth, ViewerSession, windows, capture,
  *                                      clipboard, files, permissions, input, hostCtl, getHost,
- *                                      getState, stateChanged, notify, quit, appVersion, osName }
+ *                                      identity, getState, stateChanged, notify, quit, appVersion,
+ *                                      osName }   identity: identity.js instance or null
  *                              hostCtl = { isActivePanel(wcId), getPermissions(), sessionActive(),
  *                                          panelReady(entry), isWarmPanel(wcId), warmPanelReady(entry),
  *                                          setPermissions(p), endSession(reason), promptInit(entry),
@@ -13,6 +14,7 @@
  *   ipc.listViewers()          → AppState.viewers
  *   ipc.closeAllViewers(reason)
  *   ipc.sanitizeSignal(msg)    → shared with index.js for host-side signals
+ *   ipc.sanitizePairingEvent(evt) → index.js: host-server 'pairing' → pairing:status (or null)
  *
  * Trust boundary rules:
  *   - every handler checks that the sender is the MAIN FRAME of a registered window of the
@@ -25,6 +27,9 @@
  *   - security settings (accept mode, allow policy, auto-accept, default permissions, download
  *     folder, password) are locked while an incoming session is active: a remote controller
  *     drives the host's real mouse/keyboard and must not be able to plant unattended access;
+ *     so is resetting this computer's identity, and no pairing offer can be started meanwhile;
+ *   - the identity key never reaches a renderer: the main window sees its fingerprint, and the
+ *     pairing link it has to show (public key + one offer's token);
  *   - every outgoing dial (first connect AND reconnect) re-resolves the target against the
  *     current `tailscale status` (§1.4); the viewer shows Tailscale-verified names, never the
  *     host's self-reported hostname/owner.
@@ -36,6 +41,8 @@ const os = require('os');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
 const PROTOCOL = require('../shared/protocol');
+const pairing = require('./pairing');
+const qr = require('./qr');
 
 let electron = null;
 const E = () => electron || (electron = require('electron'));
@@ -71,6 +78,9 @@ const SETTINGS_LOCKED_MESSAGE = 'Disconnect the remote session to change securit
 // remembered password. 'rate-limited' (HTTP 429) is not a password denial either.
 const PASSWORD_DENIALS = ['denied:bad-password', 'denied:password-required'];
 const LOCKED_DENIAL = 'denied:locked';
+// pairing:start refusals (host-server startPairing codes) and pairing:status phases.
+const PAIRING_CODES = ['SESSION_ACTIVE', 'HOSTING_OFF', 'TS_DOWN', 'NO_IDENTITY'];
+const PAIRING_PHASES = ['paired', 'attempt-failed', 'expired', 'cancelled', 'failed'];
 
 let ctx = null;
 const viewers = new Map();        // webContents.id → viewer record
@@ -89,6 +99,7 @@ const finite = (v) => typeof v === 'number' && Number.isFinite(v);
 const unit = (v) => (finite(v) && v >= -0.01 && v <= 1.01 ? Math.min(1, Math.max(0, v)) : null);
 const CODE_RE = /^[A-Za-z0-9]{1,32}$/;
 const REASON_RE = /^[a-z0-9][a-z0-9:_-]{0,63}$/;
+const ERROR_CODE_RE = /^[A-Z][A-Z0-9_]{0,31}$/;
 
 function osName(v) { return OS_NAMES.includes(v) ? v : 'other'; }
 
@@ -963,6 +974,78 @@ function touchesLockedSettings(partial, cur) {
   });
 }
 
+/* ================================================================== pairing a phone + identity */
+
+/**
+ * host-server 'pairing' event → pairing:status for the main window. The peer is whoever tried, as
+ * Tailscale whois knows it (display only); tokens, nonces and proofs never reach this point.
+ * @returns {{offerId, phase, reason?, peer?:{name, login, os}} | null}
+ */
+function sanitizePairingEvent(evt) {
+  if (!isObj(evt) || !isStr(evt.offerId, 64, 1) || !PAIRING_PHASES.includes(evt.phase)) return null;
+  const out = { offerId: evt.offerId, phase: evt.phase };
+  if (isStr(evt.reason, 64) && REASON_RE.test(evt.reason)) out.reason = evt.reason;
+  if (isObj(evt.peer) && (evt.phase === 'paired' || evt.phase === 'attempt-failed')) {
+    out.peer = { name: clean(evt.peer.name, 255), login: clean(evt.peer.login, 255), os: osName(evt.peer.os) };
+  }
+  return out;
+}
+
+/** What the main window may know about this computer's identity: never key bytes. */
+function identityInfo() {
+  const id = ctx.identity;
+  if (!id) return { available: false, fingerprint: null, wasReset: false, error: 'NOT_LOADED' };
+  const available = !id.unavailable;
+  const out = { available, fingerprint: available ? id.fingerprint() : null, wasReset: !!id.wasReset };
+  if (!available) out.error = typeof id.error === 'string' && ERROR_CODE_RE.test(id.error) ? id.error : 'UNKNOWN';
+  return out;
+}
+
+/**
+ * pairing:start. The QR code and the details shown next to it come from the link itself, so the
+ * dialog can only ever show what a phone will read: a link without a MagicDNS name (n:'') gives
+ * host.name '' and the dialog shows the address the phone will show, never this machine's own name.
+ */
+function startPairing() {
+  const refuse = (code) => ({ ok: false, code });
+  if (hostSessionActive()) return refuse('SESSION_ACTIVE');
+  const host = getHost();
+  if (!host || typeof host.startPairing !== 'function' || !ctx.settings.get().hostEnabled) return refuse('HOSTING_OFF');
+  let offer;
+  try {
+    offer = host.startPairing();
+  } catch (err) {
+    if (err && PAIRING_CODES.includes(err.code)) return refuse(err.code);
+    console.error('[ipc] pairing:start failed:', err && err.message);
+    return refuse('HOSTING_OFF');
+  }
+  try {
+    const d = pairing.parseLink(offer.link);
+    const code = qr.encode(offer.link);
+    return {
+      ok: true,
+      offerId: offer.offerId,
+      link: offer.link,
+      qr: { size: code.size, bits: code.bits },
+      expiresAt: offer.expiresAt,
+      fingerprint: pairing.fingerprint(pairing.decodeB64url(d.k, pairing.KEY_BYTES)),
+      host: { name: d.n, ips: [...d.a], port: d.p },
+    };
+  } catch (err) {
+    // An offer nobody can be shown must not stay usable.
+    console.error('[ipc] pairing:start: link not displayable:', err && err.message);
+    try { host.cancelPairing(offer.offerId, 'cancelled'); } catch { /* ignore */ }
+    return refuse('HOSTING_OFF');
+  }
+}
+
+/** Withdraw whatever offer is live: it was made for (and its link shows) the previous key. */
+function cancelOfferFor(reason) {
+  const host = getHost();
+  if (!host || typeof host.cancelPairing !== 'function') return;
+  try { host.cancelPairing(null, reason); } catch (err) { console.error('[ipc] cancelPairing failed:', err && err.message); }
+}
+
 function viewerRec(entry) {
   const rec = viewers.get(entry.wcId);
   return rec && !rec.closed ? rec : null;
@@ -1047,6 +1130,55 @@ function register(context) {
     if (hostSessionActive()) return null;
     settings.update({ downloadDir: r.filePaths[0] });
     return settings.effectiveDownloadDir();
+  });
+
+  /* ---------------- pairing a phone + identity (mobile DECISIONS D4, D7) ---------------- */
+
+  handle('pairing:start', ['main'], () => startPairing());
+
+  // Only the offer the dialog opened: a stale dialog closing never cancels a newer one.
+  handle('pairing:cancel', ['main'], (_e, offerId) => {
+    if (!isStr(offerId, 64, 1)) return { ok: false };
+    const host = getHost();
+    if (!host || typeof host.cancelPairing !== 'function') return { ok: false };
+    return { ok: host.cancelPairing(offerId, 'cancelled') === true };
+  });
+
+  handle('security:identity', ['main'], () => identityInfo());
+
+  // Locked during an incoming session like the security settings: a remote controller must not
+  // be able to make this computer's paired phones distrust it (or pair again) on its own.
+  handle('security:reset-identity', ['main'], () => {
+    const id = ctx.identity;
+    if (!id) return { ok: false, code: 'NO_IDENTITY', ...identityInfo() };
+    const host = getHost();
+    if (hostSessionActive() || (host && host.activeSession)) {
+      // `error` belongs to IdentityInfo (the key's error code while it is unavailable, which is
+      // exactly when the banner offers Reset identity…): the sentence goes in `message`.
+      return { ok: false, code: 'SESSION_ACTIVE', message: SETTINGS_LOCKED_MESSAGE, ...identityInfo() };
+    }
+    const r = id.reset({ sessionActive: false });
+    if (!r || !r.ok) {
+      const code = r && r.error === 'SESSION_ACTIVE' ? 'SESSION_ACTIVE' : 'WRITE_FAILED';
+      console.error(`[ipc] identity reset failed: ${code}`);
+      return { ok: false, code, ...identityInfo() };
+    }
+    cancelOfferFor('identity-reset');
+    console.log(`[main] identity reset: ${id.fingerprint()}`);
+    ctx.stateChanged();
+    return { ok: true, ...identityInfo() };
+  });
+
+  handle('security:retry-identity', ['main'], () => {
+    const id = ctx.identity;
+    if (!id) return identityInfo();
+    const before = id.fingerprint();
+    id.retry();
+    const after = id.fingerprint();
+    if (after !== before) cancelOfferFor('identity-reset');
+    if (after) console.log(`[main] identity loaded on retry: ${after}`);
+    ctx.stateChanged();
+    return identityInfo();
   });
 
   handle('permissions:request', ['main'], async (_e, kind) => {
@@ -1412,6 +1544,7 @@ module.exports = {
   sanitizeInput,
   sanitizePermissions: perms,
   sanitizeStatus,
+  sanitizePairingEvent,
   verifiedName,
   fetchInfo,
   clean,

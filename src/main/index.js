@@ -243,6 +243,7 @@ function main() {
   const auth = require('./auth');
   const hostServerMod = require('./host-server');
   const viewerClientMod = require('./viewer-client');
+  const { createIdentity } = require('./identity');
   const HostServer = typeof hostServerMod === 'function' ? hostServerMod : hostServerMod.HostServer;
   const ViewerSession = typeof viewerClientMod === 'function' ? viewerClientMod : viewerClientMod.ViewerSession;
   // Native input injection is optional at runtime (koffi / OS permission problems must not kill the app).
@@ -276,6 +277,7 @@ function main() {
   const LOGIN_ITEMS_SETTINGS_URL = 'x-apple.systempreferences:com.apple.LoginItems-Settings.extension';
 
   let host = null;
+  let identity = null;       // identity.js: this computer's Ed25519 key (main only, never sent to a renderer)
   let hostRunning = false;   // we called start() successfully and not stop()
   let hostStartError = null;
   let hostFirewallWarning = null;
@@ -776,6 +778,11 @@ function main() {
 
   async function onSessionStart(info) {
     if (!info || typeof info !== 'object' || info.id == null) return;
+    // A pairing code must not stay usable while someone else sees this desktop. host-server
+    // withdraws it before announcing the session; asking again is free and does not rely on that.
+    if (host && typeof host.cancelPairing === 'function') {
+      try { host.cancelPairing(null, 'session'); } catch (err) { console.error('[main] cancelPairing failed:', err); }
+    }
     const prev = hostState.session;
     if (prev && !prev.ended) finalizeSession(prev, 'replaced');
 
@@ -945,6 +952,54 @@ function main() {
     try { if (powerSaveBlocker.isStarted(id)) powerSaveBlocker.stop(id); } catch { /* ignore */ }
   }
 
+  /* ---------------------------------------------------------------- identity + pairing */
+
+  /**
+   * This computer's identity key (userData/identity.json, identity.js). A damaged file leaves it
+   * unavailable and untouched (Settings › Security offers Retry / Reset identity…); it is never
+   * replaced behind the user's back. Only the state and the fingerprint are logged, never key bytes.
+   */
+  function loadIdentity() {
+    let id = null;
+    try {
+      id = createIdentity({ file: path.join(app.getPath('userData'), 'identity.json') });
+      id.load();
+    } catch (err) {
+      console.error('[main] identity could not be loaded:', err && err.message);
+    }
+    if (id && id.unavailable) {
+      console.warn(`[main] identity unavailable (${id.error || 'unknown'}): phones cannot verify this computer until Settings › Security › Retry or Reset identity…`);
+    } else if (id) {
+      console.log(`[main] identity loaded: ${id.fingerprint()}`);
+    }
+    return id;
+  }
+
+  /** host-server 'pairing' → the main window's open pairing dialog (pairing:status). */
+  function onPairingEvent(evt) {
+    const ev = ipc.sanitizePairingEvent(evt);
+    if (!ev) return;
+    console.log(`[main] pairing offer ${ev.offerId.slice(0, 8)}: ${ev.phase}${ev.reason ? ` (${ev.reason})` : ''}`);
+    const win = windows.getMain();
+    if (win && !win.isDestroyed() && !win.webContents.isLoading()) win.webContents.send('pairing:status', ev);
+  }
+
+  /**
+   * The pairing dialog lives in the main window's page, and only its onClose withdraws the offer.
+   * A renderer crash, a reload or navigation, or a closed window drops the page without it, so
+   * main withdraws the offer itself: a code is never usable while no dialog shows it (or reports
+   * what happens to it). Hiding the window to the tray keeps the page, the dialog and its live
+   * status, like minimising it, so that alone withdraws nothing.
+   */
+  function withdrawPairingOffer(why) {
+    if (!host || typeof host.cancelPairing !== 'function') return;
+    try {
+      if (host.cancelPairing(null, 'cancelled')) console.log(`[main] pairing offer withdrawn: main window ${why}`);
+    } catch (err) {
+      console.error('[main] cancelPairing failed:', err);
+    }
+  }
+
   function finalizeSession(sess, reason) {
     releaseDisplayAwake(sess);
     if (sess.ended) return;
@@ -1101,6 +1156,14 @@ function main() {
         win.hide();
       });
       win.webContents.on('did-finish-load', stateChanged);
+      win.webContents.on('render-process-gone', () => withdrawPairingOffer('renderer gone'));
+      win.webContents.on('did-start-navigation', (event, legacyUrl, legacyInPlace, legacyMainFrame) => {
+        // Electron ≥ 25 passes the details on the event; the positional arguments are deprecated.
+        const mainFrame = event && typeof event.isMainFrame === 'boolean' ? event.isMainFrame : legacyMainFrame === true;
+        const sameDocument = event && typeof event.isSameDocument === 'boolean' ? event.isSameDocument : legacyInPlace === true;
+        if (mainFrame && !sameDocument) withdrawPairingOffer('reloaded');
+      });
+      win.on('closed', () => withdrawPairingOffer('closed'));
       // A crashed main renderer would otherwise be reused as a blank window by ensureMainWindow.
       win.webContents.on('render-process-gone', (_e, details) => {
         if (isQuitting || (details && details.reason === 'clean-exit')) return;
@@ -1429,13 +1492,17 @@ function main() {
       off(event, fn) { settings.removeListener(event, fn); return hostSettings; },
     };
 
+    // Before the host server exists, so its first hello can already be signed.
+    identity = loadIdentity();
+
     try {
-      host = new HostServer({ tailscale, settings: hostSettings, auth, appVersion: app.getVersion(), osName: OS_NAME });
+      host = new HostServer({ tailscale, settings: hostSettings, auth, appVersion: app.getVersion(), osName: OS_NAME, identity });
       host.on('request', (req) => { try { onRequest(req); } catch (err) { console.error('[main] request handling failed:', err); } });
       host.on('request-cancelled', onRequestCancelled);
       host.on('session-start', (s) => { onSessionStart(s).catch((err) => console.error('[main] session-start failed:', err)); });
       host.on('session-signal', onSessionSignal);
       host.on('session-end', onSessionEnd);
+      host.on('pairing', onPairingEvent);
       host.on('status', stateChanged);
       host.on('error', (err) => console.error('[main] host server error:', err && err.message));
     } catch (err) {
@@ -1457,6 +1524,7 @@ function main() {
       input,
       hostCtl,
       getHost: () => host,
+      identity,
       getState: buildState,
       stateChanged,
       notify,

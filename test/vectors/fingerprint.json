@@ -1,0 +1,192 @@
+{
+  "about": "Identity fingerprints from src/main/pairing.js: \"TV-\" + the first 20 characters of RFC 4648 base32 (upper case, no padding) of SHA-256(raw 32-byte public key), in groups of 4 joined by \"-\". Keys are base64url without padding. keys: each with its SHA-256 and full base32 for debugging. base32: RFC 4648 section 10 test vectors without padding (args are hex). Regenerate with node scripts/make-mobile-fixtures.js.",
+  "format": 1,
+  "functions": {
+    "base32": {
+      "about": "base32(bytes as hex) -> RFC 4648 base32, upper case, no padding.",
+      "cases": [
+        {
+          "args": [
+            ""
+          ],
+          "result": ""
+        },
+        {
+          "args": [
+            "66"
+          ],
+          "result": "MY"
+        },
+        {
+          "args": [
+            "666f"
+          ],
+          "result": "MZXQ"
+        },
+        {
+          "args": [
+            "666f6f"
+          ],
+          "result": "MZXW6"
+        },
+        {
+          "args": [
+            "666f6f62"
+          ],
+          "result": "MZXW6YQ"
+        },
+        {
+          "args": [
+            "666f6f6261"
+          ],
+          "result": "MZXW6YTB"
+        },
+        {
+          "args": [
+            "666f6f626172"
+          ],
+          "result": "MZXW6YTBOI"
+        },
+        {
+          "args": [
+            "00"
+          ],
+          "result": "AA"
+        },
+        {
+          "args": [
+            "ff"
+          ],
+          "result": "74"
+        },
+        {
+          "args": [
+            "0000000000"
+          ],
+          "result": "AAAAAAAA"
+        },
+        {
+          "args": [
+            "ffffffffff"
+          ],
+          "result": "77777777"
+        },
+        {
+          "args": [
+            "24f6ed6acbfe1009c030d7ca567c33ca4830911498236b5561a6c82abec5de28"
+          ],
+          "result": "ET3O22WL7YIATQBQ27FFM7BTZJEDBEIUTARWWVLBU3ECVPWF3YUA"
+        }
+      ]
+    },
+    "fingerprint": {
+      "about": "fingerprint(pub) -> \"TV-XXXX-XXXX-XXXX-XXXX-XXXX\". A key that is not 32 bytes: error BAD_KEY.",
+      "cases": [
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc"
+          ],
+          "note": "host",
+          "result": "TV-ET3O-22WL-7YIA-TQBQ-27FF"
+        },
+        {
+          "args": [
+            "F0VTtFbd38aQjsqxwQH-arIeK6oGF3lbfUOmNIKZP9U"
+          ],
+          "note": "other",
+          "result": "TV-NCEU-2WHR-R4WD-JVE6-WL2L"
+        },
+        {
+          "args": [
+            "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"
+          ],
+          "note": "RFC 8032 7.1 TEST 1",
+          "result": "TV-EH7D-DX5B-KSRG-CYTL-7BKA"
+        },
+        {
+          "args": [
+            "PUAXw-hDiVqStwqnTRt-vJyYLM8uxJaMwM1V8Sr0Zgw"
+          ],
+          "note": "RFC 8032 7.1 TEST 2",
+          "result": "TV-HH3R-HUFG-IQST-6BCS-SQQ3"
+        },
+        {
+          "args": [
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          ],
+          "note": "all zero bytes",
+          "result": "TV-MZUH-VLPY-MK6X-O3EP-YGFY"
+        },
+        {
+          "args": [
+            "__________________________________________8"
+          ],
+          "note": "all 0xff bytes",
+          "result": "TV-V6LB-G5QP-OJRV-7PNU-JJNA"
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbQ"
+          ],
+          "error": "BAD_KEY"
+        },
+        {
+          "args": [
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          ],
+          "error": "BAD_KEY"
+        },
+        {
+          "args": [
+            ""
+          ],
+          "error": "BAD_KEY"
+        }
+      ]
+    }
+  },
+  "keys": [
+    {
+      "base32": "ET3O22WL7YIATQBQ27FFM7BTZJEDBEIUTARWWVLBU3ECVPWF3YUA",
+      "fingerprint": "TV-ET3O-22WL-7YIA-TQBQ-27FF",
+      "name": "host",
+      "pub": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+      "sha256Hex": "24f6ed6acbfe1009c030d7ca567c33ca4830911498236b5561a6c82abec5de28"
+    },
+    {
+      "base32": "NCEU2WHRR4WDJVE6WL2LCEHAILGQ6MKQUTODSJB5P5R32WMMA6BQ",
+      "fingerprint": "TV-NCEU-2WHR-R4WD-JVE6-WL2L",
+      "name": "other",
+      "pub": "F0VTtFbd38aQjsqxwQH-arIeK6oGF3lbfUOmNIKZP9U",
+      "sha256Hex": "68894d58f18f2c34d49eb2f4b110e042cd0f3150a4dc39243d7f63bd598c0783"
+    },
+    {
+      "base32": "EH7DDX5BKSRGCYTL7BKAI36SE4NXX3KLNK7ELKSYQ57PI74XEG4Q",
+      "fingerprint": "TV-EH7D-DX5B-KSRG-CYTL-7BKA",
+      "name": "RFC 8032 7.1 TEST 1",
+      "pub": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+      "sha256Hex": "21fe31dfa154a261626bf854046fd2271b7bed4b6abe45aa58877ef47f9721b9"
+    },
+    {
+      "base32": "HH3RHUFGIQST6BCSSQQ3T5I3TMEJPHIIFFMVTRHTTEHOMF7VCOPQ",
+      "fingerprint": "TV-HH3R-HUFG-IQST-6BCS-SQQ3",
+      "name": "RFC 8032 7.1 TEST 2",
+      "pub": "PUAXw-hDiVqStwqnTRt-vJyYLM8uxJaMwM1V8Sr0Zgw",
+      "sha256Hex": "39f713d0a644253f04529421b9f51b9b08979d08295959c4f3990ee617f5139f"
+    },
+    {
+      "base32": "MZUHVLPYMK6XO3EPYGFY5H4OEAEJOFEFN3RDHM4QFJMR2DK7FESQ",
+      "fingerprint": "TV-MZUH-VLPY-MK6X-O3EP-YGFY",
+      "name": "all zero bytes",
+      "pub": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "sha256Hex": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925"
+    },
+    {
+      "base32": "V6LBG5QPOJRV7PNUJJNAUY6DT4JK6MHZKCTO4XEXDPQYR2E4IBIQ",
+      "fingerprint": "TV-V6LB-G5QP-OJRV-7PNU-JJNA",
+      "name": "all 0xff bytes",
+      "pub": "__________________________________________8",
+      "sha256Hex": "af9613760f72635fbdb44a5a0a63c39f12af30f950a6ee5c971be188e89c4051"
+    }
+  ]
+}

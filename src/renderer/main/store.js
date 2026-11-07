@@ -17,7 +17,7 @@ export const PROTO = window.TunnelviewProtocol || Object.freeze({
 /* ---------------------------------------------------------------- event bus */
 
 const bus = new EventTarget();
-/** subscribe('state'|'settings'|'peers', fn) → unsubscribe */
+/** subscribe('state'|'settings'|'peers'|'identity', fn) → unsubscribe */
 export function subscribe(type, fn) {
   const l = () => { try { fn(); } catch (err) { console.error(`[Tunnelview] ${type} listener failed`, err); } };
   bus.addEventListener(type, l);
@@ -236,9 +236,94 @@ export function peerTarget(p) {
 
 /* ---------------------------------------------------------------- store */
 
+/* ---------------------------------------------------------------- identity + pairing a phone */
+
+const FINGERPRINT_RE = /^TV(-[A-Z2-7]{4}){5}$/;
+const ERROR_CODE_RE = /^[A-Z][A-Z0-9_]{0,31}$/;
+const PAIRING_PHASES = new Set(['paired', 'attempt-failed', 'expired', 'cancelled', 'failed']);
+const B64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/** IdentityInfo → {available, fingerprint, wasReset, error}; null when main did not say. */
+export function normIdentity(raw) {
+  if (!isObj(raw)) return null;
+  const fingerprint = typeof raw.fingerprint === 'string' && FINGERPRINT_RE.test(raw.fingerprint) ? raw.fingerprint : null;
+  const available = raw.available === true && !!fingerprint;
+  return {
+    available,
+    fingerprint: available ? fingerprint : null,
+    wasReset: raw.wasReset === true,
+    error: available ? null : (typeof raw.error === 'string' && ERROR_CODE_RE.test(raw.error) ? raw.error : 'UNKNOWN'),
+  };
+}
+
+/** A QR symbol from main: size modules per side (21…177), bits = base64 of size² bits. */
+function normQr(q) {
+  if (!isObj(q) || !Number.isInteger(q.size) || q.size < 21 || q.size > 177 || (q.size - 17) % 4 !== 0) return null;
+  const bytes = Math.ceil((q.size * q.size) / 8);
+  if (typeof q.bits !== 'string' || q.bits.length !== Math.ceil(bytes / 3) * 4 || !B64_RE.test(q.bits)) return null;
+  return { size: q.size, bits: q.bits };
+}
+
+/** pairing:start success → a displayable offer, or null. */
+export function normPairingOffer(raw) {
+  if (!isObj(raw) || raw.ok !== true) return null;
+  const offerId = rawStr(raw.offerId, 64);
+  const link = rawStr(raw.link, 1024);
+  const qr = normQr(raw.qr);
+  const host = isObj(raw.host) ? raw.host : {};
+  if (!offerId || !link.startsWith('tunnelview://pair/') || !qr || !Number.isFinite(raw.expiresAt)) return null;
+  if (typeof raw.fingerprint !== 'string' || !FINGERPRINT_RE.test(raw.fingerprint)) return null;
+  return {
+    offerId,
+    link,
+    qr,
+    expiresAt: raw.expiresAt,
+    fingerprint: raw.fingerprint,
+    host: { name: trimDot(str(host.name, 253)), ips: strArr(host.ips, 2, 64), port: int(host.port, PROTO.DEFAULT_PORT) },
+  };
+}
+
+/** pairing:status → {offerId, phase, reason, peer|null}, or null. */
+export function normPairingStatus(raw) {
+  if (!isObj(raw) || !rawStr(raw.offerId, 64) || !PAIRING_PHASES.has(raw.phase)) return null;
+  const p = isObj(raw.peer) ? raw.peer : null;
+  return {
+    offerId: raw.offerId,
+    phase: raw.phase,
+    reason: typeof raw.reason === 'string' ? str(raw.reason, 64) : '',
+    peer: p ? { name: str(p.name, 253), login: str(p.login, 128), os: normOs(p.os) } : null,
+  };
+}
+
+export const PAIRING_ERRORS = {
+  SESSION_ACTIVE: 'Not available while someone is connected to this computer.',
+  HOSTING_OFF: 'Turn on incoming connections to pair a phone.',
+  TS_DOWN: 'Start Tailscale to pair a phone.',
+  NO_IDENTITY: 'This computer can’t prove its identity to phones right now. See Settings › Security.',
+};
+
+export const canPair = () => !!api && typeof api.startPairing === 'function';
+export const hasIdentityApi = () => !!api && typeof api.getIdentity === 'function';
+
+/**
+ * Why "Pair a phone" cannot start right now: {code, text}, or null when it can. Main decides
+ * again on pairing:start; this only keeps the button honest.
+ */
+export function pairingBlocker(state = store.state, identity = store.identity) {
+  const st = state || normState(null);
+  if (st.host.session) return { code: 'SESSION_ACTIVE', text: 'Not available during a session.' };
+  if (!st.host.enabled) return { code: 'HOSTING_OFF', text: PAIRING_ERRORS.HOSTING_OFF };
+  if (st.tailscale.state === 'unknown') return { code: 'TS_DOWN', text: 'Checking Tailscale…' };
+  if (st.tailscale.state !== 'running') return { code: 'TS_DOWN', text: PAIRING_ERRORS.TS_DOWN };
+  if (!st.host.listening) return { code: 'HOSTING_OFF', text: 'Incoming connections aren’t listening yet.' };
+  if (identity && !identity.available) return { code: 'NO_IDENTITY', text: PAIRING_ERRORS.NO_IDENTITY };
+  return null;
+}
+
 export const store = {
   state: normState(null),
   settings: normSettings(null),
+  identity: null, // normIdentity(): this computer's identity for phones; null until loaded
   // Raw PublicSettings as returned by main. Used when writing arrays of objects back
   // (e.g. trustedNodes) so we never send display-normalized copies to the validator.
   rawSettings: null,
@@ -308,6 +393,58 @@ export async function refreshTailscale() {
 export async function refreshSettings() {
   if (!api) return;
   try { setSettings(await api.getSettings()); } catch (err) { console.error('[Tunnelview] getSettings failed', err); }
+}
+
+export async function refreshIdentity() {
+  if (!hasIdentityApi()) return;
+  try {
+    store.identity = normIdentity(await api.getIdentity());
+    emit('identity');
+  } catch (err) {
+    console.error('[Tunnelview] getIdentity failed', err);
+  }
+}
+
+const IDENTITY_ERRORS = {
+  SESSION_ACTIVE: 'Disconnect the remote session to change security settings.',
+  WRITE_FAILED: 'Couldn’t save a new identity. This computer keeps its current one.',
+};
+
+/**
+ * Settings › Security › Reset identity… (after the user confirmed). Every paired phone has to pair
+ * again afterwards. @returns {Promise<boolean>} whether a new identity is in use
+ */
+export async function resetIdentity() {
+  if (!api || typeof api.resetIdentity !== 'function') return false;
+  let res;
+  try {
+    res = await api.resetIdentity();
+  } catch (err) {
+    res = { ok: false, message: errMsg(err) };
+  }
+  // The answer carries IdentityInfo (its `error` is the key's error code); a failed call does not,
+  // and must not make the key look unavailable.
+  const next = res && typeof res.available === 'boolean' ? normIdentity(res) : null;
+  if (next) {
+    store.identity = next;
+    emit('identity');
+  }
+  if (res && res.ok === true) return true;
+  const code = res && typeof res.code === 'string' ? res.code : '';
+  toast(IDENTITY_ERRORS[code] || (res && res.message ? safeText(res.message, 220) : 'Couldn’t reset the identity.'), { kind: 'danger', timeout: 7000 });
+  return false;
+}
+
+/** Settings › Security › Retry: load the identity file again. @returns {Promise<boolean>} available now */
+export async function retryIdentity() {
+  if (!api || typeof api.retryIdentity !== 'function') return false;
+  try {
+    store.identity = normIdentity(await api.retryIdentity());
+  } catch (err) {
+    toast(`Couldn't load the identity: ${errMsg(err)}`, { kind: 'danger' });
+  }
+  emit('identity');
+  return !!(store.identity && store.identity.available);
 }
 
 let settingsRefreshTimer = 0;

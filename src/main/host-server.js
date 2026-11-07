@@ -8,9 +8,16 @@
  * - Every TCP connection, before any HTTP parsing: Tailscale source while hosting, at most 4 sockets
  *   per source IP not yet handed to ws (/info probes included), each dropped after 5 s idle.
  * - Every upgrade: per-IP rate limit → Tailscale range → path → no Origin → X-Tunnelview-Protocol: <PROTOCOL_VERSION>
- *   → Host header is an IP literal (DNS-rebinding guard) → a handshake ws would accept → identity
- *   (self IP, or `tailscale whois` must succeed) → allowFrom policy → connection slots.
- *   Failures get an HTTP status line and the socket is destroyed.
+ *   → X-Tunnelview-Client-Nonce absent or well-formed → Host header is an IP literal (DNS-rebinding
+ *   guard) → a handshake ws would accept → identity (self IP, or `tailscale whois` must succeed) →
+ *   allowFrom policy → connection slots. Failures get an HTTP status line and the socket is destroyed.
+ * - hello.ident: with an identity key (identity.js) every hello is signed over the hello nonce, the
+ *   client nonce, our StableNodeID and the viewer's (pairing.identBytes), so a paired phone knows the
+ *   computer it pinned is talking to it, on this connection (mobile DECISIONS D2).
+ * - Pairing a phone (D4/D5): one live offer at a time (startPairing). A `pair` is accepted only in
+ *   state hello on a connection that sent a client nonce; every failure gets the same
+ *   pair-result 'failed' reply, 3 wrong proofs burn the offer, success consumes it. A pair
+ *   connection never becomes a session and changes nothing about admission, limits or trust.
  * - Admission (on `request`): disabled → busy (active session) → allowFrom → [password lock: the
  *   proof is ignored, neither verified nor counted] → cooldown without a usable proof ⇒ try-later →
  *   proof → cooldown + failed proof ⇒ wait for the next auth → self ⇒ prompt → trusted → same-user →
@@ -31,8 +38,8 @@
  * - One active session + one pending prompt at a time. Signals relayed only while active, after
  *   strict validation (unknown fields stripped; ICE candidates must carry a Tailscale address).
  *
- * Dependencies are injected ({ tailscale, settings, auth, appVersion, osName }) — there is no
- * "test mode": tests pass a fake tailscale object that declares 127.0.0.1 a tailnet IP.
+ * Dependencies are injected ({ tailscale, settings, auth, appVersion, osName, identity }) — there is
+ * no "test mode": tests pass a fake tailscale object that declares 127.0.0.1 a tailnet IP.
  */
 const http = require('http');
 const net = require('net');
@@ -41,8 +48,12 @@ const crypto = require('crypto');
 const { EventEmitter } = require('events');
 const { WebSocketServer, WebSocket } = require('ws');
 const PROTOCOL = require('../shared/protocol');
+const pairing = require('./pairing');
+// The pairing link's own address rule. Never the injected tailscale: a test's loopback "tailnet"
+// must not end up in a link (see _linkAddress).
+const { isTailscaleIp: isTailscaleAddress, normalizeIp: canonicalIp } = require('./tailscale');
 
-const { MSG, DENY, AUTH, PERMISSION_KEYS } = PROTOCOL;
+const { MSG, DENY, AUTH, PERMISSION_KEYS, IDENT, PAIR } = PROTOCOL;
 
 const MAX_SDP = 256 * 1024;
 const MAX_CANDIDATE = 2048;
@@ -84,6 +95,11 @@ const UPGRADE_RATE = { max: 20, windowMs: 60e3 };
 const INFO_RATE = { max: 60, windowMs: 60e3 };
 const RATE_MAP_MAX = 5000;
 const DEFAULT_PERMISSIONS = Object.freeze({ control: true, clipboard: true, files: true, audio: true });
+// startPairing() refusals (Error.code); ipc.js passes them to the main window as they are.
+const PAIRING_REFUSALS = Object.freeze(['SESSION_ACTIVE', 'HOSTING_OFF', 'TS_DOWN', 'NO_IDENTITY']);
+// Why a live offer was withdrawn ('pairing' {phase:'cancelled', reason}).
+const PAIRING_CANCEL_REASONS = new Set(['cancelled', 'replaced', 'session', 'host-stopped', 'host-id-changed', 'identity-reset']);
+const PAIR_FAILED = Object.freeze({ t: MSG.PAIR_RESULT, ok: false, reason: PAIR.FAILED });
 const VIEWER_OS = new Set(['windows', 'macos', 'linux', 'ios', 'android', 'other']);
 const DENY_REASONS = new Set(Object.values(DENY));
 // Control chars, line/paragraph separators, bidi marks/overrides/isolates and BOM — peer-supplied
@@ -227,6 +243,12 @@ function nodeKey(ident, ip) {
   return ident && ident.node && ident.node.stableId ? `node:${ident.node.stableId}` : `ip:${ip}`;
 }
 
+function pairingRefusal(code) {
+  const e = new Error(`Pairing is not available: ${code}`);
+  e.code = code;
+  return e;
+}
+
 function describeListenError(err, ip, port) {
   const code = err && err.code;
   if (code === 'EADDRINUSE') return `Port ${port} on ${ip} is already in use.`;
@@ -241,20 +263,29 @@ function describeListenError(err, ip, port) {
 
 class HostServer extends EventEmitter {
   /**
-   * @param {{tailscale, settings, auth, appVersion:string, osName:'windows'|'macos'}} deps
+   * @param {{tailscale, settings, auth, appVersion:string, osName:'windows'|'macos', identity?}} deps
+   *   identity: identity.js instance (unavailable / publicKeyB64url() / sign()) or null. Without
+   *   one, hellos carry no `ident`, /info no `features`, and startPairing() refuses NO_IDENTITY.
    */
-  constructor({ tailscale, settings, auth, appVersion, osName } = {}) {
+  constructor({ tailscale, settings, auth, appVersion, osName, identity = null } = {}) {
     super();
     if (!tailscale || !settings || !auth) throw new TypeError('HostServer requires { tailscale, settings, auth }');
     this.ts = tailscale;
     this.settings = settings;
     this.auth = auth;
+    this.identity = identity || null;
     this.appVersion = cleanText(String(appVersion || '0.0.0'), 64) || '0.0.0';
     this.osName = VIEWER_OS.has(osName) ? osName : 'other';
     this._now = Date.now; // clock for limiters + cooldowns (tests may replace it)
     this._requestWaitMs = REQUEST_WAIT_MS; // instance copies so tests can shorten them
     this._authWaitMs = AUTH_WAIT_MS;
     this._preUpgradeIdleMs = PREUPGRADE_IDLE_MS;
+    this._pairTtlMs = PAIR.TTL_MS;
+    // Listening address → the address a pairing link carries. The identity in production; tests
+    // listen on loopback, which a link may not carry, and map it to a Tailscale address.
+    this._linkAddress = (ip) => ip;
+    this._offer = null; // the live pairing offer (startPairing), at most one
+    this._identWarned = false;
     this._preUpgrade = new Map(); // source ip → TCP sockets not yet handed to ws
     const now = () => this._now();
     this.limiter = new auth.FailureLimiter({ ...FAIL_LIMIT, now }); // keys: node:<stableId>|ip:<ip>, login:<login>, 'tagged'
@@ -285,8 +316,12 @@ class HostServer extends EventEmitter {
     this._pingTimer = null;
     this._lastStatusJson = '';
 
-    this._onTsChange = () => { this._requestSync(); };
+    this._onTsChange = (st) => {
+      this._checkOfferHost(st);
+      this._requestSync();
+    };
     this._onTsStatus = (st) => {
+      this._checkOfferHost(st);
       // Retry a failed / incomplete bind on every poll; a 'change' event covers IP changes.
       if (st && st.state === 'running' && (this._error || this._unbound || !this._servers.size)) this._requestSync();
     };
@@ -295,6 +330,8 @@ class HostServer extends EventEmitter {
       const enabled = this._settings().hostEnabled;
       if (this._lastHostEnabled !== null && enabled !== this._lastHostEnabled) this._clearBackoff();
       this._lastHostEnabled = enabled;
+      // Hosting switched off: the code goes now, not only once main gets round to stop().
+      if (!enabled) this.cancelPairing(null, 'host-stopped');
       this._requestSync();
     };
   }
@@ -323,6 +360,7 @@ class HostServer extends EventEmitter {
     clearInterval(this._pingTimer);
     this._pingTimer = null;
 
+    this.cancelPairing(null, 'host-stopped');
     if (this._session) this.endSession('host-stopped');
     for (const conn of [...this._conns]) {
       if (conn.state === 'pending' || conn.state === 'auth' || conn.state === 'hello') this._deny(conn, DENY.DISABLED);
@@ -406,6 +444,7 @@ class HostServer extends EventEmitter {
     if (st && st.state === 'running' && st.self && typeof st.self.stableId === 'string' && st.self.stableId) {
       this._selfId = st.self.stableId;
     }
+    this._checkOfferHost(st);
     if (st && st.state === 'running' && st.self && Array.isArray(st.self.ips)) {
       for (const raw of st.self.ips) {
         const ip = this.ts.normalizeIp(raw);
@@ -869,7 +908,7 @@ class HostServer extends EventEmitter {
     // (whether it is unattended, busy, password-protected).
     if (!this._policyAllows(ident, s)) return send(403);
     const self = this._self();
-    return send(200, {
+    const body = {
       app: PROTOCOL.APP_ID,
       protocol: PROTOCOL.PROTOCOL_VERSION,
       version: this.appVersion,
@@ -879,7 +918,11 @@ class HostServer extends EventEmitter {
       acceptMode: s.acceptMode,
       busy: !!(this._session || this._pending),
       enabled: s.hostEnabled, // extra (not in the contract): lets the UI say "incoming disabled"
-    });
+    };
+    // Signed hellos and pairing work only while the key can be used. A phone reads [] as "this
+    // computer can't prove its identity right now", not as an old version.
+    if (this.identity) body.features = this._identityUsable() ? [...PROTOCOL.INFO_FEATURES] : [];
+    return send(200, body);
   }
 
   /* -------------------------------- WebSocket upgrade -------------------------------- */
@@ -894,6 +937,11 @@ class HostServer extends EventEmitter {
     // Browsers always send Origin on WebSocket upgrades and cannot set custom headers.
     if (req.headers.origin !== undefined || req.headers['sec-websocket-origin'] !== undefined) return abortHandshake(socket, 403);
     if (req.headers[PROTOCOL.PROTOCOL_HEADER] !== String(PROTOCOL.PROTOCOL_VERSION)) return abortHandshake(socket, 426);
+    // Optional (mobile viewers). A malformed value is refused here, before whois and before any
+    // connection slot, so it costs no more than any other refused upgrade. Node joins a repeated
+    // header with ', ', which is malformed too.
+    const cnonce = req.headers[PROTOCOL.CLIENT_NONCE_HEADER];
+    if (cnonce !== undefined && !pairing.validCnonce(cnonce)) return abortHandshake(socket, 400);
     if (!hostHeaderIsIp(req.headers.host)) return abortHandshake(socket, 403);
     // Whatever ws would refuse is refused here, before whois and before any slot is touched.
     const bad = wsHandshakeError(req);
@@ -919,7 +967,7 @@ class HostServer extends EventEmitter {
     // Handed to ws: no longer pre-upgrade (ws clears the socket timeout itself as well).
     this._releasePreUpgrade(socket);
     socket.setTimeout(0);
-    this._wss.handleUpgrade(req, socket, head, (ws) => this._onConnection(ws, ip, localIp, ident));
+    this._wss.handleUpgrade(req, socket, head, (ws) => this._onConnection(ws, ip, localIp, ident, cnonce === undefined ? null : cnonce));
     return undefined;
   }
 
@@ -986,7 +1034,7 @@ class HostServer extends EventEmitter {
     return best ? best.victim : null;
   }
 
-  _onConnection(ws, ip, localIp, ident) {
+  _onConnection(ws, ip, localIp, ident, cnonce = null) {
     const self = this._self();
     const conn = {
       id: crypto.randomUUID(),
@@ -994,6 +1042,9 @@ class HostServer extends EventEmitter {
       ip,
       localIp,
       ident,
+      // X-Tunnelview-Client-Nonce (already validated) or null: echoed and signed in hello.ident;
+      // a `pair` is only accepted with one.
+      cnonce,
       // Our StableNodeID right now (proof binding hostId); the last running status as fallback.
       hostId: (self && typeof self.stableId === 'string' && self.stableId) || this._selfId,
       peer: {
@@ -1043,7 +1094,7 @@ class HostServer extends EventEmitter {
     // Tells a viewer in password-only mode that it will be admitted without a password (trusted
     // node / same-user auto-accept — the same predicates _onRequest applies; self always prompts).
     const autoAccept = !conn.peer.isSelf && (this._isTrusted(conn.ident, s) || (s.autoAcceptSameUser && conn.peer.sameUser));
-    this._send(conn, {
+    const hello = {
       t: MSG.HELLO,
       protocol: PROTOCOL.PROTOCOL_VERSION,
       app: PROTOCOL.APP_ID,
@@ -1067,7 +1118,43 @@ class HostServer extends EventEmitter {
         // viewer sends its request without one (prompt / trusted / same-user still work).
         passwordLocked: !!this._pwBlocked(conn),
       },
-    });
+    };
+    const ident = this._helloIdent(conn);
+    if (ident) hello.ident = ident;
+    this._send(conn, hello);
+  }
+
+  /** The identity key exists and can sign. */
+  _identityUsable() {
+    return !!this.identity && this.identity.unavailable === false;
+  }
+
+  /**
+   * hello.ident: our identity key's signature over this connection's hello nonce, its client nonce
+   * (null for desktop viewers), our StableNodeID (the proof binding's hostId) and the viewer's
+   * (whois; our own for a self-connection). Omitted while the key is unavailable or either ID fails
+   * the StableNodeID rule, so a phone hears "can't prove its identity", never a bad signature.
+   */
+  _helloIdent(conn) {
+    if (!this._identityUsable()) return null;
+    const hostId = conn.hostId;
+    const viewerId = conn.ident.node.stableId;
+    let signed;
+    try {
+      signed = pairing.identBytes(conn.nonce, conn.cnonce, hostId, viewerId);
+    } catch {
+      return null; // an ID outside the StableNodeID rule: nothing a phone could verify
+    }
+    try {
+      const sig = this.identity.sign(signed);
+      return { v: IDENT.VERSION, alg: IDENT.ALG, hostId, viewerId, cnonce: conn.cnonce, sig: Buffer.from(sig).toString('base64') };
+    } catch (e) {
+      if (!this._identWarned) {
+        this._identWarned = true;
+        console.error('[host] could not sign hello.ident:', e && e.message);
+      }
+      return null;
+    }
   }
 
   _send(conn, obj) {
@@ -1103,8 +1190,62 @@ class HostServer extends EventEmitter {
         return undefined;
       }
       case MSG.BYE: return this._onBye(conn, msg);
+      case MSG.PAIR: return this._onPair(conn, msg);
       default: return undefined; // unknown types are ignored
     }
+  }
+
+  /**
+   * `pair` (mobile DECISIONS D4). Only in state hello on a connection that sent a client nonce;
+   * otherwise it is ignored like any other out-of-state message (a desktop viewer never sends one).
+   * Every refusal gets exactly PAIR_FAILED, whether or not an offer exists, so another node cannot
+   * learn that someone is pairing. Wrong proofs count against the offer (MAX_FAILURES burns it) and
+   * are reported with the whois identity; the 'self', 'no offer' and policy cases touch nothing.
+   * The connection is closed afterwards either way: 1000 after success, 4000 like a denial otherwise.
+   */
+  _onPair(conn, msg) {
+    if (conn.state !== 'hello' || !conn.cnonce) return undefined;
+    clearTimeout(conn.timer);
+    conn.timer = null;
+    // The policy as it is now, like _onRequest: this connection may have waited in hello (up to
+    // REQUEST_WAIT_MS) since before hosting was switched off or Who can connect was tightened, and
+    // D4 keeps every policy check for pairing. An excluded node cannot use up the offer either.
+    const s = this._settings();
+    if (!s.hostEnabled || !this._policyAllows(conn.ident, s)) return this._finishPair(conn, PAIR_FAILED, 4000);
+    const offer = this._liveOffer();
+    const viewerId = conn.ident.node.stableId;
+    if (conn.peer.isSelf || !offer || conn.hostId !== offer.hostId || !this._identityUsable()) return this._finishPair(conn, PAIR_FAILED, 4000);
+    const proof = typeof msg.proof === 'string' && msg.proof.length <= MAX_PROOF_CHARS ? msg.proof : null;
+    if (!proof || !pairing.verifyPairProof(offer.token, proof, conn.nonce, conn.cnonce, conn.hostId, viewerId)) {
+      offer.failures++;
+      this._safeEmit('pairing', { offerId: offer.offerId, phase: 'attempt-failed', peer: this._pairPeer(conn) });
+      if (offer.failures >= PAIR.MAX_FAILURES && this._offer === offer) this._endOffer('failed', 'too-many-attempts');
+      return this._finishPair(conn, PAIR_FAILED, 4000);
+    }
+    // Consumed: a second phone (or a replay) needs a new offer.
+    this._dropOffer(offer);
+    this._safeEmit('pairing', { offerId: offer.offerId, phase: 'paired', peer: this._pairPeer(conn) });
+    return this._finishPair(conn, {
+      t: MSG.PAIR_RESULT,
+      ok: true,
+      hostId: conn.hostId,
+      viewerId,
+      // How this computer sees the phone (control plane, verified): shown on the phone.
+      peer: { name: conn.ident.node.name, login: conn.peer.user.login },
+    }, 1000);
+  }
+
+  /** The whois identity of a pairing phone, for the main window's dialog. */
+  _pairPeer(conn) {
+    return { name: conn.ident.node.name || conn.peer.hostname, login: conn.peer.user.login, os: conn.peer.os };
+  }
+
+  _finishPair(conn, reply, code) {
+    this._releaseSlot(conn);
+    this._send(conn, reply);
+    conn.state = 'closing';
+    this._closeConn(conn, code, code === 1000 ? 'paired' : 'pair-failed');
+    return undefined;
   }
 
   _onRequest(conn, msg) {
@@ -1332,6 +1473,9 @@ class HostServer extends EventEmitter {
       startedAt: Date.now(),
     };
     this._session = conn;
+    // A pairing code on screen (or on the clipboard) must not outlive the moment someone else
+    // can see this desktop.
+    this.cancelPairing(null, 'session');
     this._send(conn, { t: MSG.ACCEPTED, sessionId: conn.session.id, permissions: { ...permissions }, via });
     this._safeEmit('session-start', structuredClone(conn.session));
     return undefined;
@@ -1462,6 +1606,129 @@ class HostServer extends EventEmitter {
     this._closeConn(conn, 1000, r);
     return true;
   }
+
+  /* -------------------------------- pairing a phone (mobile DECISIONS D3-D5) -------------------------------- */
+
+  /**
+   * Start a pairing offer: a fresh 16-byte token valid for PAIR.TTL_MS, shown as a link / QR code.
+   * A live offer is replaced ('pairing' {phase:'cancelled', reason:'replaced'} for the old one).
+   * @returns {{offerId:string, link:string, expiresAt:number, host:{id, name, ips:string[], port}}}
+   *   host = what the link carries: our StableNodeID, MagicDNS name ('' when unusable), the
+   *   Tailscale addresses we listen on (≤ 1 IPv4 + ≤ 1 IPv6) and the port
+   * @throws {Error} with .code (PAIRING_REFUSALS): 'SESSION_ACTIVE' (an incoming session is
+   *   active), 'HOSTING_OFF' (hosting off or not listening on a Tailscale address), 'TS_DOWN'
+   *   (Tailscale not running, or no StableNodeID of our own), 'NO_IDENTITY' (no usable key)
+   */
+  startPairing() {
+    if (this._session) throw pairingRefusal('SESSION_ACTIVE');
+    if (!this._started || !this._settings().hostEnabled) throw pairingRefusal('HOSTING_OFF');
+    const st = this.ts.last;
+    const self = st && st.state === 'running' && isPlainObject(st.self) ? st.self : null;
+    const hostId = self && typeof self.stableId === 'string' ? self.stableId : '';
+    if (!hostId) throw pairingRefusal('TS_DOWN');
+    const ips = this._linkAddresses();
+    const { port } = this.status();
+    if (!ips.length || !Number.isInteger(port)) throw pairingRefusal('HOSTING_OFF');
+    if (!this._identityUsable()) throw pairingRefusal('NO_IDENTITY');
+
+    const token = crypto.randomBytes(PAIR.TOKEN_BYTES);
+    const expiresAt = this._now() + this._pairTtlMs;
+    const dns = typeof self.dnsName === 'string' ? self.dnsName.toLowerCase().replace(/\.$/, '') : '';
+    const fields = {
+      v: PAIR.LINK_VERSION, id: hostId, n: dns, a: ips, p: port,
+      k: this.identity.publicKeyB64url(), t: token.toString('base64url'), x: Math.floor(expiresAt / 1000),
+    };
+    let link = null;
+    // A MagicDNS name the link format refuses (it is optional) is left out rather than failing.
+    for (const n of dns ? [dns, ''] : ['']) {
+      try {
+        link = pairing.encodeLink({ ...fields, n });
+        fields.n = n;
+        break;
+      } catch (e) {
+        if (!(e && e.code === 'LINK_NAME')) throw pairingRefusal(e && e.code === 'LINK_ID' ? 'TS_DOWN' : e && e.code === 'LINK_KEY' ? 'NO_IDENTITY' : 'HOSTING_OFF');
+      }
+    }
+    if (!link) throw pairingRefusal('HOSTING_OFF');
+
+    this.cancelPairing(null, 'replaced');
+    const offer = { offerId: crypto.randomUUID(), token, hostId, expiresAt, failures: 0, timer: null };
+    offer.timer = setTimeout(() => { if (this._offer === offer) this._endOffer('expired'); }, this._pairTtlMs);
+    if (offer.timer.unref) offer.timer.unref();
+    this._offer = offer;
+    return { offerId: offer.offerId, link, expiresAt, host: { id: hostId, name: fields.n, ips: [...ips], port } };
+  }
+
+  /**
+   * Withdraw the live offer ('pairing' {phase:'cancelled', reason}). offerId null / undefined =
+   * whichever offer is live (main: session start, identity reset); a string cancels only that
+   * offer, so a closing dialog never cancels a newer one. @returns {boolean} an offer was cancelled
+   */
+  cancelPairing(offerId = null, reason = 'cancelled') {
+    const offer = this._offer;
+    if (!offer || (offerId !== null && offerId !== undefined && offerId !== offer.offerId)) return false;
+    this._endOffer('cancelled', PAIRING_CANCEL_REASONS.has(reason) ? reason : 'cancelled');
+    return true;
+  }
+
+  /** The live offer ({offerId, expiresAt, failures}) or null. The token never leaves this module except in the link. */
+  get pairingOffer() {
+    const o = this._offer;
+    return o ? { offerId: o.offerId, expiresAt: o.expiresAt, failures: o.failures } : null;
+  }
+
+  /**
+   * Tailscale addresses for a link: the first IPv4 and the first IPv6 we listen on, in canonical
+   * text. Checked with the link format's own rule (tailscale.js), never the injected tailscale.
+   */
+  _linkAddresses() {
+    let v4 = '';
+    let v6 = '';
+    for (const listening of this._servers.keys()) {
+      const ip = this._linkAddress(listening);
+      if (typeof ip !== 'string' || !isTailscaleAddress(ip) || canonicalIp(ip) !== ip) continue;
+      if (ip.includes(':')) v6 = v6 || ip;
+      else v4 = v4 || ip;
+    }
+    return [v4, v6].filter(Boolean);
+  }
+
+  /** The live offer, after retiring it when it expired or our StableNodeID changed. */
+  _liveOffer() {
+    this._checkOfferHost(this.ts.last);
+    const offer = this._offer;
+    if (!offer) return null;
+    if (this._now() >= offer.expiresAt) {
+      this._endOffer('expired');
+      return null;
+    }
+    return offer;
+  }
+
+  /** A link names our StableNodeID: a new one (signed in again, another account) voids the offer. */
+  _checkOfferHost(st) {
+    const offer = this._offer;
+    if (!offer || !st || st.state !== 'running' || !isPlainObject(st.self)) return;
+    const id = typeof st.self.stableId === 'string' ? st.self.stableId : '';
+    if (id && id !== offer.hostId) this.cancelPairing(offer.offerId, 'host-id-changed');
+  }
+
+  /** Retire the live offer and report how: 'expired' | 'cancelled' (reason) | 'failed' (reason). */
+  _endOffer(phase, reason) {
+    const offer = this._offer;
+    if (!offer) return;
+    this._dropOffer(offer);
+    const evt = { offerId: offer.offerId, phase };
+    if (reason) evt.reason = reason;
+    this._safeEmit('pairing', evt);
+  }
+
+  _dropOffer(offer) {
+    clearTimeout(offer.timer);
+    offer.timer = null;
+    if (this._offer === offer) this._offer = null;
+    offer.token.fill(0);
+  }
 }
 
 module.exports = HostServer;
@@ -1472,3 +1739,4 @@ module.exports.candidateAddress = candidateAddress;
 module.exports.isPlainObject = isPlainObject;
 module.exports.cleanText = cleanText;
 module.exports.hostHeaderIsIp = hostHeaderIsIp;
+module.exports.PAIRING_REFUSALS = PAIRING_REFUSALS;

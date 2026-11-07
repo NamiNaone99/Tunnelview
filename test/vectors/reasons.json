@@ -1,0 +1,1574 @@
+{
+  "about": "End-of-session texts from src/renderer/viewer/reasons.js. describeClose covers every reason the module has a case for, with and without a context ({host, user, hadVideo?, passwordSet?, message?}); icon is a desktop icon name. hostReasons: host bye reasons that replace \"host-ended\" (effectiveCloseReason). Regenerate with node scripts/make-mobile-fixtures.js.",
+  "format": 1,
+  "functions": {
+    "controlBlockReason": {
+      "about": "controlBlockReason(state) -> why remote control is unavailable, the end of \"View only - ...\"; \"\" = available.",
+      "cases": [
+        {
+          "args": [
+            {
+              "control": true,
+              "controlAllowed": true,
+              "host": "office-pc",
+              "inputOpen": true,
+              "unstable": false,
+              "videoStalled": false
+            }
+          ],
+          "result": ""
+        },
+        {
+          "args": [
+            {
+              "control": false,
+              "controlAllowed": true,
+              "host": "office-pc",
+              "inputOpen": true
+            }
+          ],
+          "result": "the host turned remote control off"
+        },
+        {
+          "args": [
+            {
+              "control": true,
+              "controlAllowed": false,
+              "host": "office-pc",
+              "inputOpen": true
+            }
+          ],
+          "result": "input isn't available on office-pc"
+        },
+        {
+          "args": [
+            {
+              "control": true,
+              "controlAllowed": false,
+              "inputOpen": true
+            }
+          ],
+          "result": "input isn't available on the remote device"
+        },
+        {
+          "args": [
+            {
+              "control": true,
+              "inputOpen": true,
+              "unstable": true,
+              "videoStalled": true
+            }
+          ],
+          "result": "the connection is recovering"
+        },
+        {
+          "args": [
+            {
+              "control": true,
+              "inputOpen": true,
+              "videoStalled": true
+            }
+          ],
+          "result": "the video is stalled"
+        },
+        {
+          "args": [
+            {
+              "control": true,
+              "inputOpen": false
+            }
+          ],
+          "result": "the input channel is not ready"
+        }
+      ]
+    },
+    "describeClose": {
+      "about": "describeClose(reason, ctx) -> {tone, icon, title, message, detail?}. detail: \"\" = the message says it all (no detail line); absent = show main's status message as detail.",
+      "cases": [
+        {
+          "args": [
+            "unreachable",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "plug",
+            "message": "office-pc didn't answer over Tailscale. Check that it is online in your tailnet and that Tunnelview is running on it.",
+            "title": "Can't reach office-pc",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "not-tunnelview",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "alert",
+            "message": "office-pc answered, but Tunnelview isn't listening on that address (it may not be installed, hosting may be off, or it uses a different port).",
+            "title": "Tunnelview is not available there",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "timeout",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "clock",
+            "message": "office-pc took too long to respond.",
+            "title": "Connection timed out",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "protocol",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "alert",
+            "message": "The two devices could not understand each other. Update Tunnelview on both devices and try again.",
+            "title": "Incompatible versions",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "host-ended",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "info",
+            "message": "office-pc ended the session.",
+            "title": "Session ended",
+            "tone": "info"
+          }
+        },
+        {
+          "args": [
+            "capture-failed",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "monitor",
+            "message": "office-pc couldn't share its screen. If it's a Mac, allow Tunnelview under System Settings \u203a Privacy & Security \u203a Screen Recording on that Mac, then quit and reopen Tunnelview there.",
+            "title": "Screen sharing failed",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "capture-ended",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "monitor",
+            "message": "office-pc couldn't share its screen. If it's a Mac, allow Tunnelview under System Settings \u203a Privacy & Security \u203a Screen Recording on that Mac, then quit and reopen Tunnelview there.",
+            "title": "Screen sharing failed",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "capture-blocked",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "lock",
+            "message": "office-pc is waiting for someone at that Mac to allow screen recording (macOS asks for this from time to time).",
+            "title": "Screen recording needs approval",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "host-stopped",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "power",
+            "message": "Tailscale stopped or incoming connections were turned off on office-pc.",
+            "title": "Remote access stopped",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "connection-lost",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "plug",
+            "message": "The connection to office-pc dropped.",
+            "title": "Connection lost",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "connection-failed",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "monitor",
+            "message": "Tunnelview couldn't open a direct encrypted connection to office-pc over Tailscale. Make sure your Tailscale ACLs allow UDP 47801\u201347899 between the two devices.",
+            "title": "Video couldn't start",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "connection-timeout",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "monitor",
+            "message": "Tunnelview couldn't open a direct encrypted connection to office-pc over Tailscale. Make sure your Tailscale ACLs allow UDP 47801\u201347899 between the two devices.",
+            "title": "Video couldn't start",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "negotiation-failed",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "monitor",
+            "message": "Tunnelview couldn't open a direct encrypted connection to office-pc over Tailscale. Make sure your Tailscale ACLs allow UDP 47801\u201347899 between the two devices.",
+            "title": "Video couldn't start",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "setup-failed",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "monitor",
+            "message": "Tunnelview couldn't open a direct encrypted connection to office-pc over Tailscale. Make sure your Tailscale ACLs allow UDP 47801\u201347899 between the two devices.",
+            "title": "Video couldn't start",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "network",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "plug",
+            "message": "The connection to office-pc was interrupted before the session started.",
+            "title": "Connection lost",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "not-tailnet",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "shield",
+            "message": "office-pc is not a device in your Tailscale network, so Tunnelview refused to connect. Tunnelview only connects to Tailscale addresses.",
+            "title": "Not in your tailnet",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "not-tailnet-route",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "shield",
+            "message": "Your computer routed the connection to office-pc outside Tailscale, so Tunnelview stopped before sending anything. Another network or VPN may be using Tailscale's address range (100.64.0.0/10), or Tailscale may still be starting. Check that Tailscale is connected and try again.",
+            "title": "Connection didn't go through Tailscale",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "rate-limited",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "detail": "",
+            "icon": "clock",
+            "message": "This device tried to connect to office-pc too often. Wait a minute and try again.",
+            "title": "Too many attempts",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "non-tailnet-path",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "shield",
+            "message": "The video connection tried to use a path outside your Tailscale network, so Tunnelview ended the session.",
+            "title": "Stopped to protect your session",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "media-failed",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "monitor",
+            "message": "Tunnelview couldn't open a direct encrypted connection to office-pc over Tailscale. Make sure your Tailscale ACLs allow UDP 47801\u201347899 between the two devices.",
+            "title": "Video couldn't start",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "media-timeout",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "monitor",
+            "message": "Access was granted, but no video arrived from office-pc. Make sure your Tailscale ACLs allow UDP 47801\u201347899 between the two devices.",
+            "title": "Video didn't start",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "reconnect-failed",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "refresh",
+            "message": "Starting a new connection to office-pc failed. Check that Tailscale is running and try again.",
+            "title": "Couldn't reconnect",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "init-failed",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "alert",
+            "message": "The viewer could not be initialized. Close this window and connect again from Tunnelview.",
+            "title": "Couldn't start the session",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "local",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "check",
+            "message": "You ended the session with office-pc.",
+            "title": "Disconnected",
+            "tone": "info"
+          }
+        },
+        {
+          "args": [
+            "viewer-closed",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "check",
+            "message": "You ended the session with office-pc.",
+            "title": "Disconnected",
+            "tone": "info"
+          }
+        },
+        {
+          "args": [
+            "viewer-cancelled",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "check",
+            "message": "You ended the session with office-pc.",
+            "title": "Disconnected",
+            "tone": "info"
+          }
+        },
+        {
+          "args": [
+            "denied:rejected",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "x",
+            "message": "Alice Example declined your request to connect to office-pc.",
+            "title": "Request declined",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:timeout",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "clock",
+            "message": "Nobody accepted the request on office-pc in time.",
+            "title": "No answer",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:auth-timeout",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "clock",
+            "message": "The password wasn't entered in time. Reconnect to try again.",
+            "title": "Password prompt timed out",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:busy",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "users",
+            "message": "Another session is already active (or another request is waiting) on that device. Try again in a moment.",
+            "title": "office-pc is busy",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:not-allowed",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "shield",
+            "message": "office-pc only accepts connections from specific people or devices, and this device or your account isn't on its list. Ask its owner to add you under Who can connect (a short device name there only matches devices of its own tailnet).",
+            "title": "Not allowed",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "denied:bad-password",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "lock",
+            "message": "Too many incorrect password attempts on this connection.",
+            "title": "Wrong password",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "denied:password-required",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "lock",
+            "message": "office-pc only accepts connections with its password. Reconnect and enter it when asked.",
+            "title": "Password required",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:locked",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "detail": "",
+            "icon": "lock",
+            "message": "Too many failed password attempts from this device or your Tailscale account (tagged devices share one limit). Try again in 15 minutes.",
+            "title": "Temporarily locked",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "denied:suspended",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "lock",
+            "message": "office-pc has stopped accepting passwords for up to 15 minutes after many failed attempts from several devices. Trusted devices, and requests the person there accepts, still work.",
+            "title": "Passwords paused on office-pc",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:try-later",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "detail": "",
+            "icon": "clock",
+            "message": "office-pc isn't taking new requests from this device right now: a recent request was declined or not answered there, or this device asked several times in a few minutes. Try again in a few minutes.",
+            "title": "Try again later",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:protocol",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "alert",
+            "message": "office-pc rejected the request because of a protocol error. Update Tunnelview on both devices.",
+            "title": "Request rejected",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "denied:disabled",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "power",
+            "message": "Remote access is turned off on office-pc.",
+            "title": "Incoming connections are off",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:not-a-real-reason",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "x",
+            "message": "office-pc refused the connection.",
+            "title": "Request denied",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "not-a-real-reason",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "info",
+            "message": "The session with office-pc has ended.",
+            "title": "Session ended",
+            "tone": "info"
+          }
+        },
+        {
+          "args": [
+            "",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "info",
+            "message": "The session with office-pc has ended.",
+            "title": "Session ended",
+            "tone": "info"
+          }
+        },
+        {
+          "args": [
+            "unreachable",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "plug",
+            "message": "the remote device didn't answer over Tailscale. Check that it is online in your tailnet and that Tunnelview is running on it.",
+            "title": "Can't reach the remote device",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "not-tunnelview",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "alert",
+            "message": "the remote device answered, but Tunnelview isn't listening on that address (it may not be installed, hosting may be off, or it uses a different port).",
+            "title": "Tunnelview is not available there",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "timeout",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "clock",
+            "message": "the remote device took too long to respond.",
+            "title": "Connection timed out",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "protocol",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "alert",
+            "message": "The two devices could not understand each other. Update Tunnelview on both devices and try again.",
+            "title": "Incompatible versions",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "host-ended",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "info",
+            "message": "the remote device ended the session.",
+            "title": "Session ended",
+            "tone": "info"
+          }
+        },
+        {
+          "args": [
+            "capture-failed",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "monitor",
+            "message": "the remote device couldn't share its screen. If it's a Mac, allow Tunnelview under System Settings \u203a Privacy & Security \u203a Screen Recording on that Mac, then quit and reopen Tunnelview there.",
+            "title": "Screen sharing failed",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "capture-ended",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "monitor",
+            "message": "the remote device couldn't share its screen. If it's a Mac, allow Tunnelview under System Settings \u203a Privacy & Security \u203a Screen Recording on that Mac, then quit and reopen Tunnelview there.",
+            "title": "Screen sharing failed",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "capture-blocked",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "lock",
+            "message": "the remote device is waiting for someone at that Mac to allow screen recording (macOS asks for this from time to time).",
+            "title": "Screen recording needs approval",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "host-stopped",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "power",
+            "message": "Tailscale stopped or incoming connections were turned off on the remote device.",
+            "title": "Remote access stopped",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "connection-lost",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "plug",
+            "message": "The connection to the remote device dropped.",
+            "title": "Connection lost",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "connection-failed",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "monitor",
+            "message": "Tunnelview couldn't open a direct encrypted connection to the remote device over Tailscale. Make sure your Tailscale ACLs allow UDP 47801\u201347899 between the two devices.",
+            "title": "Video couldn't start",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "connection-timeout",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "monitor",
+            "message": "Tunnelview couldn't open a direct encrypted connection to the remote device over Tailscale. Make sure your Tailscale ACLs allow UDP 47801\u201347899 between the two devices.",
+            "title": "Video couldn't start",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "negotiation-failed",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "monitor",
+            "message": "Tunnelview couldn't open a direct encrypted connection to the remote device over Tailscale. Make sure your Tailscale ACLs allow UDP 47801\u201347899 between the two devices.",
+            "title": "Video couldn't start",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "setup-failed",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "monitor",
+            "message": "Tunnelview couldn't open a direct encrypted connection to the remote device over Tailscale. Make sure your Tailscale ACLs allow UDP 47801\u201347899 between the two devices.",
+            "title": "Video couldn't start",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "network",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "plug",
+            "message": "The connection to the remote device was interrupted before the session started.",
+            "title": "Connection lost",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "not-tailnet",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "shield",
+            "message": "the remote device is not a device in your Tailscale network, so Tunnelview refused to connect. Tunnelview only connects to Tailscale addresses.",
+            "title": "Not in your tailnet",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "not-tailnet-route",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "shield",
+            "message": "Your computer routed the connection to the remote device outside Tailscale, so Tunnelview stopped before sending anything. Another network or VPN may be using Tailscale's address range (100.64.0.0/10), or Tailscale may still be starting. Check that Tailscale is connected and try again.",
+            "title": "Connection didn't go through Tailscale",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "rate-limited",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "detail": "",
+            "icon": "clock",
+            "message": "This device tried to connect to the remote device too often. Wait a minute and try again.",
+            "title": "Too many attempts",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "non-tailnet-path",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "shield",
+            "message": "The video connection tried to use a path outside your Tailscale network, so Tunnelview ended the session.",
+            "title": "Stopped to protect your session",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "media-failed",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "monitor",
+            "message": "Tunnelview couldn't open a direct encrypted connection to the remote device over Tailscale. Make sure your Tailscale ACLs allow UDP 47801\u201347899 between the two devices.",
+            "title": "Video couldn't start",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "media-timeout",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "monitor",
+            "message": "Access was granted, but no video arrived from the remote device. Make sure your Tailscale ACLs allow UDP 47801\u201347899 between the two devices.",
+            "title": "Video didn't start",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "reconnect-failed",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "refresh",
+            "message": "Starting a new connection to the remote device failed. Check that Tailscale is running and try again.",
+            "title": "Couldn't reconnect",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "init-failed",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "alert",
+            "message": "The viewer could not be initialized. Close this window and connect again from Tunnelview.",
+            "title": "Couldn't start the session",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "local",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "check",
+            "message": "You ended the session with the remote device.",
+            "title": "Disconnected",
+            "tone": "info"
+          }
+        },
+        {
+          "args": [
+            "viewer-closed",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "check",
+            "message": "You ended the session with the remote device.",
+            "title": "Disconnected",
+            "tone": "info"
+          }
+        },
+        {
+          "args": [
+            "viewer-cancelled",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "check",
+            "message": "You ended the session with the remote device.",
+            "title": "Disconnected",
+            "tone": "info"
+          }
+        },
+        {
+          "args": [
+            "denied:rejected",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "x",
+            "message": "The person at the remote device declined your request to connect to the remote device.",
+            "title": "Request declined",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:timeout",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "clock",
+            "message": "Nobody accepted the request on the remote device in time.",
+            "title": "No answer",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:auth-timeout",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "clock",
+            "message": "The password wasn't entered in time. Reconnect to try again.",
+            "title": "Password prompt timed out",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:busy",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "users",
+            "message": "Another session is already active (or another request is waiting) on that device. Try again in a moment.",
+            "title": "the remote device is busy",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:not-allowed",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "shield",
+            "message": "the remote device only accepts connections from specific people or devices, and this device or your account isn't on its list. Ask its owner to add you under Who can connect (a short device name there only matches devices of its own tailnet).",
+            "title": "Not allowed",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "denied:bad-password",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "lock",
+            "message": "Too many incorrect password attempts on this connection.",
+            "title": "Wrong password",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "denied:password-required",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "lock",
+            "message": "the remote device only accepts connections with its password. Reconnect and enter it when asked.",
+            "title": "Password required",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:locked",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "detail": "",
+            "icon": "lock",
+            "message": "Too many failed password attempts from this device or your Tailscale account (tagged devices share one limit). Try again in 15 minutes.",
+            "title": "Temporarily locked",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "denied:suspended",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "lock",
+            "message": "the remote device has stopped accepting passwords for up to 15 minutes after many failed attempts from several devices. Trusted devices, and requests the person there accepts, still work.",
+            "title": "Passwords paused on the remote device",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:try-later",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "detail": "",
+            "icon": "clock",
+            "message": "the remote device isn't taking new requests from this device right now: a recent request was declined or not answered there, or this device asked several times in a few minutes. Try again in a few minutes.",
+            "title": "Try again later",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:protocol",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "alert",
+            "message": "the remote device rejected the request because of a protocol error. Update Tunnelview on both devices.",
+            "title": "Request rejected",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "denied:disabled",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "power",
+            "message": "Remote access is turned off on the remote device.",
+            "title": "Incoming connections are off",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:not-a-real-reason",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "x",
+            "message": "the remote device refused the connection.",
+            "title": "Request denied",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "not-a-real-reason",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "info",
+            "message": "The session with the remote device has ended.",
+            "title": "Session ended",
+            "tone": "info"
+          }
+        },
+        {
+          "args": [
+            "",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "icon": "info",
+            "message": "The session with the remote device has ended.",
+            "title": "Session ended",
+            "tone": "info"
+          }
+        },
+        {
+          "args": [
+            null,
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "info",
+            "message": "The session with office-pc has ended.",
+            "title": "Session ended",
+            "tone": "info"
+          }
+        },
+        {
+          "args": [
+            "network",
+            {
+              "hadVideo": true,
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "note": "the session had started",
+          "result": {
+            "icon": "plug",
+            "message": "The connection to office-pc dropped.",
+            "title": "Connection lost",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "connection-lost",
+            {
+              "hadVideo": false,
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "plug",
+            "message": "The connection to office-pc dropped.",
+            "title": "Connection lost",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:password-required",
+            {
+              "host": "office-pc",
+              "passwordSet": false,
+              "user": "Alice Example"
+            }
+          ],
+          "note": "the host has no password yet",
+          "result": {
+            "icon": "lock",
+            "message": "office-pc only accepts password connections, but no password has been set there yet. Ask its owner to set one or switch to 'Ask every time'.",
+            "title": "Password required",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:password-required",
+            {
+              "host": "office-pc",
+              "passwordSet": true,
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "icon": "lock",
+            "message": "office-pc only accepts connections with its password. Reconnect and enter it when asked.",
+            "title": "Password required",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:locked",
+            {
+              "host": "office-pc",
+              "message": "Too many failed password attempts. Try again in 29 seconds.",
+              "user": "Alice Example"
+            }
+          ],
+          "note": "the retry sentence comes from main's status message",
+          "result": {
+            "detail": "",
+            "icon": "lock",
+            "message": "Too many failed password attempts from this device or your Tailscale account (tagged devices share one limit). Try again in 29 seconds.",
+            "title": "Temporarily locked",
+            "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "denied:try-later",
+            {
+              "host": "office-pc",
+              "message": "Not taking requests right now. Try again in about 2 minutes.",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "detail": "",
+            "icon": "clock",
+            "message": "office-pc isn't taking new requests from this device right now: a recent request was declined or not answered there, or this device asked several times in a few minutes. Try again in about 2 minutes.",
+            "title": "Try again later",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:try-later",
+            {
+              "host": "office-pc",
+              "message": "Try again in 1 second.",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "detail": "",
+            "icon": "clock",
+            "message": "office-pc isn't taking new requests from this device right now: a recent request was declined or not answered there, or this device asked several times in a few minutes. Try again in 1 second.",
+            "title": "Try again later",
+            "tone": "warn"
+          }
+        },
+        {
+          "args": [
+            "denied:try-later",
+            {
+              "host": "office-pc",
+              "message": "no retry sentence here",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "detail": "",
+            "icon": "clock",
+            "message": "office-pc isn't taking new requests from this device right now: a recent request was declined or not answered there, or this device asked several times in a few minutes. Try again in a few minutes.",
+            "title": "Try again later",
+            "tone": "warn"
+          }
+        }
+      ]
+    },
+    "effectiveCloseReason": {
+      "about": "effectiveCloseReason(reason, hostReason) -> the reason to describe: hostReason when reason is \"host-ended\" and hostReason is one of hostReasons.",
+      "cases": [
+        {
+          "args": [
+            "host-ended",
+            "capture-blocked"
+          ],
+          "result": "capture-blocked"
+        },
+        {
+          "args": [
+            "host-ended",
+            "capture-ended"
+          ],
+          "result": "capture-ended"
+        },
+        {
+          "args": [
+            "host-ended",
+            "capture-failed"
+          ],
+          "result": "capture-failed"
+        },
+        {
+          "args": [
+            "host-ended",
+            "connection-failed"
+          ],
+          "result": "connection-failed"
+        },
+        {
+          "args": [
+            "host-ended",
+            "connection-lost"
+          ],
+          "result": "connection-lost"
+        },
+        {
+          "args": [
+            "host-ended",
+            "connection-timeout"
+          ],
+          "result": "connection-timeout"
+        },
+        {
+          "args": [
+            "host-ended",
+            "host-ended"
+          ],
+          "result": "host-ended"
+        },
+        {
+          "args": [
+            "host-ended",
+            "host-stopped"
+          ],
+          "result": "host-stopped"
+        },
+        {
+          "args": [
+            "host-ended",
+            "media-failed"
+          ],
+          "result": "media-failed"
+        },
+        {
+          "args": [
+            "host-ended",
+            "negotiation-failed"
+          ],
+          "result": "negotiation-failed"
+        },
+        {
+          "args": [
+            "host-ended",
+            "non-tailnet-path"
+          ],
+          "result": "non-tailnet-path"
+        },
+        {
+          "args": [
+            "host-ended",
+            "setup-failed"
+          ],
+          "result": "setup-failed"
+        },
+        {
+          "args": [
+            "host-ended",
+            "panel-closed"
+          ],
+          "result": "host-ended"
+        },
+        {
+          "args": [
+            "host-ended",
+            null
+          ],
+          "result": "host-ended"
+        },
+        {
+          "args": [
+            "host-ended",
+            42
+          ],
+          "result": "host-ended"
+        },
+        {
+          "args": [
+            "network",
+            "capture-failed"
+          ],
+          "result": "network"
+        },
+        {
+          "args": [
+            "denied:busy",
+            "host-stopped"
+          ],
+          "result": "denied:busy"
+        }
+      ]
+    },
+    "retrySentence": {
+      "about": "retrySentence(message) -> the first \"Try again in ....\" sentence of a status message, or \"\".",
+      "cases": [
+        {
+          "args": [
+            "Too many failed password attempts from this device or your Tailscale account. Try again in 15 minutes."
+          ],
+          "result": "Try again in 15 minutes."
+        },
+        {
+          "args": [
+            " Try again in 29 seconds."
+          ],
+          "result": "Try again in 29 seconds."
+        },
+        {
+          "args": [
+            "x Try again in about 2 minutes. Try again in 5 seconds."
+          ],
+          "result": "Try again in about 2 minutes."
+        },
+        {
+          "args": [
+            "Try again later"
+          ],
+          "result": ""
+        },
+        {
+          "args": [
+            ""
+          ],
+          "result": ""
+        },
+        {
+          "args": [
+            null
+          ],
+          "result": ""
+        }
+      ]
+    }
+  },
+  "hostReasons": [
+    "capture-blocked",
+    "capture-ended",
+    "capture-failed",
+    "connection-failed",
+    "connection-lost",
+    "connection-timeout",
+    "host-ended",
+    "host-stopped",
+    "media-failed",
+    "negotiation-failed",
+    "non-tailnet-path",
+    "setup-failed"
+  ]
+}

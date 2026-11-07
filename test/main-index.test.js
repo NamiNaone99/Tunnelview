@@ -36,6 +36,15 @@ function setPlatform(p) {
   Object.defineProperty(process, 'platform', { value: p, configurable: true, enumerable: true, writable: false });
 }
 
+// Every load() makes a userData folder, and index.js writes identity.json (a private key) into
+// it: all of them go when this file is done.
+const userDataDirs = [];
+test.after(() => {
+  for (const dir of userDataDirs) {
+    try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 }); } catch { /* still in use: left to the OS */ }
+  }
+});
+
 function stub(rel, exports) {
   const file = require.resolve(path.join(SRC, rel));
   require.cache[file] = { id: file, filename: file, loaded: true, exports };
@@ -50,6 +59,7 @@ async function load({ platform, settings: initialSettings = null, loginItem = nu
   for (const k of Object.keys(require.cache)) if (k.startsWith(SRC)) delete require.cache[k];
 
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'tunnelview-index-'));
+  userDataDirs.push(userData);
   if (initialSettings) {
     fs.mkdirSync(path.join(userData, 'userData'), { recursive: true });
     fs.writeFileSync(path.join(userData, 'userData', 'settings.json'), JSON.stringify({ version: 1, ...initialSettings }));
@@ -193,7 +203,8 @@ async function load({ platform, settings: initialSettings = null, loginItem = nu
 
   /* ---------------- stubs ---------------- */
   class FakeHost extends EventEmitter {
-    constructor(deps) { super(); this.settings = deps.settings; this.permsSent = []; this.ended = []; h.host = this; }
+    constructor(deps) { super(); this.deps = deps; this.settings = deps.settings; this.permsSent = []; this.ended = []; this.pairingCancels = []; h.host = this; }
+    cancelPairing(offerId, reason) { this.pairingCancels.push([offerId, reason]); return true; }
     async start() { return this.status(); }
     async stop() {}
     status() { return { listening: true, addresses: ['100.64.0.1'], port: 47800, error: null }; }
@@ -694,4 +705,68 @@ test('Windows viewer decodes video in software unless gpuVideoDecode is on; macO
   assert.equal(h.settings.get().gpuVideoDecode, true);
   h = await load({ platform: 'darwin', settings: { gpuVideoDecode: false } });
   assert.ok(!h.switches.includes(DISABLE), 'macOS keeps VideoToolbox');
+});
+
+/* ================================================================== identity + pairing a phone */
+
+test('identity: userData/identity.json loaded before the host, passed to it; pairing events reach the main window; a session cancels the offer', async () => {
+  const h = await load({
+    platform: 'win32',
+    // The harness stubs auth.js as {}; identity.js needs its real base64 helpers.
+    before: () => {
+      const file = require.resolve(path.join(SRC, 'main/auth.js'));
+      delete require.cache[file];
+      require(file);
+    },
+  });
+  assert.ok(fs.existsSync(path.join(h.userData, 'userData', 'identity.json')), 'created in userData');
+  const id = h.host.deps.identity;
+  assert.ok(id && id.unavailable === false, 'HostServer got the loaded identity');
+  const main = mainWindow(h);
+  assert.deepEqual(await invoke(h, 'security:identity', main), { available: true, fingerprint: id.fingerprint(), wasReset: false });
+
+  main.webContents.sent.length = 0;
+  const offerId = '6f1c2a54-8d0e-4f43-9a1b-3c5d7e9f0a12';
+  h.host.emit('pairing', { offerId, phase: 'attempt-failed', token: 'never-forwarded', peer: { name: 'mallory-pc', login: 'm@example.com', os: 'android', ip: '100.64.0.9' } });
+  h.host.emit('pairing', { offerId, phase: 'not-a-phase' });
+  h.host.emit('pairing', { offerId, phase: 'cancelled', reason: 'replaced' });
+  assert.deepEqual(main.webContents.sent.filter(([ch]) => ch === 'pairing:status'), [
+    ['pairing:status', { offerId, phase: 'attempt-failed', peer: { name: 'mallory-pc', login: 'm@example.com', os: 'android' } }],
+    ['pairing:status', { offerId, phase: 'cancelled', reason: 'replaced' }],
+  ]);
+
+  assert.deepEqual(h.host.pairingCancels, []);
+  startSession(h);
+  assert.deepEqual(h.host.pairingCancels, [[null, 'session']], 'no pairing code stays usable while someone sees this desktop');
+  const reset = await invoke(h, 'security:reset-identity', main);
+  assert.equal(reset.ok, false);
+  assert.equal(reset.code, 'SESSION_ACTIVE', 'reset locked during the incoming session');
+  h.host.endSession('test-done');
+  await settle();
+});
+
+test('pairing: main withdraws the offer when the main window\'s page goes without the dialog closing (crash, reload, navigation, closed)', async () => {
+  const h = await load({ platform: 'win32' });
+  const main = mainWindow(h);
+  const cancels = h.host.pairingCancels;
+  cancels.length = 0;
+  const wc = main.webContents;
+  // Not the page going away: in-page navigation, a sub-frame, hiding to the tray (the dialog stays
+  // open there and keeps showing what happens to the code).
+  wc.emit('did-start-navigation', { url: 'file:///index.html#x', isMainFrame: true, isSameDocument: true });
+  wc.emit('did-start-navigation', { url: 'about:blank', isMainFrame: false, isSameDocument: false });
+  wc.emit('did-start-navigation', {}, 'file:///index.html#y', true, true); // legacy arguments, in place
+  main.close(); // closeToTray (default): hidden
+  assert.equal(main.destroyed, false);
+  assert.deepEqual(cancels, []);
+
+  wc.emit('did-start-navigation', { url: 'file:///index.html', isMainFrame: true, isSameDocument: false }); // reload
+  assert.deepEqual(cancels, [[null, 'cancelled']]);
+  wc.emit('did-start-navigation', {}, 'file:///index.html', false, true); // legacy arguments
+  assert.equal(cancels.length, 2);
+  wc.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 1 });
+  assert.equal(cancels.length, 3);
+  main.destroy();
+  assert.deepEqual(cancels, [[null, 'cancelled'], [null, 'cancelled'], [null, 'cancelled'], [null, 'cancelled']]);
+  await settle();
 });

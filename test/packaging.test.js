@@ -133,6 +133,20 @@ test('docs: ARCHITECTURE §4 lists exactly the protocol DENY reasons and the cur
   assert.ok(doc.includes(`AUTH.CONTEXT = '${P.AUTH.CONTEXT}'`), 'AUTH.CONTEXT differs from the docs');
 });
 
+test('docs: ARCHITECTURE §4 states the pairing constants as protocol.js has them', () => {
+  const P = require('../src/shared/protocol');
+  const s4 = docSection(read('docs/ARCHITECTURE.md'), 4);
+  assert.ok(s4.includes(`IDENT.CONTEXT = '${P.IDENT.CONTEXT}'`), 'IDENT.CONTEXT differs from the docs');
+  assert.ok(s4.includes(`PAIR.CONTEXT = '${P.PAIR.CONTEXT}'`), 'PAIR.CONTEXT differs from the docs');
+  // protocol.js has the header in lower case (how Node presents incoming header names).
+  const header = /^ {2}\| `(X-Tunnelview-Client-Nonce)` \|/m.exec(s4);
+  assert.ok(header && header[1].toLowerCase() === P.CLIENT_NONCE_HEADER, 'client-nonce header row');
+  assert.ok(s4.includes(`(\`PROTOCOL.INFO_FEATURES\`) is \`[${P.INFO_FEATURES.map((f) => `'${f}'`).join(', ')}]\``), 'INFO_FEATURES differs from the docs');
+  assert.ok(s4.includes(`\`${P.PAIR.LINK_PREFIX}<base64url(`), 'link prefix');
+  assert.ok(s4.includes(`**${P.PAIR.TTL_MS / 60000} min** (\`PAIR.TTL_MS\`)`), 'PAIR.TTL_MS differs from the docs');
+  assert.match(s4, new RegExp(`\\*\\*${P.PAIR.MAX_FAILURES}\\*\\*\\s+\\(\`PAIR\\.MAX_FAILURES\`\\)`), 'PAIR.MAX_FAILURES differs from the docs');
+});
+
 /** The text of the `## <n>. …` section of ARCHITECTURE.md (up to the next `## ` heading). */
 function docSection(doc, n) {
   const start = doc.search(new RegExp(`^## ${n}\\. `, 'm'));

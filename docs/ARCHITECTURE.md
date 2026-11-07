@@ -113,16 +113,28 @@ scripts/make-icons.js       generates build/icon.png (1024²) without external d
 scripts/check.js            syntax-checks every .js file (node --check / vm for ESM)
 scripts/verify-fuses.js     checks a packaged app's Electron fuses + ASAR integrity (CI, §1.9)
 scripts/mac-install.sh      builds Tunnelview.app on a Mac and installs it (README › macOS)
+scripts/make-mobile-fixtures.js  writes test/vectors/*.json from the real modules; --check only
+                            compares (exit 1 when a file is missing, different or stale)
 .github/workflows/build.yml Windows + macOS builds
 docs/ARCHITECTURE.md        this file
 README.md, SECURITY.md, LICENSE
 test/*.test.js              node --test (pure Node; no Electron required)
+test/vectors/*.json         shared test vectors for the mobile client (auth, links, ident, pair, …);
+                            generated, never hand-edited: run make-mobile-fixtures.js after a change
+                            (test/mobile-vectors.test.js fails until they match the code)
+test/support/               test helpers, not tests: fake-tailscale.js (fake tailnet over
+                            127.0.0.x), phone-sim.js (Node phone for the pairing tests)
+test/fixtures/              tailscale-*.json status samples, qr-golden.json (reference QR symbols)
 src/shared/protocol.js      UMD constants (main: require; renderer: window.TunnelviewProtocol)
 src/main/
   index.js                  app lifecycle, single-instance, command-line switches, wiring
   settings.js               JSON settings store (userData/settings.json)
   tailscale.js              CLI discovery, status, whois, IP validation, watcher
   auth.js                   scrypt password hashing, challenge/response
+  identity.js               this computer's Ed25519 identity key (userData/identity.json; main only)
+  pairing.js                pure functions: hello.ident bytes, pair proofs, pairing links, fingerprints
+  qr.js                     QR symbol of a pairing link → {size, bits} for the main window
+  vendor/qrcodegen.js       Project Nayuki QR Code generator v1.8.0 (MIT), hand-ported to CommonJS (types removed)
   host-server.js            HTTP+WS listener on Tailscale IPs, admission, host session state
   viewer-client.js          outbound WS client for one viewer session
   windows.js                BrowserWindow factories (main, viewer, panel, prompt)
@@ -186,10 +198,18 @@ A machine may run several outgoing viewer sessions.
   Default port **47800** (`PROTOCOL.DEFAULT_PORT`). Client sends header `X-Tunnelview-Protocol: 2`,
   no `Origin`. `maxPayload` 1 MiB both sides. Handshake timeout 8 s. ws-level ping every 15 s;
   a peer missing 2 pongs is dropped.
+- Upgrade request headers:
+
+  | Header | Sent by | Value |
+  |---|---|---|
+  | `X-Tunnelview-Protocol` | every client | `2`; anything else → 426 |
+  | `X-Tunnelview-Client-Nonce` | phones (optional; desktop viewers omit it) | canonical base64 of 32 fresh random bytes, new for every connection. Present but malformed → **400**, checked right after the protocol header, before `tailscale whois` and before any connection slot is touched. It goes into `hello.ident` (below) and is required for `pair`. |
 - HTTP `GET /tunnelview/v1/info` on the same port (same IP + whois checks and the same `allowFrom`
   policy, refused with 403, because it reveals whether a host is unattended or busy; no Origin
   required since it carries nothing secret) → `200 application/json`:
-  `{ app:'Tunnelview', protocol:2, version, hostname, os:'windows'|'macos', passwordSet, acceptMode, busy }`.
+  `{ app:'Tunnelview', protocol:2, version, hostname, os:'windows'|'macos', passwordSet, acceptMode, busy, features? }`.
+  `features` (`PROTOCOL.INFO_FEATURES`) is `['ident-v1', 'pair-v1']` while this computer's identity key
+  is usable and `[]` while it is unavailable; a host without an identity module omits it.
   Everything else → 404.
 - Refusals before a WebSocket exists are bare HTTP statuses. **403 means policy only**: the
   `allowFrom` policy refused this peer. The other 403 cases (non-Tailscale address, `Origin`
@@ -222,7 +242,7 @@ Messages:
 
 | t | dir | fields |
 |---|-----|--------|
-| `hello` | H→V | `protocol:2, app:'Tunnelview', version, host:{hostname, os, user:{login, displayName}}, auth:{passwordSet:bool, acceptMode:'ask'|'password-only', salt:b64|null, kdf:{N,r,p,keylen}|null, nonce:b64, autoAccept:bool, passwordLocked:bool}` |
+| `hello` | H→V | `protocol:2, app:'Tunnelview', version, host:{hostname, os, user:{login, displayName}}, auth:{passwordSet:bool, acceptMode:'ask'|'password-only', salt:b64|null, kdf:{N,r,p,keylen}|null, nonce:b64, autoAccept:bool, passwordLocked:bool}, ident?:{v:1, alg:'ed25519', hostId, viewerId, cnonce:b64|null, sig:b64}` (§4 Signed hello, below) |
 | `request` | V→H | `protocol:2, viewer:{hostname, os, version}, proof:b64|null` |
 | `auth` | V→H | `proof:b64` (only valid while pending or after `auth-failed`) |
 | `pending` | H→V | — (waiting for host user) |
@@ -348,6 +368,51 @@ prompt (Pending slot below).
 
 Accepted sessions start with `settings.defaultPermissions` (prompt may override).
 
+### Signed hello and pairing a phone
+
+**Signed hello.** While this computer's identity key (`identity.js`, §7) is usable, every `hello`
+carries `ident`: `hostId` = this host's StableNodeID, `viewerId` = `whois(remote IP).node.stableId`
+(the same binding as password proofs, Auth above), `cnonce` = the connection's
+`X-Tunnelview-Client-Nonce` or `null`, and `sig` = base64 of the Ed25519 signature over
+`utf8(IDENT.CONTEXT + nonce + '|' + (cnonce || '') + '|' + hostId + '|' + viewerId)` with
+`IDENT.CONTEXT = 'Tunnelview-hello-v1|'` and `nonce` = `hello.auth.nonce`. Without a usable key,
+or when either ID is missing, `ident` is left out. A paired phone checks it with the pinned public
+key before it sends anything (`pairing.verifyIdent`); desktop viewers ignore it.
+
+**Pairing.** The main window starts an offer (§6 `pairing:start`): a 16-byte token valid for
+**2 min** (`PAIR.TTL_MS`), shown as a QR code of the link
+`tunnelview://pair/1/<base64url(JSON {v, id, n, a, p, k, t, x})>` (host StableNodeID, MagicDNS
+name or `''`, 1–2 Tailscale addresses this host listens on, port, base64url public key, base64url
+token, expiry in unix seconds; `pairing.encodeLink` / `parseLink`). One offer at a time; a new
+one replaces it. It is withdrawn when an incoming session starts, the host stops or hosting is
+switched off, this host's StableNodeID changes, the identity is reset, or the dialog closes
+(including when the main window's page goes without closing it: a renderer crash, a reload or
+navigation, a closed window; hiding the window to the tray keeps it). The phone connects with a client
+nonce, verifies `hello.ident` against the link's key and `id` and learns its own `viewerId` from
+it, then sends:
+
+| t | dir | fields |
+|---|-----|--------|
+| `pair` | V→H | `proof:b64` (pair proof, below), `device:{name, os, version}` (display only) |
+| `pair-result` | H→V | success: `ok:true, hostId, viewerId, peer:{name, login}` (how this host sees the phone, from whois), then close 1000. Any refusal: exactly `ok:false, reason:'failed'`, then close 4000 |
+
+- Pair proof = base64(HMAC-SHA256(token, utf8(`PAIR.CONTEXT + nonce + '|' + cnonce + '|' + hostId + '|' + viewerId`)))
+  with `PAIR.CONTEXT = 'Tunnelview-pair-v1|'`, the hello's nonce, this connection's client nonce and
+  the IDs signed in `hello.ident`. The host checks it in constant time.
+- `pair` is handled only in state `hello` on a connection that sent a client nonce; anywhere
+  else it is ignored like any unknown frame. It never admits anything: it is not a `request`, and
+  a paired phone still goes through `request`, the policy, the password and the prompt like any
+  viewer.
+- The policy is checked again when `pair` arrives, as for `request`: hosting must still be on
+  and `allowFrom` must still admit the node (the connection may have waited in `hello` since before
+  either changed).
+- The refusal is the same whether there is no offer, the offer expired, the peer is this node,
+  the policy refuses it, the offer names another host ID or the proof is wrong, so no other node
+  learns that someone is pairing. Only a wrong or malformed proof counts against the offer: after **3**
+  (`PAIR.MAX_FAILURES`) the offer is burned. Each one is reported to the main window with the
+  whois identity of the node that tried. A correct proof consumes the offer.
+- `pair-result`'s `reason` is not a `denied` reason; the `denied` row above lists those exactly.
+
 ## 5. Data channels (created by host, all ordered + reliable)
 
 ### `input` (V→H, JSON strings)
@@ -416,6 +481,12 @@ shapes that other modules depend on are listed here as well.
 | `session:connect` | `connect(opts)` | `{ok:true}` \| `{ok:true, existing:true}` (a viewer for that device was already open and was focused instead) \| `{ok:false, error, code}`; `code` adds `'AMBIGUOUS'` (several devices match the name; §7 `resolveTarget`) |
 | `settings:update` | `updateSettings(partial)` | while an **incoming session is active**, rejects changes to `acceptMode`, `allowFrom`, `allowList`, `autoAcceptSameUser`, `defaultPermissions` and `downloadDir` |
 | `settings:set-password`, `settings:choose-download-dir` | `setPassword`, `chooseDownloadDir` | refused while an incoming session is active |
+| `pairing:start` | `startPairing()` | → `{ok:true, offerId, link, qr:{size, bits}, expiresAt, fingerprint, host:{name, ips, port}}` \| `{ok:false, code:'SESSION_ACTIVE'\|'HOSTING_OFF'\|'TS_DOWN'\|'NO_IDENTITY'}`. `qr` = `qr.encode(link)` (§7); `fingerprint` and `host` are read back from the link itself (`host.name` is `''` when the link has no MagicDNS name; the dialog then shows the first address, as the phone does). Replaces a live offer |
+| `pairing:cancel` | `cancelPairing(offerId)` | → `{ok}`; withdraws that offer only (a stale dialog never cancels a newer one) |
+| `pairing:status` (main → renderer) | `onPairingStatus(cb)` | `{offerId, phase:'paired'\|'attempt-failed'\|'expired'\|'cancelled'\|'failed', reason?, peer?:{name, login, os}}`; `peer` (whois) only on `paired` / `attempt-failed` (`ipc.sanitizePairingEvent`) |
+| `security:identity` | `getIdentity()` | → `{available, fingerprint\|null, wasReset, error?}`; never key bytes |
+| `security:reset-identity` | `resetIdentity()` | new key (every paired phone must pair again), cancels a live offer → `{ok:true, …identity}` \| `{ok:false, code:'SESSION_ACTIVE'\|'WRITE_FAILED'\|'NO_IDENTITY', message?, …identity}`; **refused while an incoming session is active**, like the locked settings (`message` = the locked-settings sentence; `error` is always the identity's error code) |
+| `security:retry-identity` | `retryIdentity()` | loads `identity.json` again → identity info; cancels a live offer when the key changed. Never makes a new key once a key file existed in this run (both files gone → `error:'MISSING'`; Reset identity… makes one) |
 
 - `AppState.host.warning: string|null` is a non-fatal problem while listening, e.g. a Windows
   Firewall rule that blocks Tunnelview.
@@ -535,7 +606,7 @@ invalid binding makes `verifyProof` return false and `computeProof` reject with 
 
 ### `host-server.js`
 ```js
-const host = new HostServer({ tailscale, settings, auth, appVersion, osName });
+const host = new HostServer({ tailscale, settings, auth, appVersion, osName, identity });   // identity: identity.js or null
 await host.start(); await host.stop(); host.status() → {listening, addresses:[], port, error}
 host.on('request', req)      // req = {requestId, peer:{ip, hostname, os, user:{login,displayName}, stableId, tags, sameUser, isSelf}, viewer:{hostname,os,version}, respond({accept, permissions, trust}) }
                              //   peer.hostname = MagicDNS label (verified); viewer.hostname = self-reported, display only
@@ -553,6 +624,15 @@ host.sendSignal(msg)                       // panel renderer → viewer (only t=
 host.setPermissions(perms)                 // updates + notifies viewer (t=permissions)
 host.endSession(reason)
 host.activeSession                          // or null
+host.startPairing()                         // → {offerId, link, expiresAt, host:{id, name, ips, port}}; throws
+                                           //   Error.code SESSION_ACTIVE | HOSTING_OFF | TS_DOWN | NO_IDENTITY (§4 Signed hello…)
+host.cancelPairing(offerId = null, reason)  // null = whichever offer is live; → bool
+host.pairingOffer                           // {offerId, expiresAt, failures} | null (no token: it leaves
+                                           //   host-server only inside startPairing()'s link)
+host.on('pairing', evt)                     // {offerId, phase:'paired'|'attempt-failed', peer:{name, login, os}}
+                                           //   | {offerId, phase:'expired'} | {offerId, phase:'failed', reason:'too-many-attempts'}
+                                           //   | {offerId, phase:'cancelled', reason: cancelled|replaced|session|host-stopped|
+                                           //      host-id-changed|identity-reset}
 ```
 Admission policy (order, reasons and numbers in §4):
 - **Locks gate only password verification** (`hello.auth.passwordLocked`). The password
@@ -582,6 +662,37 @@ Admission policy (order, reasons and numbers in §4):
 - `hello.auth.autoAccept` mirrors the trusted / same-user predicates (never for self).
 - The proof binding is `{hostId: own stableId, viewerId: whois(remote IP).node.stableId}`.
 - A `tailscale whois` failure is answered with HTTP 503. 403 is reserved for policy refusals.
+- `hello.ident`, `pair` and the pairing offer (§4 Signed hello and pairing a phone) change
+  nothing above: admission, limits, proofs and trust work exactly as without them.
+
+### `identity.js`
+```js
+const identity = createIdentity({ file: path.join(userData, 'identity.json') });
+identity.load()                  // → {ok, error}; never throws. Load order: identity.json → identity.json.bak →
+                                 //   (neither file exists, and none did earlier in this run) generate + write
+                                 //   both → else unavailable
+identity.unavailable / .error    // error: CORRUPT | READ_FAILED | VERSION | WRITE_FAILED | MISSING | NOT_LOADED
+identity.fingerprint()           // 'TV-XXXX-XXXX-XXXX-XXXX-XXXX' | null
+identity.publicKeyB64url()       // the link's `k`
+identity.sign(bytes)             // Ed25519; host-server signs hello.ident with it
+identity.retry()                 // load() again (Settings › Security › Retry); MISSING instead of a new key
+                                 //   when both files went away after this run saw one
+identity.reset({sessionActive})  // new key, the old file kept as identity.json.old; refused during a session
+identity.wasReset                // true after a reset() in this run
+```
+Only Reset identity… makes a new key once a key file has existed: a damaged or missing file
+leaves the key unavailable (phones hear "can't prove its identity", not "pair again") until Retry
+or Reset identity…. No key file is ever deleted or written over: a damaged or differing
+`identity.json`, `.bak` or `.old` that has to make room is renamed to `<name>.corrupt-<ms>`
+(unusable) or `<name>.prev-<ms>` (another valid key) first. These files stay in userData until
+the user removes them. The private key never leaves this module.
+
+### `pairing.js` / `qr.js`
+`pairing.js` holds pure functions shared by host-server and the phone's test vectors
+(`identBytes`, `verifyIdent`, `pairProof`, `verifyPairProof`, `encodeLink`, `parseLink`,
+`fingerprint`, `validCnonce`). `qr.encode(text)` → `{size, bits}`: `size` modules per side
+without the quiet zone, `bits` = base64 of the modules row by row, MSB first, 1 = dark. The main
+window draws it on a `<canvas>`, black on white with a 4-module quiet zone.
 
 ### `viewer-client.js`
 ```js
@@ -761,6 +872,13 @@ internet (Windows Mark-of-the-Web, macOS quarantine).
   deleted. Until access is allowed, files sent to the Mac fail with `no-access`.
 
 ### `index.js` (lifecycle and wiring)
+- After `app` is ready and before HostServer is built, main loads `userData/identity.json`
+  (`identity.js`) and passes it to HostServer and ipc. Only the state and the fingerprint are
+  logged, never key bytes. HostServer's `'pairing'` events go to the main window as
+  `pairing:status` (`ipc.sanitizePairingEvent`); an incoming session start withdraws a live
+  pairing offer, and so does the main window's page going without the dialog's own cancel
+  (`render-process-gone`, a main-frame `did-start-navigation` such as a reload, `closed`).
+  Hiding the window to the tray does not: the page, the dialog and its live status stay.
 - While an **incoming** session is active, main holds
   `powerSaveBlocker.start('prevent-display-sleep')` and stops it when the session ends. Chromium's
   WebRTC wake lock only prevents app suspension, so without it the display would sleep (frozen
@@ -833,6 +951,15 @@ internet (Windows Mark-of-the-Web, macOS quarantine).
 `settings.get()` returns a deep copy; `settings.update(partial)` validates every field (unknown
 keys dropped, wrong types → keep old), persists, emits `'change'`. The renderer never sees
 `password` — only `passwordSet: bool`.
+
+This computer's identity key is **not** a setting: it lives in `userData/identity.json` (plus
+`identity.json.bak`, and `identity.json.old` after a reset), written atomically with mode 0600 by
+`identity.js` and read only by main. A damaged or replaced key file is kept beside them as
+`identity.json[.bak|.old].corrupt-<ms>` or `.prev-<ms>` (§7 `identity.js`). A `.prev-<ms>` file
+is a working private key, and a `.corrupt-<ms>` one may hold most of one. Tunnelview never deletes
+them; removing them only gives up the chance to restore one of those keys by hand. It is never stored in `settings.json` and never sent to a
+renderer: the main window gets only the fingerprint and, while a pairing dialog is open, the link
+(public key + that offer's token).
 
 ## 9. Quality presets (`src/renderer/shared/rtc.js`)
 

@@ -1,6 +1,6 @@
 /*
- * Main window — left column "This Desk": identity, addresses, host status, macOS permissions,
- * active incoming session and outgoing viewer sessions.
+ * Main window — left column "This Desk": identity, addresses, host status, pairing a phone,
+ * macOS permissions, active incoming session and outgoing viewer sessions.
  *
  * Re-renders only when its inputs actually change (main may push AppState every poll), and
  * restores keyboard focus across re-renders via data-fid markers.
@@ -8,9 +8,9 @@
 import { h, icon, osIcon, toast, formatDuration, initials, safeText } from '../shared/ui.js';
 import {
   api, store, subscribe, saveSettings, copyText, errMsg, ipv4Of, ipv6Of, refreshState, OS_NAMES,
-  securityLocked, canFocusViewer, focusViewer, activeTrustedCount,
+  securityLocked, canFocusViewer, focusViewer, activeTrustedCount, canPair, pairingBlocker,
 } from './store.js';
-import { openPasswordDialog, confirmDialog } from './dialogs.js';
+import { openPasswordDialog, confirmDialog, openPairingDialog } from './dialogs.js';
 
 const LOCKED_HINT = 'Locked while someone is connected to this computer';
 
@@ -66,6 +66,7 @@ export function mountDesk(root, { openSettings }) {
       state.permissions, state.input,
       settings.passwordSet, settings.acceptMode, settings.allowFrom, settings.allowList.length,
       settings.autoAcceptSameUser, activeTrustedCount(settings), settings.hostEnabled,
+      store.identity, canPair(),
     ]);
     if (sig === lastSig) return;
     lastSig = sig;
@@ -139,6 +140,8 @@ export function mountDesk(root, { openSettings }) {
         value: INPUT_REASON[state.input.reason] || (state.input.reason ? `Unavailable (${state.input.reason})` : 'Unavailable'),
         sub: 'Viewers can see this screen but not control it.',
       }) : null));
+
+    if (canPair()) parts.push(...pairBlock(state));
 
     // macOS permissions
     if (state.platform === 'macos' || (state.permissions.screen !== 'n/a' && state.permissions.screen !== '')) {
@@ -262,6 +265,26 @@ export function mountDesk(root, { openSettings }) {
     });
   }
 
+  /** "Pair a phone": the reason it is unavailable stays visible next to the disabled button. */
+  function pairBlock(state) {
+    const blocker = pairingBlocker(state, store.identity);
+    const btn = h('button', {
+      class: 'btn btn-sm', type: 'button', dataset: { fid: 'pair-phone' }, disabled: !!blocker,
+      'aria-describedby': 'pair-phone-hint',
+      onClick: async () => {
+        btn.disabled = true;
+        try { await openPairingDialog(); } finally { if (btn.isConnected) btn.disabled = !!pairingBlocker(store.state, store.identity); }
+      },
+    }, icon('phone'), 'Pair a phone');
+    return [
+      h('div', { class: 'label desk-section' }, 'Phone'),
+      h('div', { class: 'pair-block' },
+        btn,
+        h('div', { class: blocker ? 'status-sub pair-hint is-blocked' : 'status-sub pair-hint', id: 'pair-phone-hint' },
+          blocker ? blocker.text : 'Show a code your phone scans once, so it recognises this computer.')),
+    ];
+  }
+
   function permissionsBlock(perms) {
     const screen = SCREEN_STATUS[perms.screen] || SCREEN_STATUS.unknown;
     const acc = perms.accessibility === 'granted' ? SCREEN_STATUS.granted : ['dot-danger', 'Not allowed'];
@@ -381,5 +404,6 @@ export function mountDesk(root, { openSettings }) {
 
   subscribe('state', render);
   subscribe('settings', render);
+  subscribe('identity', render);
   render();
 }

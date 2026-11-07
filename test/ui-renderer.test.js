@@ -877,3 +877,528 @@ test('desk: the accept-mode summary counts only trusted entries that can auto-ac
   setSettings(null);
   root.remove();
 });
+
+/* ------------------------------------------------------------------ pairing a phone + identity */
+
+const FP = 'TV-ABCD-EFGH-JKLM-NPQR-ST23';
+const realQr = require('../src/main/qr');
+const PAIR_LINK = 'tunnelview://pair/1/eyJ2IjoxfQ';
+const NOTE = 'Pairing lets your phone recognise this computer. It does not let anyone in: the password, Who can connect and the approval prompt still decide.';
+
+function pairingOffer(extra = {}) {
+  return {
+    ok: true, offerId: `offer-${Math.random().toString(36).slice(2)}`, link: PAIR_LINK, qr: realQr.encode(PAIR_LINK),
+    expiresAt: Date.now() + 120000, fingerprint: FP, host: { name: 'studio-pc.tail1.ts.net', ips: ['100.64.0.2'], port: 47800 }, ...extra,
+  };
+}
+
+/** Preload pairing calls, recorded; status events are pushed with emitPairing(). */
+function installPairingApi({ start = () => pairingOffer() } = {}) {
+  const listeners = new Set();
+  api.startPairing = async () => { calls.push(['startPairing']); return start(); };
+  api.cancelPairing = async (id) => { calls.push(['cancelPairing', id]); return { ok: true }; };
+  api.onPairingStatus = (cb) => { listeners.add(cb); return () => listeners.delete(cb); };
+  api.copyText = async (t) => { calls.push(['copyText', t]); };
+  return { emit: (s) => { for (const cb of [...listeners]) cb(s); }, listeners };
+}
+function removePairingApi() {
+  for (const k of ['startPairing', 'cancelPairing', 'onPairingStatus', 'copyText', 'getIdentity', 'resetIdentity', 'retryIdentity']) delete api[k];
+}
+const topModal = () => document.body.querySelectorAll('.modal-layer').pop() || null;
+
+test('store: identity and pairing payloads are checked before any view uses them', async () => {
+  const { normIdentity, normPairingOffer, normPairingStatus, pairingBlocker, normState } = await load('main/store.js');
+  assert.deepEqual(normIdentity({ available: true, fingerprint: FP, wasReset: false }), { available: true, fingerprint: FP, wasReset: false, error: null });
+  assert.deepEqual(normIdentity({ available: false, fingerprint: null, wasReset: true, error: 'CORRUPT' }), { available: false, fingerprint: null, wasReset: true, error: 'CORRUPT' });
+  assert.equal(normIdentity({ available: true, fingerprint: 'TV-0000' }).available, false, 'a malformed fingerprint is not shown');
+  assert.equal(normIdentity({ available: false, error: '<b>x</b>' }).error, 'UNKNOWN');
+  assert.equal(normIdentity(null), null);
+
+  const offer = pairingOffer();
+  const n = normPairingOffer(offer);
+  assert.equal(n.offerId, offer.offerId);
+  assert.deepEqual(n.qr, offer.qr);
+  assert.equal(n.host.name, 'studio-pc.tail1.ts.net');
+  for (const bad of [{ ...offer, ok: false }, { ...offer, link: 'https://evil.example' }, { ...offer, qr: { size: 22, bits: offer.qr.bits } },
+    { ...offer, qr: { size: offer.qr.size, bits: 'AAAA' } }, { ...offer, fingerprint: 'nope' }, { ...offer, offerId: '' }]) {
+    assert.equal(normPairingOffer(bad), null);
+  }
+
+  assert.deepEqual(normPairingStatus({ offerId: 'o1', phase: 'attempt-failed', peer: { name: 'evil\u202Epc', login: 'm@x', os: 'beos' } }),
+    { offerId: 'o1', phase: 'attempt-failed', reason: '', peer: { name: 'evilpc', login: 'm@x', os: 'other' } });
+  assert.equal(normPairingStatus({ offerId: 'o1', phase: 'started' }), null);
+
+  const st = (patch) => normState({ ...clone(MAC_STATE), ...patch });
+  assert.equal(pairingBlocker(st({}), { available: true, fingerprint: FP }), null);
+  assert.equal(pairingBlocker(st({}), null), null, 'identity not known yet: main decides');
+  assert.equal(pairingBlocker(st({ host: { ...MAC_STATE.host, session: SESSION } })).code, 'SESSION_ACTIVE');
+  assert.equal(pairingBlocker(st({ host: { ...MAC_STATE.host, enabled: false } })).code, 'HOSTING_OFF');
+  assert.equal(pairingBlocker(st({ tailscale: { ...MAC_STATE.tailscale, state: 'stopped' } })).code, 'TS_DOWN');
+  assert.equal(pairingBlocker(st({ host: { ...MAC_STATE.host, listening: false } })).code, 'HOSTING_OFF');
+  assert.equal(pairingBlocker(st({}), { available: false, error: 'CORRUPT' }).code, 'NO_IDENTITY');
+});
+
+test('dialogs: the QR canvas shows every module, black on white, inside a 4-module quiet zone', async () => {
+  const { qrModules, drawQr } = await load('main/dialogs.js');
+  const { QrCode, QrSegment } = require('../src/main/vendor/qrcodegen');
+  const sym = QrCode.encodeSegments([QrSegment.makeBytes([...Buffer.from(PAIR_LINK, 'utf8')])], QrCode.Ecc.MEDIUM);
+  const qr = realQr.encode(PAIR_LINK);
+  const rows = qrModules(qr);
+  assert.equal(rows.length, sym.size);
+  for (let y = 0; y < sym.size; y++) for (let x = 0; x < sym.size; x++) assert.equal(rows[y][x], sym.getModule(x, y), `module ${x},${y}`);
+  assert.equal(qrModules({ size: qr.size, bits: 'AAAA' }), null);
+
+  const ops = [];
+  const ctx = { set fillStyle(v) { ops.push(['style', v]); }, fillRect: (...r) => ops.push(['rect', ...r]) };
+  const canvas = { getContext: (t) => (t === '2d' ? ctx : null), width: 0, height: 0 };
+  assert.equal(drawQr(canvas, qr), true);
+  const scale = canvas.width / (qr.size + 8);
+  assert.ok(Number.isInteger(scale) && scale >= 2, 'whole pixels per module');
+  assert.equal(canvas.width, canvas.height);
+  assert.deepEqual(ops.slice(0, 3), [['style', '#ffffff'], ['rect', 0, 0, canvas.width, canvas.height], ['style', '#000000']]);
+  const dark = ops.slice(3);
+  assert.equal(dark.length, rows.flat().filter(Boolean).length);
+  assert.ok(dark.every(([, x, y, w, hgt]) => x >= 4 * scale && y >= 4 * scale && w === scale && hgt === scale
+    && x + w <= (qr.size + 4) * scale && y + hgt <= (qr.size + 4) * scale), 'quiet zone stays light');
+  assert.equal(drawQr({}, qr), false, 'no canvas support → false (the link can still be copied)');
+});
+
+test('desk: "Pair a phone" needs a preload that can pair; disabled with the reason when it cannot', async () => {
+  const { setState, store } = await load('main/store.js');
+  const { mountDesk } = await load('main/desk.js');
+  setState(clone(MAC_STATE));
+  store.identity = null;
+  let root = mount();
+  mountDesk(root, { openSettings() {} });
+  assert.equal(root.querySelector('[data-fid="pair-phone"]'), null, 'older preload: no button');
+  root.remove();
+
+  const pa = installPairingApi();
+  root = mount();
+  mountDesk(root, { openSettings() {} });
+  const btn = () => root.querySelector('[data-fid="pair-phone"]');
+  const hint = () => root.querySelector('#pair-phone-hint').textContent;
+  assert.ok(btn() && !btn().disabled);
+  assert.match(btn().textContent, /Pair a phone/);
+  assert.equal(btn().getAttribute('aria-describedby'), 'pair-phone-hint');
+
+  const cases = [
+    [{ host: { ...MAC_STATE.host, enabled: false } }, 'Turn on incoming connections to pair a phone.'],
+    [{ tailscale: { ...MAC_STATE.tailscale, state: 'needs-login' } }, 'Start Tailscale to pair a phone.'],
+    [{ host: { ...MAC_STATE.host, session: SESSION } }, 'Not available during a session.'],
+  ];
+  for (const [patch, text] of cases) {
+    setState({ ...clone(MAC_STATE), ...clone(patch) });
+    assert.equal(btn().disabled, true, text);
+    assert.equal(hint(), text);
+  }
+  setState(clone(MAC_STATE));
+  api.getIdentity = async () => ({ available: false, fingerprint: null, wasReset: false, error: 'CORRUPT' });
+  const { refreshIdentity } = await load('main/store.js');
+  await refreshIdentity();
+  assert.equal(btn().disabled, true);
+  assert.match(hint(), /can’t prove its identity to phones right now/);
+  api.getIdentity = async () => ({ available: true, fingerprint: FP, wasReset: false });
+  await refreshIdentity();
+  assert.equal(btn().disabled, false);
+
+  calls.length = 0;
+  btn().click();
+  await sleep(5);
+  assert.deepEqual(calls[0], ['startPairing']);
+  const modal = topModal();
+  assert.ok(modal && modal.querySelector('.modal-pair'), 'the pairing dialog opened');
+  byText(modal, 'Close').click();
+  await sleep(5);
+  assert.equal(pa.listeners.size, 0);
+  store.identity = null;
+  removePairingApi();
+  root.remove();
+});
+
+test('pairing dialog: QR, name, ID, countdown and the note; live attempts; closing withdraws the offer', async () => {
+  const { openPairingDialog } = await load('main/dialogs.js');
+  const offer = pairingOffer();
+  const pa = installPairingApi({ start: () => offer });
+  calls.length = 0;
+  const done = openPairingDialog();
+  await sleep(5);
+  const modal = topModal();
+  const card = modal.querySelector('.modal-pair');
+  assert.ok(card);
+  assert.equal(card.getAttribute('role'), 'dialog');
+  const text = () => card.textContent;
+  assert.match(text(), /Scan with Tunnelview on your phone/);
+  assert.ok(text().includes(NOTE), 'the note, word for word');
+  assert.ok(text().includes('studio-pc.tail1.ts.net'));
+  assert.ok(text().includes(FP));
+  const canvas = card.querySelector('canvas');
+  assert.equal(canvas.getAttribute('role'), 'img');
+  assert.ok(canvas.getAttribute('aria-label'));
+  const timer = card.querySelector('[role="timer"]');
+  assert.match(timer.textContent, /^(2:00|1:59)$/);
+  assert.ok(card.querySelector('[role="status"]'));
+  assert.equal(byText(card, 'New code').hidden, true);
+
+  byText(card, 'Copy pairing link').click();
+  await sleep(5);
+  assert.deepEqual(calls.find((c) => c[0] === 'copyText'), ['copyText', PAIR_LINK]);
+
+  pa.emit({ offerId: 'some-other-offer', phase: 'attempt-failed', peer: { name: 'ignored', login: '', os: 'ios' } });
+  pa.emit({ offerId: offer.offerId, phase: 'attempt-failed', peer: { name: 'mallory-phone', login: 'mallory@example.com', os: 'android' } });
+  const failures = card.querySelector('.pair-failures');
+  assert.equal(failures.children.length, 1);
+  assert.equal(failures.children[0].textContent, 'mallory-phone · mallory@example.com · Android');
+  assert.match(card.querySelector('[role="status"]').textContent, /A pairing attempt failed/);
+  assert.doesNotMatch(text(), /ignored/);
+
+  pa.emit({ offerId: offer.offerId, phase: 'failed', reason: 'too-many-attempts' });
+  assert.match(card.querySelector('[role="status"]').textContent, /blocked after 3 wrong attempts/);
+  assert.equal(byText(card, 'New code').hidden, false);
+  assert.equal(byText(card, 'Copy pairing link').disabled, true);
+
+  const next = pairingOffer();
+  api.startPairing = async () => { calls.push(['startPairing']); return next; };
+  byText(card, 'New code').click();
+  await sleep(5);
+  assert.equal(card.querySelector('.pair-failures').children.length, 0, 'a new code starts a new list');
+  assert.equal(byText(card, 'New code').hidden, true);
+  pa.emit({ offerId: offer.offerId, phase: 'cancelled', reason: 'replaced' });
+  assert.match(card.querySelector('[role="status"]').textContent, /Waiting for your phone/, 'the replaced offer is old news');
+
+  calls.length = 0;
+  byText(card, 'Close').click();
+  assert.deepEqual(await done, { paired: false });
+  assert.deepEqual(calls, [['cancelPairing', next.offerId]], 'only the offer this dialog shows');
+  assert.equal(pa.listeners.size, 0, 'unsubscribed');
+  removePairingApi();
+});
+
+test('pairing dialog: refusals are explained; a paired phone ends it with Done and no cancel', async () => {
+  const { openPairingDialog } = await load('main/dialogs.js');
+  installPairingApi({ start: () => ({ ok: false, code: 'TS_DOWN' }) });
+  const before = document.body.querySelectorAll('.modal-layer').length;
+  assert.deepEqual(await openPairingDialog(), { paired: false });
+  assert.equal(document.body.querySelectorAll('.modal-layer').length, before, 'no dialog');
+  assert.ok(toasts().includes('Start Tailscale to pair a phone.'), toasts().join(' | '));
+
+  const offer = pairingOffer();
+  const pa = installPairingApi({ start: () => offer });
+  const done = openPairingDialog();
+  await sleep(5);
+  const card = topModal().querySelector('.modal-pair');
+  pa.emit({ offerId: offer.offerId, phase: 'paired', peer: { name: 'pixel-8', login: 'alice@example.com', os: 'android' } });
+  assert.match(card.querySelector('[role="status"]').textContent, /Paired with pixel-8 · alice@example.com/);
+  assert.ok(byText(card, 'Done'));
+  assert.equal(byText(card, 'Copy pairing link').hidden, true);
+  calls.length = 0;
+  byText(card, 'Done').click();
+  assert.deepEqual(await done, { paired: true });
+  assert.deepEqual(calls, [], 'nothing left to cancel');
+  removePairingApi();
+});
+
+/** Canvas elements get a 2d context that records what is painted (the fake DOM has none). */
+function recordingCanvas() {
+  const ops = [];
+  FakeElement.prototype.getContext = function getContext(type) {
+    return type === '2d' ? { set fillStyle(v) { ops.push(['style', v]); }, fillRect: (...r) => ops.push(['rect', ...r]) } : null;
+  };
+  return { ops, restore: () => { delete FakeElement.prototype.getContext; } };
+}
+
+/** matchMedia whose 'change' listeners the test fires itself (once, as the dialog asks). */
+function fakeMatchMedia() {
+  const mqs = [];
+  globalThis.matchMedia = (q) => {
+    const fns = new Set();
+    const mq = { q, fns, addEventListener: (_t, fn) => fns.add(fn), removeEventListener: (_t, fn) => fns.delete(fn) };
+    mqs.push(mq);
+    return mq;
+  };
+  const fire = () => { const mq = mqs.at(-1); const fns = [...mq.fns]; mq.fns.clear(); for (const fn of fns) fn(); };
+  return { mqs, fire, restore: () => { delete globalThis.matchMedia; } };
+}
+
+test('dialogs: drawQr gives every module the same whole number of device pixels and sizes the canvas to match', async () => {
+  const { drawQr } = await load('main/dialogs.js');
+  const pairing = require('../src/main/pairing');
+  // A typical link (version 13) and the worst case D6 allows for (version 21).
+  const linkOf = (n) => pairing.encodeLink({
+    v: 1, id: 'nHOSTabc123CNTRL', n, a: ['100.101.102.103', 'fd7a:115c:a1e0::1234:5678'], p: 47800,
+    k: Buffer.alloc(32, 1).toString('base64url'), t: Buffer.alloc(16, 2).toString('base64url'), x: 1762520000,
+  });
+  const typical = realQr.encode(linkOf('office-pc.tail1234.ts.net'));
+  const worst = realQr.encode(linkOf(`${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(57)}`));
+  assert.ok(worst.size > typical.size);
+  try {
+    for (const qr of [typical, worst]) {
+      for (const dpr of [1, 1.25, 1.5, 2, 3]) {
+        globalThis.devicePixelRatio = dpr;
+        const canvas = { getContext: () => ({ set fillStyle(_v) {}, fillRect() {} }), width: 0, height: 0, style: {} };
+        assert.equal(drawQr(canvas, qr), true);
+        const total = qr.size + 8;
+        const perModule = canvas.width / total;
+        assert.ok(Number.isInteger(perModule) && perModule >= 2, `${qr.size}@${dpr}: ${perModule} device px per module`);
+        const css = parseFloat(canvas.style.width);
+        assert.equal(canvas.style.width, `${css}px`);
+        assert.equal(canvas.style.height, canvas.style.width);
+        assert.ok(Math.abs(css * dpr - canvas.width) < 1e-9, `${qr.size}@${dpr}: shown 1:1 on device pixels, not rescaled`);
+        assert.ok(css <= 232 || perModule === 2, `${qr.size}@${dpr}: ${css}px fits the dialog's box`);
+      }
+    }
+  } finally {
+    delete globalThis.devicePixelRatio;
+  }
+});
+
+test('pairing dialog: an ended or used code is cleared, not faded; New code draws again; a new pixel ratio redraws a live one', async () => {
+  const { openPairingDialog } = await load('main/dialogs.js');
+  const rec = recordingCanvas();
+  const media = fakeMatchMedia();
+  const offer = pairingOffer();
+  const pa = installPairingApi({ start: () => offer });
+  try {
+    const done = openPairingDialog();
+    await sleep(5);
+    const card = topModal().querySelector('.modal-pair');
+    const canvas = card.querySelector('canvas');
+    const label = card.querySelector('.pair-qr-ended');
+    const total = offer.qr.size + 8;
+    const painted = () => rec.ops.filter(([k, v]) => k === 'style' && v === '#000000').length;
+    assert.ok(painted() > 0, 'the code is drawn');
+    assert.equal(canvas.width % total, 0);
+    assert.equal(canvas.style.width, `${canvas.width}px`, 'devicePixelRatio 1');
+    assert.equal(label.hidden, true);
+
+    // The window moves to a 200 % monitor: drawn again for it, and the new ratio is watched.
+    assert.match(media.mqs.at(-1).q, /\(resolution: 1dppx\)/);
+    globalThis.devicePixelRatio = 2;
+    rec.ops.length = 0;
+    media.fire();
+    assert.ok(painted() > 0);
+    assert.equal(canvas.width / total, Math.floor((232 * 2) / total));
+    assert.equal(canvas.style.width, `${canvas.width / 2}px`);
+    assert.match(media.mqs.at(-1).q, /\(resolution: 2dppx\)/);
+
+    // Expired: painted over in white (a faded symbol still scans), and the box says why.
+    rec.ops.length = 0;
+    pa.emit({ offerId: offer.offerId, phase: 'expired' });
+    assert.deepEqual(rec.ops, [['style', '#ffffff'], ['rect', 0, 0, canvas.width, canvas.height]]);
+    assert.equal(label.hidden, false);
+    assert.equal(label.textContent, 'Code ended');
+    assert.match(canvas.getAttribute('aria-label'), /code ended/);
+    rec.ops.length = 0;
+    media.fire();
+    assert.deepEqual(rec.ops, [], 'a new pixel ratio does not bring a dead code back');
+
+    const next = pairingOffer();
+    api.startPairing = async () => next;
+    byText(card, 'New code').click();
+    await sleep(5);
+    assert.ok(painted() > 0, 'the new code is drawn');
+    assert.equal(label.hidden, true);
+    assert.match(canvas.getAttribute('aria-label'), /Scan it with Tunnelview/);
+
+    // Used by the phone: cleared as well.
+    rec.ops.length = 0;
+    pa.emit({ offerId: next.offerId, phase: 'paired', peer: { name: 'pixel-8', login: 'alice@example.com', os: 'android' } });
+    assert.deepEqual(rec.ops, [['style', '#ffffff'], ['rect', 0, 0, canvas.width, canvas.height]]);
+    assert.equal(label.textContent, 'Paired');
+    byText(card, 'Done').click();
+    assert.deepEqual(await done, { paired: true });
+    assert.equal(media.mqs.at(-1).fns.size, 0, 'no longer watching the pixel ratio');
+  } finally {
+    rec.restore();
+    media.restore();
+    delete globalThis.devicePixelRatio;
+    removePairingApi();
+  }
+});
+
+test('pairing dialog: a refused New code keeps Copy disabled; keyboard focus moves with the buttons that are shown', async () => {
+  const { openPairingDialog } = await load('main/dialogs.js');
+  await sleep(200); // earlier dialogs hand the focus back 160 ms after they close
+  const offer = pairingOffer();
+  const pa = installPairingApi({ start: () => offer });
+  const done = openPairingDialog();
+  await sleep(5);
+  const card = topModal().querySelector('.modal-pair');
+  const copy = byText(card, 'Copy pairing link');
+  const renew = byText(card, 'New code');
+  const close = byText(card, 'Close');
+  const status = () => card.querySelector('[role="status"]').textContent;
+
+  copy.focus();
+  pa.emit({ offerId: offer.offerId, phase: 'failed', reason: 'too-many-attempts' });
+  assert.equal(copy.disabled, true);
+  assert.equal(document.activeElement, renew, 'from the now disabled Copy to New code, not to <body>');
+
+  // Refused (someone connected meanwhile): the code on screen is still the dead one.
+  api.startPairing = async () => ({ ok: false, code: 'SESSION_ACTIVE' });
+  renew.click();
+  await sleep(5);
+  assert.equal(status(), 'Not available while someone is connected to this computer.');
+  assert.equal(copy.disabled, true, 'Copy stays disabled');
+  assert.equal(renew.disabled, false);
+  assert.equal(close.disabled, false);
+  assert.equal(document.activeElement, renew);
+
+  // Accepted: New code is hidden again, so the focus goes to Copy.
+  const next = pairingOffer();
+  api.startPairing = async () => next;
+  renew.click();
+  await sleep(5);
+  assert.equal(renew.hidden, true);
+  assert.equal(copy.disabled, false);
+  assert.equal(document.activeElement, copy);
+
+  // Focus somewhere else in the dialog is left where it is.
+  close.focus();
+  pa.emit({ offerId: next.offerId, phase: 'cancelled', reason: 'session' });
+  assert.equal(document.activeElement, close);
+  close.click();
+  assert.deepEqual(await done, { paired: false });
+  removePairingApi();
+});
+
+test('pairing dialog: the countdown running out and an expiry pushed by main both end the code', async () => {
+  const { openPairingDialog } = await load('main/dialogs.js');
+  const ended = (card) => {
+    assert.match(card.querySelector('[role="status"]').textContent, /^This code expired\. Make a new one to pair\.$/);
+    assert.equal(card.querySelector('.pair-expiry').hidden, true);
+    assert.equal(byText(card, 'New code').hidden, false);
+    assert.equal(byText(card, 'Copy pairing link').disabled, true);
+  };
+
+  // The dialog's own countdown: the offer's time is up at the first tick.
+  installPairingApi({ start: () => pairingOffer({ expiresAt: Date.now() - 1 }) });
+  let done = openPairingDialog();
+  await sleep(5);
+  let card = topModal().querySelector('.modal-pair');
+  assert.equal(card.querySelector('[role="timer"]').textContent, '0:00');
+  ended(card);
+  byText(card, 'Close').click();
+  await done;
+
+  // main's 'expired' (host-server's timer) for a code the dialog still counts down.
+  const offer = pairingOffer();
+  const pa = installPairingApi({ start: () => offer });
+  done = openPairingDialog();
+  await sleep(5);
+  card = topModal().querySelector('.modal-pair');
+  assert.match(card.querySelector('[role="status"]').textContent, /Waiting for your phone/);
+  pa.emit({ offerId: offer.offerId, phase: 'expired' });
+  ended(card);
+  byText(card, 'Close').click();
+  assert.deepEqual(await done, { paired: false });
+  removePairingApi();
+});
+
+test('app.css: the pairing dialog scrolls its body, so Close / New code stay in view in a small window', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'main', 'app.css'), 'utf8');
+  const theme = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'shared', 'theme.css'), 'utf8');
+  const rule = (sel) => {
+    const m = new RegExp(`^${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'm').exec(css);
+    assert.ok(m, `no ${sel} rule`);
+    return m[1].replace(/\s+/g, ' ');
+  };
+  // The card is a flex column capped at the window height; the body is the part that gives way.
+  assert.match(rule('.modal'), /max-height: calc\(100vh - 48px\)/);
+  assert.match(rule('.modal'), /display: flex; flex-direction: column/);
+  const body = rule('.modal-pair .modal-body');
+  for (const decl of ['flex: 1 1 auto', 'min-height: 0', 'overflow-y: auto']) assert.ok(body.includes(decl), `${decl} in .modal-pair .modal-body`);
+  // An ended code is cleared in script and labelled; the label hides with [hidden].
+  assert.doesNotMatch(css, /\.pair-qr\.is-ended\s*\{[^}]*opacity/);
+  assert.match(rule('.pair-qr-ended'), /position: absolute; inset: 0;/);
+  assert.match(theme, /\[hidden\]\s*\{\s*display:\s*none\s*!important;?\s*\}/);
+});
+
+test('pairing dialog: a link without a MagicDNS name shows the address the phone will show', async () => {
+  const { openPairingDialog } = await load('main/dialogs.js');
+  installPairingApi({ start: () => pairingOffer({ host: { name: '', ips: ['100.64.0.2', 'fd7a:115c:a1e0::2'], port: 47800 } }) });
+  const done = openPairingDialog();
+  await sleep(5);
+  const card = topModal().querySelector('.modal-pair');
+  const facts = card.querySelector('.pair-facts').textContent;
+  assert.ok(facts.includes('Computer100.64.0.2'), facts);
+  byText(card, 'Close').click();
+  await done;
+  removePairingApi();
+});
+
+test('settings: this computer\'s ID, the unavailable banner with Retry, Reset identity… (confirmed, locked in a session)', async () => {
+  const { setState, setSettings, store, refreshIdentity } = await load('main/store.js');
+  const { createSettingsView } = await load('main/settings-view.js');
+  setState(clone(MAC_STATE));
+  setSettings({});
+  store.identity = null;
+  let view = createSettingsView();
+  view.open('security');
+  let sheet = document.body.querySelectorAll('.sheet-layer').pop();
+  assert.equal(sheet.querySelector('.id-row').hidden, true, 'older preload: no identity row');
+  view.close();
+
+  let identity = { available: true, fingerprint: FP, wasReset: false };
+  api.getIdentity = async () => { calls.push(['getIdentity']); return identity; };
+  api.retryIdentity = async () => { calls.push(['retryIdentity']); return identity; };
+  api.resetIdentity = async () => {
+    calls.push(['resetIdentity']);
+    identity = { available: true, fingerprint: 'TV-ZZZZ-YYYY-XXXX-WWWW-VVVV', wasReset: true };
+    return { ok: true, ...identity };
+  };
+  await refreshIdentity();
+  view = createSettingsView();
+  view.open('security');
+  sheet = document.body.querySelectorAll('.sheet-layer').pop();
+  const row = sheet.querySelector('.id-row');
+  assert.equal(row.hidden, false);
+  assert.ok(row.textContent.includes(`This computer's ID: ${FP}`), row.textContent);
+  const banner = row.querySelector('.id-banner');
+  assert.equal(banner.hidden, true);
+
+  // Unavailable → banner with Retry (and Reset identity…).
+  identity = { available: false, fingerprint: null, wasReset: false, error: 'CORRUPT' };
+  await refreshIdentity();
+  assert.equal(banner.hidden, false);
+  assert.match(banner.textContent, /This computer can't prove its identity to phones right now/);
+  assert.match(banner.textContent, /The identity file is damaged\./);
+  assert.ok(byText(banner, 'Reset identity…'));
+  identity = { available: true, fingerprint: FP, wasReset: false };
+  calls.length = 0;
+  byText(banner, 'Retry').click();
+  await sleep(5);
+  assert.deepEqual(calls, [['retryIdentity']]);
+  assert.equal(banner.hidden, true);
+
+  // Locked while someone is connected; Retry is not a security change.
+  setState({ ...clone(MAC_STATE), host: { ...MAC_STATE.host, session: SESSION } });
+  const resetBtns = row.querySelectorAll('button').filter((b) => b.textContent === 'Reset identity…');
+  assert.equal(resetBtns.length, 2);
+  assert.ok(resetBtns.every((b) => b.disabled && b.hasAttribute('data-lock')));
+  setState(clone(MAC_STATE));
+  const resetBtn = resetBtns.find((b) => !b.closest('.id-banner'));
+  assert.equal(resetBtn.disabled, false);
+
+  // Reset asks first; Cancel changes nothing.
+  calls.length = 0;
+  resetBtn.click();
+  await sleep(5);
+  byText(topModal(), 'Cancel').click();
+  await sleep(5);
+  assert.deepEqual(calls, []);
+  resetBtn.click();
+  await sleep(5);
+  const confirmModal = topModal();
+  assert.match(confirmModal.textContent, /Phones paired with it will stop connecting until you pair them again/);
+  byText(confirmModal, 'Reset identity').click();
+  await sleep(5);
+  assert.deepEqual(calls, [['resetIdentity']]);
+  assert.ok(row.textContent.includes("This computer's ID: TV-ZZZZ-YYYY-XXXX-WWWW-VVVV"));
+  assert.ok(row.textContent.includes('Phones paired with this computer must pair again'));
+  view.close();
+  store.identity = null;
+  removePairingApi();
+});
