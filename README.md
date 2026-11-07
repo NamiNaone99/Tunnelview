@@ -595,8 +595,8 @@ npm run dist:mac -- --arm64 --x64         # on a Mac → dist/Tunnelview-<v>-mac
 - **koffi native binaries are per-architecture.** npm installs only the one for the machine you
   build on. To package the other architecture, add its binary first. This is the same step CI runs:
   ```sh
-  npm install --no-save --force @koromix/koffi-win32-arm64@$(node -p "require('koffi/package.json').version")   # Windows arm64
-  npm install --no-save --force @koromix/koffi-darwin-x64@$(node -p "require('koffi/package.json').version")    # Intel build on Apple Silicon
+  npm install --no-save --force @koromix/koffi-win32-arm64@$(node -p "require('./node_modules/koffi/package.json').version")   # Windows arm64
+  npm install --no-save --force @koromix/koffi-darwin-x64@$(node -p "require('./node_modules/koffi/package.json').version")    # Intel build on Apple Silicon
   ```
 - **Signing:** macOS builds are ad-hoc signed (`mac.identity: "-"` in `electron-builder.yml`) with
   the hardened runtime and `build/entitlements.mac.plist`. To ship with a Developer ID and

@@ -51,7 +51,7 @@ jobs:
       # installer needs @koromix/koffi-win32-arm64 as well, pinned to the exact koffi version.
       - name: Add koffi binary for Windows arm64
         run: |
-          KOFFI_VERSION="$(node -p "require('koffi/package.json').version")"
+          KOFFI_VERSION="$(node -p "require('./node_modules/koffi/package.json').version")"
           npm install --no-save --force "@koromix/koffi-win32-arm64@${KOFFI_VERSION}"
 
       # Equivalent to `npm test`; the glob form is used because Node 22 treats a bare directory
@@ -116,7 +116,7 @@ jobs:
       # it anyway so the Intel build also carries its koffi binary.
       - name: Add koffi binary for macOS x64
         run: |
-          KOFFI_VERSION="$(node -p "require('koffi/package.json').version")"
+          KOFFI_VERSION="$(node -p "require('./node_modules/koffi/package.json').version")"
           npm install --no-save --force "@koromix/koffi-darwin-x64@${KOFFI_VERSION}"
 
       - name: Unit tests
