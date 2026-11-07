@@ -31,6 +31,9 @@ const MIN_SDK = 24;
 const TARGET_SDK = 36;
 
 // Exactly these permissions (PLAN §6.10). Libraries' extras are removed in AndroidManifest.xml.
+// CHANGE_NETWORK_STATE is deliberately absent: ConnectivityManager.bindProcessToNetwork (the
+// TailnetPlugin process binding) needs no permission, and without it libwebrtc cannot ask Android to
+// bring up mobile data (requestNetwork).
 const PERMISSIONS = [
   'android.permission.INTERNET',
   'android.permission.ACCESS_NETWORK_STATE',

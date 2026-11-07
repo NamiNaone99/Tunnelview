@@ -6,6 +6,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterFragmentActivity
+import io.flutter.embedding.engine.FlutterEngine
 
 /**
  * The only activity. FlutterFragmentActivity, because local_auth's BiometricPrompt needs a
@@ -17,6 +18,8 @@ import io.flutter.embedding.android.FlutterFragmentActivity
  * - setRecentsScreenshotEnabled(false) on API 33+;
  * - filterTouchesWhenObscured: touches are dropped while another app's window covers this one
  *   (tapjacking), on the whole view tree including the FlutterView.
+ *
+ * In-app native code: [TailnetPlugin] (Tailscale detection and process binding).
  */
 class MainActivity : FlutterFragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -26,6 +29,11 @@ class MainActivity : FlutterFragmentActivity() {
             setRecentsScreenshotEnabled(false)
         }
         filterTouchesWhenObscured(window.decorView)
+    }
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        flutterEngine.plugins.add(TailnetPlugin())
     }
 
     override fun onPostResume() {

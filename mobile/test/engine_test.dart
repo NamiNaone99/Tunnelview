@@ -64,4 +64,33 @@ void main() {
     expect(RtcEngine.ready, isFalse);
     expect(RtcEngine.ensureReady, throwsStateError);
   });
+
+  group('peer connections', () {
+    test('no ICE servers (no STUN or TURN), UDP only, unified plan', () {
+      final config = peerConnectionConfig();
+      expect(config['iceServers'], isEmpty);
+      expect(config['tcpCandidatePolicy'], 'disabled');
+      expect(config['sdpSemantics'], 'unified-plan');
+      expect(config['bundlePolicy'], 'max-bundle');
+      expect(() => assertNoIceServers(config), returnsNormally);
+    });
+
+    test('a config with ICE servers is refused', () {
+      expect(
+        () => assertNoIceServers({
+          'iceServers': [
+            {'urls': 'stun:stun.example.org'},
+          ],
+        }),
+        throwsStateError,
+      );
+      expect(() => assertNoIceServers({}), throwsStateError);
+    });
+
+    test('the self-test does not run before WebRTC is ready', () async {
+      final outcome = await const EngineIceGatherer().gather();
+      expect(outcome.error, 'webrtc-unavailable');
+      expect(outcome.candidates, isEmpty);
+    });
+  });
 }

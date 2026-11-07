@@ -74,6 +74,18 @@ jobs:
       - name: pubspec.lock allow-list
         run: node scripts/check-apk.js lock mobile/pubspec.lock mobile/pubspec-allow.txt
 
+      # CRITIQUE N8: fakes and test policies live under mobile/test only. And the app must never
+      # use Android's VPN-provider API: that would replace Tailscale as the phone's VPN.
+      - name: No test-only code in lib/, no VPN-provider API
+        run: |
+          if grep -rnE 'package:flutter_test|package:test/|test/support|forTesting' mobile/lib; then
+            echo "::error::test-only code or imports under mobile/lib (listed above)"; exit 1
+          fi
+          if grep -rn 'VpnService' mobile/lib mobile/android/app/src; then
+            echo "::error::Tunnelview must never use VpnService (listed above)"; exit 1
+          fi
+          echo "ok"
+
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -81,23 +93,38 @@ jobs:
           cache: true
 
       - name: pub get (lockfile enforced)
+        id: pubget
         working-directory: mobile
         run: flutter pub get --enforce-lockfile
 
+      # On failure the formatted diff is printed and uploaded (dart-format-patch); analyze and the
+      # tests still run, so one run reports everything.
       - name: dart format
         working-directory: mobile
         run: |
           if ! dart format --output=none --set-exit-if-changed lib test; then
             dart format lib test >/dev/null
+            git diff > "$RUNNER_TEMP/dart-format.patch"
             git diff
-            echo "::error::run dart format (diff above)"; exit 1
+            echo "::error::run dart format (diff above; also in the dart-format-patch artifact)"; exit 1
           fi
 
+      - name: Upload the dart format patch
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dart-format-patch
+          path: ${{ runner.temp }}/dart-format.patch
+          if-no-files-found: ignore
+          retention-days: 3
+
       - name: flutter analyze
+        if: ${{ !cancelled() && steps.pubget.outcome == 'success' }}
         working-directory: mobile
         run: flutter analyze
 
       - name: flutter test
+        if: ${{ !cancelled() && steps.pubget.outcome == 'success' }}
         working-directory: mobile
         run: flutter test
 

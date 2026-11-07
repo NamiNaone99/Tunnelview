@@ -8,9 +8,12 @@
 // candidates on Wi-Fi and mobile data, outside the Tailscale tunnel. So
 // main() awaits [RtcEngine.initialize] before runApp, and everything else
 // goes through this file and checks [RtcEngine.ready] first.
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+
+import 'self_test.dart';
 
 /// Platforms with their own network mask rules.
 enum RtcPlatform { android, ios, unsupported }
@@ -120,4 +123,104 @@ class RtcEngine {
       return _result = RtcInitResult.failed('WebRTC initialisation failed: $e');
     }
   }
+}
+
+/// Settings for every peer connection. No ICE servers: no STUN or TURN, so
+/// nothing is ever sent to a third party and only host candidates exist.
+Map<String, dynamic> peerConnectionConfig() => {
+  'iceServers': <Map<String, dynamic>>[],
+  'bundlePolicy': 'max-bundle',
+  'rtcpMuxPolicy': 'require',
+  'sdpSemantics': 'unified-plan',
+  'tcpCandidatePolicy': 'disabled',
+};
+
+/// Throws unless [config] has an empty `iceServers` list.
+void assertNoIceServers(Map<String, dynamic> config) {
+  final servers = config['iceServers'];
+  if (servers is! List || servers.isNotEmpty) {
+    throw StateError('peer connections must have no ICE servers');
+  }
+}
+
+/// The real [LocalIceGatherer]: a local peer connection with one data
+/// channel and an offer, gathered until complete or the timeout, then closed.
+/// The offer and the candidates never leave this function's result.
+class EngineIceGatherer implements LocalIceGatherer {
+  const EngineIceGatherer();
+
+  @override
+  Future<GatherOutcome> gather({
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    final watch = Stopwatch()..start();
+    if (!RtcEngine.ready) {
+      return GatherOutcome.failed('webrtc-unavailable', watch.elapsed);
+    }
+    RTCPeerConnection? pc;
+    final lines = <String>[];
+    final complete = Completer<void>();
+    try {
+      final config = peerConnectionConfig();
+      assertNoIceServers(config);
+      pc = await createPeerConnection(config);
+      pc.onIceCandidate = (c) {
+        final line = c.candidate;
+        if (line != null && line.isNotEmpty) lines.add(line);
+      };
+      pc.onIceGatheringState = (state) {
+        if (state == RTCIceGatheringState.RTCIceGatheringStateComplete &&
+            !complete.isCompleted) {
+          complete.complete();
+        }
+      };
+      await pc.createDataChannel('self-test', RTCDataChannelInit());
+      final offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      var completed = true;
+      try {
+        await complete.future.timeout(timeout);
+      } on TimeoutException {
+        completed = false;
+      }
+      final local = await pc.getLocalDescription();
+      final sdpLines = (local?.sdp ?? '')
+          .split(RegExp(r'\r?\n'))
+          .where((l) => l.startsWith('a=candidate:'));
+      final stats = await pc.getStats();
+      return GatherOutcome(
+        candidates: mergeCandidates(
+          [...lines, ...sdpLines],
+          [
+            for (final r in stats)
+              if (r.type == 'local-candidate') r.values,
+          ],
+        ),
+        completed: completed,
+        elapsed: watch.elapsed,
+      );
+    } catch (e) {
+      return GatherOutcome.failed(_describeError(e), watch.elapsed);
+    } finally {
+      final p = pc;
+      if (p != null) {
+        try {
+          await p.close();
+        } catch (_) {
+          // Closing a connection that already failed must not hide the result.
+        }
+        try {
+          await p.dispose();
+        } catch (_) {
+          // As above.
+        }
+      }
+    }
+  }
+}
+
+/// flutter_webrtc throws plain strings; keep them short.
+String _describeError(Object e) {
+  final s = e is String ? e : e.runtimeType.toString();
+  return s.length > 160 ? '${s.substring(0, 160)}…' : s;
 }
