@@ -37,10 +37,7 @@ List<String> networkIgnoreMaskFor(RtcPlatform platform) {
   ];
   switch (platform) {
     case RtcPlatform.android:
-      return [
-        for (final t in common) t.name,
-        AdapterType.adapterTypeAny.name,
-      ];
+      return [for (final t in common) t.name, AdapterType.adapterTypeAny.name];
     case RtcPlatform.ios:
       return [for (final t in common) t.name];
     case RtcPlatform.unsupported:
