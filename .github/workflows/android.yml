@@ -2,12 +2,20 @@
 # job that holds the key but runs no third-party build code (no pub, Gradle or npm).
 #   - test:         format, analyze, unit tests, repo gates.
 #   - build:        universal release APK (R8, not debuggable, unsigned) + gates
-#                   (scripts/check-apk.js). No secrets, no environment, no caches.
+#                   (scripts/check-apk.js). No secrets, no environment, no caches. The Flutter
+#                   SDK is a hash-pinned archive.
 #   - sign-dev:     branch pushes in this repository: dev key (repository secrets),
 #                   io.github.naminaone99.tunnelview.dev, "Tunnelview Dev".
 #   - sign-release: tags v* only (via workflow_call from build.yml later), environment
 #                   "release" (owner approval): release key.
 #   - ios-compile:  `flutter build ios --release --no-codesign`, a compile check only.
+#
+# The sign jobs sign only the APK the build job produced: they download the artifact by the ID
+# the build job reported and check the APK against the SHA-256 in the build job's outputs.
+# Other jobs in the run cannot change either value (an artifact can be replaced, a job output
+# cannot).
+#
+# Every action is pinned to a full commit SHA (the comment names its release tag).
 name: android
 
 on:
@@ -18,12 +26,14 @@ on:
     paths:
       - "mobile/**"
       - "scripts/check-apk.js"
+      - "test/check-apk.test.js"
       - "package.json"
       - ".github/workflows/android.yml"
   pull_request:
     paths:
       - "mobile/**"
       - "scripts/check-apk.js"
+      - "test/check-apk.test.js"
       - "package.json"
       - ".github/workflows/android.yml"
   workflow_call:
@@ -49,7 +59,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -74,6 +84,9 @@ jobs:
       - name: pubspec.lock allow-list
         run: node scripts/check-apk.js lock mobile/pubspec.lock mobile/pubspec-allow.txt
 
+      - name: APK gate unit tests (scripts/check-apk.js)
+        run: node --test test/check-apk.test.js
+
       # CRITIQUE N8: fakes and test policies live under mobile/test only. And the app must never
       # use Android's VPN-provider API: that would replace Tailscale as the phone's VPN.
       - name: No test-only code in lib/, no VPN-provider API
@@ -83,6 +96,18 @@ jobs:
           fi
           if grep -rn 'VpnService' mobile/lib mobile/android/app/src; then
             echo "::error::Tunnelview must never use VpnService (listed above)"; exit 1
+          fi
+          echo "ok"
+
+      # PLAN §6.10: no logging of IPs, tokens, nonces or proofs. Release builds silence Flutter's
+      # error printing (lib/app/quiet_errors.dart); app code never prints or logs at all.
+      - name: No printing or logging in app code
+        run: |
+          if grep -rnE '\b(print|debugPrint|debugPrintStack)\(' mobile/lib; then
+            echo "::error::print/debugPrint in mobile/lib (listed above): logcat ends up in bug reports"; exit 1
+          fi
+          if grep -rnE 'android\.util\.Log|\bLog\.[a-z]+\(|\bprintln\(|printStackTrace\(' mobile/android/app/src; then
+            echo "::error::logging in the app's Kotlin code (listed above)"; exit 1
           fi
           echo "ok"
 
@@ -111,7 +136,7 @@ jobs:
 
       - name: Upload the dart format patch
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dart-format-patch
           path: ${{ runner.temp }}/dart-format.patch
@@ -140,24 +165,56 @@ jobs:
       version: ${{ steps.ver.outputs.version }}
       channel: ${{ steps.ver.outputs.channel }}
       code: ${{ steps.ver.outputs.code }}
+      # What the sign jobs sign: the artifact by ID, and the APK by hash.
+      apk_sha256: ${{ steps.stage.outputs.apk_sha256 }}
+      unsigned_artifact_id: ${{ steps.upload_unsigned.outputs.artifact-id }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "17"
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
+      # The Flutter SDK that compiles the APK is pinned by content, not by version name: the
+      # archive's SHA-256 (from releases_linux.json, committed here), then the framework commit
+      # and the engine hash inside it. The engine's Maven artifacts are also pinned by
+      # mobile/android/gradle/verification-metadata.xml. Update all four with FLUTTER_VERSION.
+      - name: Flutter SDK (hash-pinned archive)
+        env:
+          FLUTTER_ARCHIVE: stable/linux/flutter_linux_3.47.9-stable.tar.xz
+          FLUTTER_SHA256: 25ed8c3c29d51a7353f2a944310b478af8214920639524b19c50a19e6c044c5a
+          FLUTTER_FRAMEWORK: c197ca5199e9ee5661e865596c9c07294dfab51c
+          FLUTTER_ENGINE: 89c39edfdfae2949f6806e4a315c0c08522238b7
+        run: |
+          set -euo pipefail
+          case "$FLUTTER_ARCHIVE" in *"_${FLUTTER_VERSION}-stable.tar.xz") ;; *)
+            echo "::error::FLUTTER_ARCHIVE does not match FLUTTER_VERSION $FLUTTER_VERSION"; exit 1 ;; esac
+          a="$RUNNER_TEMP/flutter.tar.xz"
+          curl -fsSL --retry 5 --connect-timeout 15 -o "$a" \
+            "https://storage.googleapis.com/flutter_infra_release/releases/$FLUTTER_ARCHIVE"
+          echo "$FLUTTER_SHA256  $a" | sha256sum -c -
+          tar xf "$a" -C "$RUNNER_TEMP"
+          rm -f "$a"
+          root="$RUNNER_TEMP/flutter"
+          head="$(git -C "$root" rev-parse HEAD)"
+          [ "$head" = "$FLUTTER_FRAMEWORK" ] || { echo "::error::Flutter framework commit $head, expected $FLUTTER_FRAMEWORK"; exit 1; }
+          engine="$(tr -d '[:space:]' < "$root/bin/internal/engine.version")"
+          [ "$engine" = "$FLUTTER_ENGINE" ] || { echo "::error::Flutter engine $engine, expected $FLUTTER_ENGINE"; exit 1; }
+          {
+            echo "FLUTTER_ROOT=$root"
+            echo "PUB_CACHE=$HOME/.pub-cache"
+          } >> "$GITHUB_ENV"
+          {
+            echo "$root/bin"
+            echo "$root/bin/cache/dart-sdk/bin"
+            echo "$HOME/.pub-cache/bin"
+          } >> "$GITHUB_PATH"
 
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
+      - name: Flutter version
+        run: flutter --version
 
       # versionName = package.json version. versionCode:
       #   release (tags v*): MAJOR*10000 + MINOR*100 + PATCH, e.g. 0.3.0 -> 300.
@@ -167,6 +224,7 @@ jobs:
       #     version have larger run numbers. Dev builds use their own application ID (.dev),
       #     so dev codes never compete with release codes. Valid up to version 2.10.0 and run
       #     99999 (Android's limit is 2100000000); the step fails beyond that.
+      # Node: the runner's preinstalled one (check-apk.js needs only Node 18+ built-ins).
       - name: Version, build number and channel
         id: ver
         run: |
@@ -197,12 +255,32 @@ jobs:
           echo "ORG_GRADLE_PROJECT_tunnelviewChannel=$CH" >> "$GITHUB_ENV"
           echo "version $VER, versionCode $CODE, channel $CH, package $PKG"
 
-      - name: Gradle dependency verification is committed
+      # Strict verification, set where the repository cannot weaken it: Gradle reads
+      # GRADLE_USER_HOME/gradle.properties before the project's file. The checks also catch an
+      # accidental weakening in the repository (a second, later mode line wins in a properties
+      # file; trust entries skip verification).
+      - name: Gradle dependency verification is strict and complete
         run: |
+          set -euo pipefail
           f=mobile/android/gradle/verification-metadata.xml
+          p=mobile/android/gradle.properties
           [ -s "$f" ] || { echo "::error::$f is missing (run the mobile-bootstrap workflow)"; exit 1; }
-          grep -qx 'org.gradle.dependency.verification=strict' mobile/android/gradle.properties || {
-            echo "::error::gradle.properties must set org.gradle.dependency.verification=strict"; exit 1; }
+          n="$(grep -cE '^\s*org\.gradle\.dependency\.verification\s*[=:]' "$p" || true)"
+          if [ "$n" != 1 ] || ! grep -qx 'org.gradle.dependency.verification=strict' "$p"; then
+            echo "::error::$p must set org.gradle.dependency.verification=strict, exactly once"; exit 1
+          fi
+          if grep -nE '<trusted-artifacts|<trust[ >]' "$f"; then
+            echo "::error::$f exempts artifacts from verification (listed above)"; exit 1
+          fi
+          grep -q '<verify-metadata>true</verify-metadata>' "$f" || {
+            echo "::error::$f must verify metadata files too"; exit 1; }
+          if grep -rEn 'dependencyVerification|DependencyVerificationMode|dependency-verification' mobile/android \
+            --include='*.kts' --include='*.gradle' --include='*.properties'; then
+            echo "::error::the build changes dependency verification (listed above)"; exit 1
+          fi
+          mkdir -p "$HOME/.gradle"
+          echo 'org.gradle.dependency.verification=strict' >> "$HOME/.gradle/gradle.properties"
+          echo "ok: strict, forced in $HOME/.gradle/gradle.properties"
 
       - name: Build the universal release APK (unsigned)
         working-directory: mobile
@@ -226,7 +304,7 @@ jobs:
       - name: pubspec.lock allow-list
         run: node scripts/check-apk.js lock mobile/pubspec.lock mobile/pubspec-allow.txt
 
-      - name: APK gates (manifest, entries, R8 mapping, alignment, unsigned)
+      - name: APK gates (manifest, entries, dex, R8 mapping, alignment, unsigned)
         run: |
           node scripts/check-apk.js apk mobile/build/app/outputs/flutter-apk/app-release.apk \
             --package "${{ steps.ver.outputs.package }}" \
@@ -234,17 +312,25 @@ jobs:
             --mapping mobile/build/app/outputs/mapping/release/mapping.txt \
             --unsigned
 
+      # Internal files carry an "internal-" prefix; build.yml's release job refuses to publish
+      # them.
       - name: Stage the unsigned APK
+        id: stage
         run: |
+          set -euo pipefail
           mkdir -p dist
-          cp mobile/build/app/outputs/flutter-apk/app-release.apk dist/app-release-unsigned.apk
-          cp mobile/build/app/outputs/mapping/release/mapping.txt dist/mapping.txt
-          cp "$RUNNER_TEMP/runtime-classpath.txt" dist/runtime-classpath.txt
-          (cd dist && sha256sum -- * > "$RUNNER_TEMP/SHA256SUMS" && mv "$RUNNER_TEMP/SHA256SUMS" SHA256SUMS && cat SHA256SUMS)
+          cp mobile/build/app/outputs/flutter-apk/app-release.apk dist/internal-app-release-unsigned.apk
+          cp mobile/build/app/outputs/mapping/release/mapping.txt dist/internal-mapping.txt
+          cp "$RUNNER_TEMP/runtime-classpath.txt" dist/internal-runtime-classpath.txt
+          sum="$(sha256sum dist/internal-app-release-unsigned.apk | cut -d' ' -f1)"
+          echo "apk_sha256=$sum" >> "$GITHUB_OUTPUT"
+          echo "unsigned APK SHA-256: $sum"
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload the unsigned APK (internal, never released)
+        id: upload_unsigned
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: android-unsigned
+          name: internal-android-unsigned
           path: dist/*
           if-no-files-found: error
           retention-days: 7
@@ -260,23 +346,29 @@ jobs:
         shell: bash
     env:
       VER: ${{ needs.build.outputs.version }}
+      APK_SHA256: ${{ needs.build.outputs.apk_sha256 }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           sparse-checkout: |
             scripts/check-apk.js
           sparse-checkout-cone-mode: false
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: android-unsigned
+          artifact-ids: ${{ needs.build.outputs.unsigned_artifact_id }}
           path: in
+          merge-multiple: true
 
-      - name: The build job produced a dev build
+      - name: The build job produced this dev build
         run: |
+          set -euo pipefail
           [ "${{ needs.build.outputs.channel }}" = dev ] || { echo "::error::not a dev build"; exit 1; }
-          (cd in && sha256sum -c SHA256SUMS)
+          if ! [[ "$APK_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::the build job reported no APK SHA-256"; exit 1
+          fi
+          echo "$APK_SHA256  in/internal-app-release-unsigned.apk" | sha256sum -c -
 
       - name: Sign with the dev key (apksigner only)
         env:
@@ -295,7 +387,7 @@ jobs:
             --ks-pass env:KS_PW --key-pass env:KS_PW \
             --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true \
             --v4-signing-enabled false \
-            --out "out/Tunnelview-$VER-android-dev.apk" in/app-release-unsigned.apk
+            --out "out/Tunnelview-$VER-android-dev.apk" in/internal-app-release-unsigned.apk
 
       - name: Verify signer, manifest and alignment
         run: |
@@ -305,7 +397,7 @@ jobs:
             --cert "${{ vars.ANDROID_DEV_CERT_SHA256 }}"
           (cd out && sha256sum -- *.apk | tee SHA256SUMS)
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Tunnelview-${{ needs.build.outputs.version }}-android-dev
           path: |
@@ -330,23 +422,29 @@ jobs:
         shell: bash
     env:
       VER: ${{ needs.build.outputs.version }}
+      APK_SHA256: ${{ needs.build.outputs.apk_sha256 }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           sparse-checkout: |
             scripts/check-apk.js
           sparse-checkout-cone-mode: false
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: android-unsigned
+          artifact-ids: ${{ needs.build.outputs.unsigned_artifact_id }}
           path: in
+          merge-multiple: true
 
-      - name: The build job produced a release build
+      - name: The build job produced this release build
         run: |
+          set -euo pipefail
           [ "${{ needs.build.outputs.channel }}" = release ] || { echo "::error::not a release build"; exit 1; }
-          (cd in && sha256sum -c SHA256SUMS)
+          if ! [[ "$APK_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::the build job reported no APK SHA-256"; exit 1
+          fi
+          echo "$APK_SHA256  in/internal-app-release-unsigned.apk" | sha256sum -c -
 
       - name: Sign with the release key (apksigner only)
         env:
@@ -365,7 +463,7 @@ jobs:
             --ks-pass env:KS_PW --key-pass env:KS_PW \
             --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true \
             --v4-signing-enabled false \
-            --out "out/Tunnelview-$VER-android.apk" in/app-release-unsigned.apk
+            --out "out/Tunnelview-$VER-android.apk" in/internal-app-release-unsigned.apk
 
       - name: Verify signer, manifest and alignment
         run: |
@@ -375,7 +473,7 @@ jobs:
             --cert "${{ vars.ANDROID_RELEASE_CERT_SHA256 }}"
           (cd out && sha256sum -- *.apk | tee SHA256SUMS-android.txt)
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Tunnelview-android
           path: |
@@ -396,7 +494,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 

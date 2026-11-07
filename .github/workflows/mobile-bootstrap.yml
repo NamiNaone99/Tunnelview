@@ -34,19 +34,45 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "17"
 
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
-        with:
-          flutter-version: "3.47.9"
-          channel: stable
+      # Same hash-pinned Flutter SDK as android.yml's build job (keep the values in step): this
+      # job writes the trust-on-first-use verification metadata the build then relies on.
+      - name: Flutter SDK (hash-pinned archive)
+        env:
+          FLUTTER_ARCHIVE: stable/linux/flutter_linux_3.47.9-stable.tar.xz
+          FLUTTER_SHA256: 25ed8c3c29d51a7353f2a944310b478af8214920639524b19c50a19e6c044c5a
+          FLUTTER_FRAMEWORK: c197ca5199e9ee5661e865596c9c07294dfab51c
+          FLUTTER_ENGINE: 89c39edfdfae2949f6806e4a315c0c08522238b7
+        run: |
+          set -euo pipefail
+          a="$RUNNER_TEMP/flutter.tar.xz"
+          curl -fsSL --retry 5 --connect-timeout 15 -o "$a" \
+            "https://storage.googleapis.com/flutter_infra_release/releases/$FLUTTER_ARCHIVE"
+          echo "$FLUTTER_SHA256  $a" | sha256sum -c -
+          tar xf "$a" -C "$RUNNER_TEMP"
+          rm -f "$a"
+          root="$RUNNER_TEMP/flutter"
+          head="$(git -C "$root" rev-parse HEAD)"
+          [ "$head" = "$FLUTTER_FRAMEWORK" ] || { echo "::error::Flutter framework commit $head, expected $FLUTTER_FRAMEWORK"; exit 1; }
+          engine="$(tr -d '[:space:]' < "$root/bin/internal/engine.version")"
+          [ "$engine" = "$FLUTTER_ENGINE" ] || { echo "::error::Flutter engine $engine, expected $FLUTTER_ENGINE"; exit 1; }
+          {
+            echo "FLUTTER_ROOT=$root"
+            echo "PUB_CACHE=$HOME/.pub-cache"
+          } >> "$GITHUB_ENV"
+          {
+            echo "$root/bin"
+            echo "$root/bin/cache/dart-sdk/bin"
+            echo "$HOME/.pub-cache/bin"
+          } >> "$GITHUB_PATH"
 
       - name: Toolchain facts
         run: |
@@ -112,7 +138,7 @@ jobs:
           "$BT/zipalign" -c -P 16 -v 4 build/app/outputs/flutter-apk/app-release.apk | tail -5 || true
           ls -la "$RUNNER_TEMP/out"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mobile-bootstrap-${{ steps.task.outputs.task }}
           path: ${{ runner.temp }}/out/*

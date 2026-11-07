@@ -17,12 +17,21 @@ targetSdk 36.
 - `test`: `flutter pub get --enforce-lockfile`, `dart format` check, `flutter analyze`,
   `flutter test`, plus repo gates.
 - `build`: an **unsigned** universal release APK (R8 on, not debuggable), checked by
-  `scripts/check-apk.js` (permissions, exported components, intent filters, `<queries>`,
-  runtime classpath allow-list, `pubspec.lock` allow-list, banned packages in R8's mapping,
-  16 KB zip alignment). No secrets in this job.
+  `scripts/check-apk.js` (permissions, exported components including resource-reference
+  values, intent filters, `<queries>`, no component in a separate process, no VPN service, Flutter
+  deep links off on the launcher, no `android.net.VpnService` in any dex, runtime classpath
+  allow-list, `pubspec.lock` allow-list, banned packages in R8's mapping, 16 KB zip alignment).
+  No secrets and no caches in this job. The Flutter SDK is a hash-pinned archive (SHA-256,
+  framework commit and engine hash in the workflow), and Gradle runs with strict dependency
+  verification forced from `~/.gradle/gradle.properties`. Unit tests for the gates:
+  `test/check-apk.test.js`.
 - `sign-dev` (branch pushes): signs with the dev key, application ID
   `io.github.naminaone99.tunnelview.dev`, label "Tunnelview Dev".
 - `sign-release` (tags `v*`, environment `release`): signs with the release key.
+- The sign jobs sign only what `build` produced: they download the internal artifact by the ID
+  `build` reported and check the APK against the SHA-256 in `build`'s job outputs. Internal
+  files are named `internal-*`; `build.yml`'s release job refuses to publish them.
+- Every action is pinned to a full commit SHA.
 
 Channels: Gradle `-PtunnelviewChannel=dev|release` and `--dart-define=TUNNELVIEW_CHANNEL=...`
 must agree (the Gradle build checks it).
@@ -43,6 +52,16 @@ must agree (the Gradle build checks it).
   mask.
 - Test-only code (fakes, test policies) lives under `test/` only (CI gate). Nothing may use
   Android's VpnService API (CI gate): that would replace Tailscale as the phone's VPN.
+- No printing or logging: no `print`/`debugPrint` in `lib/`, no `android.util.Log` in the
+  app's Kotlin (CI gate). Release builds handle Flutter errors silently
+  (`lib/app/quiet_errors.dart`), because error text such as a `SocketException` names
+  addresses and logcat ends up in shared bug reports.
+- No deep links: the launcher activity is exported, so any app can start it with an explicit
+  Intent. `MainActivity` replaces every Intent with a plain MAIN Intent before Flutter sees it,
+  `flutter_deeplinking_enabled` is false in the manifest (APK gate), and the Dart app always
+  starts at home and ignores routes the platform pushes.
+- Clipboard writes are marked sensitive (`UiPlugin.kt`, `ClipDescription.EXTRA_IS_SENSITIVE`):
+  no preview on Android 13+, kept out of keyboard clipboard histories that honour the flag.
 
 ## Tailscale detection (M2)
 
@@ -56,9 +75,17 @@ must agree (the Gradle build checks it).
   (split tunnelling). Binding needs no permission, so `CHANGE_NETWORK_STATE` is not requested.
 - Dart re-derives the choice with a bit-exact port of the desktop `isTailscaleAddress`
   (`lib/net/addresses.dart`) and never reports OK when the two sides disagree.
-- A new tailnet network within 3 s of losing the old one is reported as "VPN re-established".
+- A new tailnet network within 3 s of losing the old one (or replacing it directly) is reported
+  as "VPN re-established" while it is usable, until it is lost or replaced.
 - At every start, once Tailscale is found, a local ICE gathering self-test runs (no ICE servers,
   nothing sent). Sessions are refused unless every candidate is one of the phone's own Tailscale
-  addresses. Diagnostics shows the result; Copy report leaves out other devices' addresses.
+  addresses. It runs again on its own when the phone's Tailscale addresses change (also after a
+  failure, and when they changed during a run), and a failed test once more on a new tailnet
+  network; never a failure again on the same network and addresses ("Run self-test again" in
+  Diagnostics does that). Diagnostics shows the result; Copy report leaves out other devices'
+  addresses.
+- A detection fault (the Kotlin and Dart choices disagree, or the platform call fails) shows
+  "Can't check Tailscale" with a card that opens Diagnostics, instead of a "Checking" that never
+  ends. Sessions stay refused.
 - `lib/platform/tailnet_platform.dart` is the platform-neutral contract, so an iOS Swift twin can
   serve the same channel later.

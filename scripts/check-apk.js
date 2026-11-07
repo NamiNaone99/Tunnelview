@@ -14,8 +14,12 @@
  *   node scripts/check-apk.js apk <file.apk> --package <applicationId> --build-tools <dir>
  *         [--mapping <mapping.txt>] (--unsigned | --cert <SHA-256 colon hex>)
  *       Manifest policy (permissions, exported components, intent filters, <queries>,
- *       application flags), APK entries, R8 mapping ban-list, zipalign -c -P 16 -v 4, and
- *       either "not signed at all" or "signed by exactly this certificate with v2 + v3".
+ *       application flags, no separate processes, no VPN service, Flutter deep links off),
+ *       APK entries, no VpnService reference in any classes*.dex, R8 mapping ban-list,
+ *       zipalign -c -P 16 -v 4, and either "not signed at all" or "signed by exactly this
+ *       certificate with v2 + v3".
+ *
+ * Unit tests: test/check-apk.test.js (node --test).
  *
  * Exits 1 with a list of every failure.
  */
@@ -62,6 +66,18 @@ const BANNED_PREFIXES = [
 ];
 const BANNED_ENTRY_RE = /firebase|play-services|mlkit|crashlytics|sentry|barhopper|bugsnag/i;
 const REQUIRED_ABIS = ['arm64-v8a', 'armeabi-v7a', 'x86_64'];
+
+// Tunnelview must never become a VPN provider: that would ask the user to replace Tailscale.
+// R8 never renames framework types, so any use of the class leaves this descriptor in the dex.
+const VPN_SERVICE_DESCRIPTOR = 'Landroid/net/VpnService';
+const VPN_SERVICE_PERMISSION = 'android.permission.BIND_VPN_SERVICE';
+const VPN_SERVICE_ACTION = 'android.net.VpnService';
+
+// Flutter's embedding turns an Intent's data URI into a route unless the launcher activity says
+// otherwise (FlutterActivityLaunchConfigs.deepLinkEnabled: a missing value means TRUE).
+const FLUTTER_DEEPLINKING_META = 'flutter_deeplinking_enabled';
+
+const COMPONENT_TYPES = ['activity', 'activity-alias', 'service', 'receiver', 'provider'];
 
 // ---- Small helpers ------------------------------------------------------------------------
 
@@ -288,6 +304,21 @@ function boolAttr(v) {
   return v;
 }
 
+// A security-relevant boolean attribute must be absent or a literal. A resource reference
+// (aapt2 prints "@0x7f...") is resolved by the platform at install time and could be true.
+function literalBoolAttr(attrs, key, where) {
+  const v = boolAttr(attrs[key]);
+  if (v === undefined || v === true || v === false) return v;
+  fail(`manifest: ${where} ${key} is not a literal true/false (${v})`);
+  return 'unknown';
+}
+
+// android:value of the launcher activity's <meta-data android:name="flutter_deeplinking_enabled">.
+function metaDataValue(component, name) {
+  const m = kids(component, 'meta-data').find((e) => e.attrs['android:name'] === name);
+  return m ? m.attrs['android:value'] : undefined;
+}
+
 function checkManifest(tree, expectedPackage) {
   const [manifest] = kids(tree, 'manifest');
   if (!manifest) {
@@ -336,31 +367,52 @@ function checkManifest(tree, expectedPackage) {
   if (a['android:label'] !== wantLabel) fail(`application: label is ${a['android:label']}, expected ${wantLabel}`);
   if (boolAttr(a['android:allowBackup']) !== false) fail('application: allowBackup is not false');
   if (boolAttr(a['android:fullBackupContent']) === true) fail('application: fullBackupContent is true');
-  if (boolAttr(a['android:debuggable']) === true) fail('application: debuggable');
-  if (boolAttr(a['android:testOnly']) === true) fail('application: testOnly');
+  // A non-literal value fails inside literalBoolAttr.
+  if (literalBoolAttr(a, 'android:debuggable', 'application') === true) fail('application: debuggable');
+  if (literalBoolAttr(a, 'android:testOnly', 'application') === true) fail('application: testOnly');
   if (boolAttr(a['android:usesCleartextTraffic']) !== false) fail('application: usesCleartextTraffic is not false');
   if (!a['android:networkSecurityConfig']) fail('application: no networkSecurityConfig');
   if (!a['android:dataExtractionRules']) fail('application: no dataExtractionRules');
+  // TailnetPlugin binds the main process to the Tailscale network; a component in another
+  // process would not be bound and could reach Wi-Fi or mobile data directly.
+  if (a['android:process'] !== undefined) fail(`application: android:process is set (${a['android:process']})`);
 
   // Components.
   const launchers = [];
-  for (const type of ['activity', 'activity-alias', 'service', 'receiver', 'provider']) {
+  for (const type of COMPONENT_TYPES) {
     for (const c of kids(app, type)) {
       const name = c.attrs['android:name'];
+      const where = `${type} ${name}`;
       const filters = kids(c, 'intent-filter');
       const actions = filters.flatMap((f) => kids(f, 'action').map((x) => x.attrs['android:name']));
       const categories = filters.flatMap((f) => kids(f, 'category').map((x) => x.attrs['android:name']));
-      const exportedAttr = boolAttr(c.attrs['android:exported']);
-      const exported = exportedAttr === undefined ? filters.length > 0 : exportedAttr === true;
+      const exportedAttr = literalBoolAttr(c.attrs, 'android:exported', where);
+      // A non-literal value counts as exported (worst case); it has already failed above.
+      const exported = exportedAttr === undefined ? filters.length > 0 : exportedAttr !== false;
       const isLauncher = type === 'activity' &&
         actions.includes('android.intent.action.MAIN') &&
         categories.includes('android.intent.category.LAUNCHER');
       if (isLauncher) launchers.push(name);
-      info(`  ${type} ${name} exported=${exported}${filters.length ? ` actions=${actions.join(',')}` : ''}`);
-      if (actions.includes('android.intent.action.VIEW')) fail(`manifest: VIEW intent filter on ${type} ${name}`);
-      if (exported && !(isLauncher && name === LAUNCHER_ACTIVITY)) fail(`manifest: ${type} ${name} is exported`);
+      info(`  ${where} exported=${exported}${filters.length ? ` actions=${actions.join(',')}` : ''}`);
+      if (c.attrs['android:process'] !== undefined) {
+        fail(`manifest: ${where} runs in a separate process (${c.attrs['android:process']})`);
+      }
+      if (c.attrs['android:permission'] === VPN_SERVICE_PERMISSION || actions.includes(VPN_SERVICE_ACTION)) {
+        fail(`manifest: ${where} is a VPN service (Tunnelview must never be a VPN provider)`);
+      }
+      if (actions.includes('android.intent.action.VIEW')) fail(`manifest: VIEW intent filter on ${where}`);
+      if (exported && !(isLauncher && name === LAUNCHER_ACTIVITY)) fail(`manifest: ${where} is exported`);
       if (isLauncher && actions.some((x) => x !== 'android.intent.action.MAIN')) {
         fail(`manifest: launcher ${name} has extra actions: ${actions.join(', ')}`);
+      }
+      if (isLauncher && name === LAUNCHER_ACTIVITY) {
+        // The launcher is exported, so any app can start it with an explicit Intent (data URI,
+        // extras). Flutter must not turn that data into a route.
+        const deeplinking = metaDataValue(c, FLUTTER_DEEPLINKING_META);
+        if (boolAttr(deeplinking) !== false) {
+          fail(`manifest: launcher ${name} needs <meta-data android:name="${FLUTTER_DEEPLINKING_META}" ` +
+            `android:value="false"/> (found ${deeplinking === undefined ? 'none' : deeplinking})`);
+        }
       }
     }
   }
@@ -403,6 +455,28 @@ function checkEntries(apk) {
     if (!entries.includes(`lib/${abi}/libflutter.so`)) fail(`apk: not universal, lib/${abi}/libflutter.so missing`);
   }
   info(`apk: ${entries.length} entries checked`);
+  checkDex(apk, entries.filter((e) => /^classes\d*\.dex$/.test(e)));
+}
+
+// Fails if any dex file mentions android.net.VpnService (as a type descriptor).
+function dexMentionsVpnService(buf) {
+  return buf.indexOf(Buffer.from(VPN_SERVICE_DESCRIPTOR, 'latin1')) >= 0;
+}
+
+function checkDex(apk, dexEntries) {
+  if (dexEntries.length === 0) {
+    fail('apk: no classes*.dex entries');
+    return;
+  }
+  for (const entry of dexEntries) {
+    const r = spawnSync('unzip', ['-p', apk, entry], { maxBuffer: 1024 * 1024 * 1024 });
+    if (r.error || r.status !== 0 || !r.stdout || r.stdout.length === 0) {
+      fail(`apk: cannot read ${entry} (${r.error ? r.error.message : `unzip exit ${r.status}`})`);
+      continue;
+    }
+    if (dexMentionsVpnService(r.stdout)) fail(`apk: ${entry} references ${VPN_SERVICE_DESCRIPTOR} (never a VPN provider)`);
+  }
+  info(`dex: ${dexEntries.join(', ')} checked, no ${VPN_SERVICE_DESCRIPTOR}`);
 }
 
 function checkAlignment(apk, bt) {
@@ -480,4 +554,13 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { parsePubspecLock, parseGradleDependencies, parseXmlTree, kids, boolAttr, checkManifest, errors };
+module.exports = {
+  parsePubspecLock,
+  parseGradleDependencies,
+  parseXmlTree,
+  kids,
+  boolAttr,
+  checkManifest,
+  dexMentionsVpnService,
+  errors,
+};

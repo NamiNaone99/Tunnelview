@@ -168,6 +168,20 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      # Internal build files must never be published: android.yml's unsigned APK, R8 mapping and
+      # classpath list ("internal-*"), and dev-signed APKs. When android.yml is called from this
+      # workflow, its artifacts join this run, and the download above (no name or pattern) would
+      # fetch them too; download only the release artifacts then (for example by name, or
+      # `pattern: Tunnelview-*` if every release artifact keeps that prefix). This step stops the
+      # release if anything internal arrives anyway.
+      - name: No internal build files in the release
+        run: |
+          bad="$(find artifacts -type f | grep -E '(^|/)internal-|unsigned|(^|/)mapping\.txt$|runtime-classpath|-dev\.apk$' || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::internal build files must not be published:"; echo "$bad"; exit 1
+          fi
+          echo "ok: no internal build files"
+
       - name: Create or update the release
         env:
           GH_TOKEN: ${{ github.token }}
