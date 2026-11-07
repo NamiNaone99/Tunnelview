@@ -1379,12 +1379,15 @@ test('win32 native bindings: INPUT layout matches the ABI (no SendInput call)', 
   assert.ok(Number.isInteger(nat.GetSystemMetrics(W.SM.YVIRTUALSCREEN)));
 });
 
-test('changecount.get() returns a positive integer or null and never throws', () => {
+test('changecount.get() returns a non-negative integer or null and never throws', () => {
   const changecount = require('../src/main/native/changecount');
   for (let i = 0; i < 2; i++) {
     const v = changecount.get();
-    // null when unsupported or (Windows) without clipboard access, e.g. a service session
-    assert.ok(v === null || (Number.isInteger(v) && v > 0), String(v));
+    // null when unsupported or (Windows) without clipboard access, e.g. a service session (Windows
+    // maps its "no access" 0 to null). macOS: NSPasteboard.changeCount is 0 until the first copy of
+    // the login session — a fresh CI runner, for example.
+    const min = process.platform === 'darwin' ? 0 : 1;
+    assert.ok(v === null || (Number.isInteger(v) && v >= min), String(v));
   }
 });
 
