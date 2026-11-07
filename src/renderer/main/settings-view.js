@@ -9,9 +9,13 @@
 import { h, icon, toast, applyTheme, timeAgo, safeText } from '../shared/ui.js';
 import {
   api, store, subscribe, saveSettings, PROTO, errMsg, peerName, copyText, OS_NAMES, securityLocked, isTaggedTrust,
-  hasIdentityApi, resetIdentity, retryIdentity,
+  hasIdentityApi, resetIdentity, retryIdentity, hasUpdateApi, normUpdateState,
 } from './store.js';
 import { pushLayer, openPasswordDialog, removePassword, confirmDialog } from './dialogs.js';
+import {
+  describeUpdate, updatePlan, revealLabel, checkNow, setAutoCheck, downloadAndInstall, installWithConfirm,
+  revealDownloaded, openReleases,
+} from './updates.js';
 
 const SECTIONS = [
   ['security', 'Security', 'shield'],
@@ -20,6 +24,7 @@ const SECTIONS = [
   ['files', 'Files', 'folder'],
   ['network', 'Network', 'network'],
   ['appearance', 'Appearance', 'sun'],
+  ['updates', 'Updates', 'download'], // only with the updater API (src/preload/main.js)
   ['about', 'About', 'info'],
 ];
 
@@ -57,6 +62,7 @@ export function createSettingsView() {
   subscribe('settings', sync);
   subscribe('state', sync);
   subscribe('identity', sync);
+  subscribe('update', sync);
   subscribe('peers', () => { if (built) built.updateSuggestions(); });
 
   /* ------------------------------------------------------------------ controls */
@@ -133,8 +139,9 @@ export function createSettingsView() {
   }
 
   function section(id, title, iconName, ...content) {
+    // The heading can take the focus (open(id, {focusSection:true})), but is not a Tab stop.
     return h('section', { class: 'set-card', id: `set-${id}`, dataset: { section: id }, 'aria-labelledby': `set-${id}-title` },
-      h('header', { class: 'set-card-head' }, h('span', { class: 'set-card-icon' }, icon(iconName, { size: 16 })), h('h3', { id: `set-${id}-title` }, title)),
+      h('header', { class: 'set-card-head' }, h('span', { class: 'set-card-icon' }, icon(iconName, { size: 16 })), h('h3', { id: `set-${id}-title`, tabindex: '-1' }, title)),
       ...content);
   }
 
@@ -522,6 +529,161 @@ export function createSettingsView() {
           (v) => { applyTheme(v); saveSettings({ theme: v }); }, 'Theme')));
   }
 
+  /**
+   * In-app updates (updates.js; main: updater.js). The daily check is locked during an incoming
+   * session like the security settings (main refuses the change then). Check now and the download
+   * stay available; Install waits until no session runs, and the reason stays in view.
+   */
+  function buildUpdates() {
+    const TONE_DOT = { ok: 'dot-ok', accent: 'dot-accent', danger: 'dot-danger' };
+    // UpdateState as main last sent it; before its first answer, what settings and AppState say.
+    const current = () => store.update || normUpdateState({
+      status: 'idle', currentVersion: store.state.version, platform: store.state.platform,
+      autoCheck: store.settings.autoUpdateCheck, lastCheckAt: store.settings.lastUpdateCheckAt,
+    });
+    // A busy button, and one that has the keyboard focus, stays focusable (aria-disabled):
+    // Chromium moves the focus of a control that becomes disabled to <body>, out of this sheet
+    // (a session that starts while Install has the focus, a check that starts on its own). Clicks
+    // are checked against the plan anyway. Any other button that cannot be used now is disabled.
+    const setBtn = (btn, { enabled, busy }) => {
+      if (busy || (!enabled && document.activeElement === btn)) {
+        btn.disabled = false;
+        btn.setAttribute('aria-disabled', 'true');
+      } else {
+        btn.removeAttribute('aria-disabled');
+        btn.disabled = !enabled;
+      }
+      if (busy) btn.setAttribute('data-busy', ''); else btn.removeAttribute('data-busy'); // progress cursor
+    };
+
+    // Daily check
+    const lockHint = h('div', { class: 'set-desc update-lock-hint', hidden: true },
+      icon('lock', { size: 12 }), h('span', null, 'Locked while someone is connected to this computer.'));
+    bind((_s, st) => { lockHint.hidden = !securityLocked(st); });
+    const autoRow = h('div', { class: 'set-row-group' },
+      row('Check for updates automatically',
+        'Contacts GitHub once a day to look for a signed update. Tunnelview sends no names or tailnet details, and installs nothing without your click.',
+        toggle(() => current().autoCheck, (v) => setAutoCheck(v), 'Check for updates automatically (contacts GitHub once a day)', { lock: true })),
+      lockHint);
+
+    // Version, Check now, status
+    const versionEl = h('div', { class: 'set-title' });
+    const lastEl = h('div', { class: 'set-desc' });
+    const checkBtn = h('button', {
+      class: 'btn btn-sm', type: 'button',
+      onClick: () => { if (updatePlan(current(), store.updateOps).check.enabled) checkNow(); },
+    });
+    const statusIcon = h('span', { class: 'update-status-icon' });
+    const statusText = h('span', { class: 'update-status-text' });
+    const statusLine = h('div', { class: 'update-status' }, statusIcon, statusText);
+    const detailEl = h('div', { class: 'set-desc update-detail' });
+    const bar = h('i');
+    const progress = h('div', {
+      class: 'progress update-progress', role: 'progressbar', 'aria-label': 'Download progress',
+      'aria-valuemin': '0', 'aria-valuemax': '100', hidden: true,
+    }, bar);
+    // Read out when the status changes, never once per percent of a download.
+    const live = h('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
+
+    // What's new: text only (textContent), line breaks kept by CSS, scrolls within a capped height.
+    const notesTitle = h('div', { class: 'set-title', id: 'update-notes-title' });
+    const notesDate = h('span', { class: 'small faint' });
+    const notesBox = h('div', { class: 'update-notes selectable', tabindex: '0', role: 'region', 'aria-labelledby': 'update-notes-title' });
+    const notesBlock = h('div', { class: 'update-notes-block', hidden: true },
+      h('div', { class: 'row update-notes-head' }, notesTitle, notesDate),
+      notesBox);
+
+    // Download and install / Restart and install, Show in folder, Releases page
+    const primaryBtn = h('button', { class: 'btn btn-sm btn-primary', type: 'button', 'aria-describedby': 'update-hint', onClick: onPrimary });
+    const revealBtn = h('button', { class: 'btn btn-sm', type: 'button', onClick: () => revealDownloaded() });
+    const releasesBtn = h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onClick: () => openReleases() }, icon('external'), 'Releases page');
+    const hintText = h('span');
+    const hint = h('div', { class: 'small update-hint', id: 'update-hint', hidden: true }, icon('lock', { size: 14 }), hintText);
+
+    async function onPrimary() {
+      const p = updatePlan(current(), store.updateOps).primary;
+      if (!p || !p.enabled) return;
+      if (p.action === 'download') await downloadAndInstall();
+      else if (p.action === 'install') await installWithConfirm();
+      else if (p.action === 'releases') await openReleases();
+    }
+
+    let notesSig = null;
+    let spoken = null;
+    bind((_s, st) => {
+      const u = current();
+      const d = describeUpdate(u);
+      const plan = updatePlan(u, store.updateOps);
+
+      versionEl.textContent = `Tunnelview ${u.currentVersion || st.version}`.trim();
+      lastEl.textContent = u.lastCheckAt ? `Last checked ${timeAgo(u.lastCheckAt)}` : 'Not checked yet';
+      setBtn(checkBtn, plan.check);
+      checkBtn.replaceChildren(...(plan.check.busy ? [h('span', { class: 'spinner spinner-sm' }), 'Checking…'] : [icon('refresh'), 'Check now']));
+
+      statusLine.hidden = !d.text;
+      statusLine.className = d.tone ? `update-status is-${d.tone}` : 'update-status';
+      statusIcon.replaceChildren(d.tone === 'busy' ? h('span', { class: 'spinner spinner-sm' }) : h('span', { class: `dot ${TONE_DOT[d.tone] || ''}` }));
+      statusText.textContent = d.text;
+      detailEl.textContent = d.detail;
+      detailEl.hidden = !d.detail;
+      progress.hidden = d.progress === null;
+      if (d.progress !== null) {
+        bar.style.width = `${d.progress}%`;
+        progress.setAttribute('aria-valuenow', String(d.progress));
+        progress.setAttribute('aria-valuetext', d.detail ? `${d.progress}% (${d.detail})` : `${d.progress}%`);
+      }
+
+      const sig = u.latest ? JSON.stringify([u.latest.version, u.latest.date, u.latest.notes]) : '';
+      if (sig !== notesSig) {
+        notesSig = sig;
+        notesBlock.hidden = !u.latest;
+        if (u.latest) {
+          notesTitle.textContent = `What’s new in ${u.latest.version}`;
+          // YYYY-MM-DD: the rest of the window is English, so no locale month names here.
+          const day = u.latest.date ? new Date(u.latest.date) : null;
+          notesDate.textContent = day && Number.isFinite(day.getTime()) ? `Released ${day.toISOString().slice(0, 10)}` : '';
+          notesBox.textContent = u.latest.notes || 'No release notes for this version.';
+          notesBox.classList.toggle('is-empty', !u.latest.notes);
+          notesBox.scrollTop = 0;
+        }
+      }
+
+      const p = plan.primary;
+      primaryBtn.hidden = !p;
+      if (p) {
+        setBtn(primaryBtn, p);
+        const lead = p.busy && p.label.endsWith('…') ? h('span', { class: 'spinner spinner-sm spinner-on-accent' })
+          : icon(p.action === 'releases' ? 'external' : p.action === 'install' ? 'refresh' : 'download');
+        primaryBtn.replaceChildren(lead, p.label);
+      }
+      revealBtn.hidden = !plan.reveal;
+      revealBtn.replaceChildren(icon('folder'), revealLabel(u.platform));
+      releasesBtn.hidden = !plan.releases;
+      hint.hidden = !plan.hint;
+      hintText.textContent = plan.hint;
+
+      const key = JSON.stringify([u.status, u.phase, u.error && u.error.code, u.latest && u.latest.version]);
+      if (key !== spoken) {
+        spoken = key;
+        live.textContent = d.announce;
+      }
+    });
+
+    return section('updates', 'Updates', 'download',
+      autoRow,
+      h('div', { class: 'set-row stack update-row' },
+        h('div', { class: 'row gap-16 update-head' },
+          h('div', { class: 'set-text grow' }, versionEl, lastEl),
+          h('div', { class: 'set-ctl' }, checkBtn)),
+        statusLine,
+        detailEl,
+        progress,
+        notesBlock,
+        h('div', { class: 'row gap-4 update-actions' }, primaryBtn, revealBtn, h('span', { class: 'spacer' }), releasesBtn),
+        hint,
+        live));
+  }
+
   function buildAbout() {
     const verEl = h('span', { class: 'mono' });
     const platEl = h('span');
@@ -535,7 +697,10 @@ export function createSettingsView() {
       'Screen, input and files travel peer-to-peer inside the tailnet: WireGuard plus DTLS-SRTP, with no STUN/TURN servers; Tailscale may relay through DERP when no direct path exists.',
       'Passwords never leave this device; viewers prove they know them.',
       'While someone is connected, a session panel is always visible on this computer.',
-    ];
+      hasUpdateApi()
+        ? 'The only connection outside your tailnet goes to GitHub, for updates: HTTPS requests that carry no names or tailnet details. Turn the daily check off under Updates.'
+        : null,
+    ].filter(Boolean);
     const quit = async () => {
       const ok = await confirmDialog({
         title: 'Quit Tunnelview?',
@@ -563,11 +728,13 @@ export function createSettingsView() {
 
   function build() {
     const sec = buildSecurity();
+    const withUpdates = hasUpdateApi();
     const body = h('div', { class: 'sheet-body' },
-      sec.el, buildStreaming(), buildBehaviour(), buildFiles(), buildNetwork(), buildAppearance(), buildAbout(),
+      sec.el, buildStreaming(), buildBehaviour(), buildFiles(), buildNetwork(), buildAppearance(),
+      withUpdates ? buildUpdates() : null, buildAbout(),
       h('div', { class: 'sheet-foot faint small' }, 'Changes are saved automatically.'));
 
-    const navBtns = SECTIONS.map(([id, label]) =>
+    const navBtns = SECTIONS.filter(([id]) => id !== 'updates' || withUpdates).map(([id, label]) =>
       h('button', { type: 'button', class: 'nav-chip', dataset: { target: id }, onClick: () => scrollToSection(id, true) }, label));
     const closeBtn = h('button', { class: 'btn btn-ghost btn-icon', type: 'button', 'aria-label': 'Close settings', title: 'Close (Esc)', onClick: close }, icon('x', { size: 18 }));
     // Registered after every section's binders, so it also covers controls they just (re)built.
@@ -582,7 +749,10 @@ export function createSettingsView() {
 
     const sheet = h('aside', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'settings-title' },
       h('header', { class: 'sheet-head' },
-        h('div', { class: 'grow' }, h('h2', { id: 'settings-title' }, 'Settings'), h('div', { class: 'small faint' }, 'Tunnelview only ever connects inside your tailnet')),
+        h('div', { class: 'grow' }, h('h2', { id: 'settings-title' }, 'Settings'),
+          h('div', { class: 'small faint' }, hasUpdateApi()
+            ? 'Remote sessions stay inside your tailnet; only update checks go to GitHub'
+            : 'Remote sessions stay inside your tailnet')),
         closeBtn),
       h('nav', { class: 'sheet-nav', 'aria-label': 'Settings sections' }, navBtns),
       body);
@@ -615,7 +785,11 @@ export function createSettingsView() {
     return { wrap, sheet, body, closeBtn, scrollToSection, updateSuggestions: sec.updateSuggestions };
   }
 
-  function open(sectionId = null) {
+  /**
+   * Show the sheet (scrolled to sectionId). focusSection: the section's heading takes the keyboard
+   * focus, so Tab continues inside it (used by the update banner's "View update").
+   */
+  function open(sectionId = null, { focusSection = false } = {}) {
     if (!built) {
       built = build();
       built.updateSuggestions();
@@ -632,7 +806,12 @@ export function createSettingsView() {
       requestAnimationFrame(() => built.wrap.classList.add('open'));
       built.closeBtn.focus({ preventScroll: true });
     }
-    built.scrollToSection(sectionId && SECTIONS.some(([id]) => id === sectionId) ? sectionId : 'security', false);
+    const target = sectionId && SECTIONS.some(([id]) => id === sectionId) ? sectionId : 'security';
+    built.scrollToSection(target, false);
+    if (focusSection) {
+      const head = built.body.querySelector(`#set-${target}-title`);
+      if (head) head.focus({ preventScroll: true });
+    }
   }
 
   function close() {

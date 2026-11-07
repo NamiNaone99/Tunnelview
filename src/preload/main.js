@@ -47,6 +47,33 @@
  *   IdentityInfo = { available:bool, fingerprint:string|null, wasReset:bool,
  *                    error?:string }   // while unavailable: CORRUPT|READ_FAILED|VERSION|WRITE_FAILED|MISSING|NOT_LOADED|…
  *   The identity key itself never reaches this window.
+ *   UpdateState = {   // in-app updates (src/main/updater.js; DECISIONS U1-U6)
+ *     status: 'idle'           // nothing checked yet in this run
+ *           | 'checking' | 'up-to-date'
+ *           | 'available'      // latest is set, not downloaded
+ *           | 'downloading'    // progress is set
+ *           | 'ready'          // latest is downloaded and verified: offer "Restart and install"
+ *           | 'installing'     // see phase; on success Tunnelview quits
+ *           | 'error',         // error is set; latest / downloaded keep what was known, so
+ *                              // Download / Install can still be offered
+ *     phase: null | 'preparing' | 'waiting-for-approval' | 'quitting',   // installing only
+ *                              // (waiting-for-approval: Windows UAC prompt, may stay open long)
+ *     currentVersion: string, platform: 'windows'|'macos'|'other',
+ *     supported: bool,         // this build can install by itself (packaged; Windows x64/arm64
+ *                              // installed by its installer, with elevate.exe, updates on a local
+ *                              // disk; or macOS); otherwise point to the releases page
+ *     autoCheck: bool,         // settings.autoUpdateCheck
+ *     lastCheckAt: number|null,// ms since the epoch of the last completed check
+ *     latest: null | { version:'X.Y.Z', date:string (ISO), notes:string, size:number },
+ *                              // notes: plain text, may contain \n and \t; render as text only
+ *     downloaded: bool,
+ *     progress: null | { received:number, total:number, percent:0..100 },
+ *     error: null | { code:string, message:string },   // message: English, ready to show
+ *     blocked: null | 'INCOMING_SESSION'|'INCOMING_REQUEST'|'OUTGOING_SESSION'|'SESSION_ACTIVE',
+ *                              // install would be refused right now, and why
+ *     justUpdated: null | { from:string, to:string } } // this start follows an in-app update
+ *                              // (macOS: Screen Recording / Accessibility must be allowed again)
+ *   UpdateResult = { ok:true } | { ok:false, code:string, message:string }
  */
 const { contextBridge, ipcRenderer } = require('electron');
 
@@ -77,6 +104,7 @@ contextBridge.exposeInMainWorld('tunnelview', {
    * existing: true → a viewer window for that device was already open and was brought to the front.
    * code: 'NOT_TAILNET' | 'NOT_FOUND' | 'TS_DOWN' | 'SELF_HOST_DISABLED'
    *       | 'AMBIGUOUS' (the name matches several devices — use the full MagicDNS name or IP)
+   *       | 'UPDATING' (an update is being installed on this computer; `error` says so)
    */
   connect: (opts) => ipcRenderer.invoke('session:connect', opts),
   /** Bring a running viewer window to the front. id = AppState.viewers[].id. @returns {Promise<{ok:boolean}>} */
@@ -87,8 +115,9 @@ contextBridge.exposeInMainWorld('tunnelview', {
   /**
    * Partial update; returns the validated, persisted settings. @returns {Promise<PublicSettings>}
    * While an incoming session is active (AppState.host.session !== null) a change to acceptMode,
-   * allowFrom, allowList, autoAcceptSameUser, defaultPermissions or downloadDir REJECTS with
-   * 'Disconnect the remote session to change security settings.' (other keys still apply).
+   * allowFrom, allowList, autoAcceptSameUser, defaultPermissions, downloadDir or autoUpdateCheck
+   * REJECTS with 'Disconnect the remote session to change security settings.' (other keys still
+   * apply). password, loginItemApplied and lastUpdateCheckAt cannot be written from here.
    */
   updateSettings: (partial) => ipcRenderer.invoke('settings:update', partial),
   /**
@@ -151,4 +180,34 @@ contextBridge.exposeInMainWorld('tunnelview', {
   /** End the active incoming session (host side) from the main window. */
   endHostSession: () => ipcRenderer.invoke('host:end-session'),
   quit: () => ipcRenderer.send('app:quit'),
+
+  /* In-app updates. The only traffic outside the tailnet: main process, HTTPS GET to GitHub. */
+  /** @returns {Promise<UpdateState>} */
+  getUpdateState: () => ipcRenderer.invoke('update:get-state'),
+  /** Check GitHub now (always allowed). Resolves when the check is over. @returns {Promise<UpdateState>} */
+  checkForUpdates: () => ipcRenderer.invoke('update:check'),
+  /**
+   * Download and verify UpdateState.latest. Resolves when it is verified (ok) or failed; progress
+   * arrives through onUpdateState meanwhile. @returns {Promise<UpdateResult>}
+   */
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  /**
+   * Install the downloaded update (only ever from the user's click). Refused with the reason
+   * (code = UpdateState.blocked) during an incoming session, a pending incoming request or an
+   * outgoing session. Windows: resolves after the UAC prompt is answered ({ok:true}: Tunnelview
+   * quits now; code 'UAC_DECLINED' when declined). macOS: resolves once the helper runs, then
+   * Tunnelview quits and reopens updated. @returns {Promise<UpdateResult>}
+   */
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+  /**
+   * Turn the daily check on / off (settings.autoUpdateCheck). Refused ({ok:false,
+   * code:'SETTINGS_LOCKED', message}) while an incoming session is active. @returns {Promise<UpdateResult>}
+   */
+  setAutoUpdateCheck: (enabled) => ipcRenderer.invoke('update:set-auto', enabled === true),
+  /** Show the downloaded update file in Explorer / Finder. @returns {Promise<UpdateResult>} */
+  revealUpdate: () => ipcRenderer.invoke('update:reveal'),
+  /** Open https://github.com/NamiNaone99/Tunnelview/releases/latest in the browser. @returns {Promise<{ok:boolean}>} */
+  openReleasesPage: () => ipcRenderer.invoke('update:open-releases'),
+  /** Pushed on every update state change. @param {(s: UpdateState) => void} cb @returns unsubscribe fn */
+  onUpdateState: (cb) => on('update:state', cb),
 });

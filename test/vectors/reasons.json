@@ -418,6 +418,22 @@
         },
         {
           "args": [
+            "updating",
+            {
+              "host": "office-pc",
+              "user": "Alice Example"
+            }
+          ],
+          "result": {
+            "detail": "",
+            "icon": "refresh",
+            "message": "This computer is installing a Tunnelview update, so no session can start now. Connect again after Tunnelview restarts.",
+            "title": "Tunnelview is updating",
+            "tone": "info"
+          }
+        },
+        {
+          "args": [
             "init-failed",
             {
               "host": "office-pc",
@@ -988,6 +1004,20 @@
             "message": "Starting a new connection to the remote device failed. Check that Tailscale is running and try again.",
             "title": "Couldn't reconnect",
             "tone": "danger"
+          }
+        },
+        {
+          "args": [
+            "updating",
+            null
+          ],
+          "note": "no context: the default names",
+          "result": {
+            "detail": "",
+            "icon": "refresh",
+            "message": "This computer is installing a Tunnelview update, so no session can start now. Connect again after Tunnelview restarts.",
+            "title": "Tunnelview is updating",
+            "tone": "info"
           }
         },
         {

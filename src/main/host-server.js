@@ -263,17 +263,21 @@ function describeListenError(err, ip, port) {
 
 class HostServer extends EventEmitter {
   /**
-   * @param {{tailscale, settings, auth, appVersion:string, osName:'windows'|'macos', identity?}} deps
+   * @param {{tailscale, settings, auth, appVersion:string, osName:'windows'|'macos', identity?, busy?}} deps
    *   identity: identity.js instance (unavailable / publicKeyB64url() / sign()) or null. Without
    *   one, hellos carry no `ident`, /info no `features`, and startPairing() refuses NO_IDENTITY.
+   *   busy: () => boolean, true while main installs an update (updater.isInstalling()): every
+   *   admission (password, trusted, same-user, prompt) is denied 'busy' meanwhile and no prompt
+   *   is shown. A throwing callback counts as not busy.
    */
-  constructor({ tailscale, settings, auth, appVersion, osName, identity = null } = {}) {
+  constructor({ tailscale, settings, auth, appVersion, osName, identity = null, busy = null } = {}) {
     super();
     if (!tailscale || !settings || !auth) throw new TypeError('HostServer requires { tailscale, settings, auth }');
     this.ts = tailscale;
     this.settings = settings;
     this.auth = auth;
     this.identity = identity || null;
+    this._busy = typeof busy === 'function' ? busy : null;
     this.appVersion = cleanText(String(appVersion || '0.0.0'), 64) || '0.0.0';
     this.osName = VIEWER_OS.has(osName) ? osName : 'other';
     this._now = Date.now; // clock for limiters + cooldowns (tests may replace it)
@@ -916,7 +920,7 @@ class HostServer extends EventEmitter {
       os: this.osName,
       passwordSet: !!s.password,
       acceptMode: s.acceptMode,
-      busy: !!(this._session || this._pending),
+      busy: !!(this._session || this._pending || this._updating()),
       enabled: s.hostEnabled, // extra (not in the contract): lets the UI say "incoming disabled"
     };
     // Signed hellos and pairing work only while the key can be used. A phone reads [] as "this
@@ -1270,8 +1274,8 @@ class HostServer extends EventEmitter {
     // Only an active session makes the host busy for everyone. Another viewer's pending prompt
     // blocks only requests that need a prompt themselves (_startPrompt); password, trusted and
     // same-user admissions withdraw it (_accept), so unanswered prompts from strangers cannot keep
-    // trusted devices and correct passwords out.
-    if (this._session) return this._deny(conn, DENY.BUSY);
+    // trusted devices and correct passwords out. An update being installed makes it busy too.
+    if (this._session || this._updating()) return this._deny(conn, DENY.BUSY);
     if (!this._policyAllows(conn.ident, s)) return this._deny(conn, DENY.NOT_ALLOWED);
     // Locks gate only password verification: while password sign-in is blocked for this peer its
     // proof is ignored (not verified, not counted) and admission continues without it.
@@ -1357,9 +1361,9 @@ class HostServer extends EventEmitter {
       if (conn.state === 'pending') return undefined;
       return this._deny(conn, pwBlocked);
     }
-    // Only an active session is 'busy': a correct proof withdraws another viewer's pending prompt
-    // (_accept), as on the request path.
-    if (this._session) return this._deny(conn, DENY.BUSY);
+    // Only an active session (or an update being installed) is 'busy': a correct proof withdraws
+    // another viewer's pending prompt (_accept), as on the request path.
+    if (this._session || this._updating()) return this._deny(conn, DENY.BUSY);
     const s = this._settings();
     if (s.password && this.auth.verifyProof(s.password, conn.nonce, msg.proof, this._binding(conn))) {
       this._resetLimiter(conn);
@@ -1448,6 +1452,8 @@ class HostServer extends EventEmitter {
     clearTimeout(conn.timer);
     conn.timer = null;
     if (this._session && this._session !== conn) return this._deny(conn, DENY.BUSY);
+    // Every admission path ends here: a prompt accepted while an update started installing too.
+    if (this._updating()) return this._deny(conn, DENY.BUSY);
     this._withdrawPending(conn);
     const wasPrompt = conn.state === 'pending';
     if (this._pending === conn) this._pending = null;
@@ -1479,6 +1485,12 @@ class HostServer extends EventEmitter {
     this._send(conn, { t: MSG.ACCEPTED, sessionId: conn.session.id, permissions: { ...permissions }, via });
     this._safeEmit('session-start', structuredClone(conn.session));
     return undefined;
+  }
+
+  /** Main installs an update (deps.busy): no session may start. Fails open (a throwing callback). */
+  _updating() {
+    if (!this._busy) return false;
+    try { return this._busy() === true; } catch { return false; }
   }
 
   /**

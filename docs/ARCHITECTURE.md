@@ -102,6 +102,34 @@ and this document disagree, fix the code (or update this document deliberately).
    macOS Screen Recording / Accessibility grants. `scripts/verify-fuses.js` checks every CI build.
    Main also rejects debugging switches and `--dev` in packaged builds (`app.isPackaged`), so
    `--dev` works only in development runs.
+10. **The updater is the single path outside the tailnet** (`updater.js`, §7). Every rule above
+    still holds. This is the one documented exception to "only the tailnet":
+    - **Who and how.** Only the main process, with Node `https`. The requests are `GET` only, over
+      HTTPS only, and the updater never accepts a connection. Renderers cannot reach it: their CSP
+      stays `connect-src 'self'`, and they only get the sanitized `update:*` IPC (§6).
+    - **Where.** Only `github.com`, `objects.githubusercontent.com` and
+      `release-assets.githubusercontent.com` (redirects are checked hop by hop against that list),
+      plus the system DNS lookups of those three names. §1.4's "never system DNS" rule is about
+      dialing peers and is not loosened by this.
+    - **What.** The signed manifest
+      `https://github.com/NamiNaone99/Tunnelview/releases/latest/download/tunnelview-update.json`.
+      After the user's click, it also fetches the one release asset that the verified manifest names
+      for this platform.
+    - **When.** In packaged builds, it checks automatically once a day: the first check comes 60 s
+      after start, and none within 24 h of the last one. A check that failed because of the network
+      or GitHub (no answer, 429, 5xx) is retried after 2 h, then 4, 8 and 16 h, then once a day;
+      any other failure counts as that day's check. It also runs whenever the user clicks
+      *Check now* or *Download*.
+    - **What it sends.** Nothing about the user, this computer or the tailnet: no cookies, no
+      credentials, no query string. The only headers are
+      `User-Agent: Tunnelview-Updater/<version>` and `Accept: application/octet-stream`. GitHub
+      sees the source IP, the time and the running Tunnelview version.
+    - **Turning it off.** `settings.autoUpdateCheck = false` (Settings › Updates) stops every
+      automatic request. The manual *Check now* stays available. The setting is locked during an
+      incoming session (§6), so a remote controller cannot switch it.
+    - **What it does with the answer.** Nothing the updater receives reaches the host server,
+      signaling or WebRTC. Nothing is installed without the user's click and a manifest whose
+      Ed25519 signature verifies against `update-keys.js`.
 
 ## 2. Repository layout
 
@@ -115,7 +143,11 @@ scripts/verify-fuses.js     checks a packaged app's Electron fuses + ASAR integr
 scripts/mac-install.sh      builds Tunnelview.app on a Mac and installs it (README › macOS)
 scripts/make-mobile-fixtures.js  writes test/vectors/*.json from the real modules; --check only
                             compares (exit 1 when a file is missing, different or stale)
-.github/workflows/build.yml Windows + macOS builds
+scripts/sign-update.js      builds, signs and verifies tunnelview-update.json for a release (CI job
+                            update-manifest; Node built-ins only, §7 updater.js)
+.github/workflows/build.yml Windows + macOS builds; on v* tags the signed update manifest
+                            (update-manifest, environment `release`) and the GitHub release
+.github/release-notes/      optional v<version>.txt: plain-text notes signed into the manifest
 docs/ARCHITECTURE.md        this file
 README.md, SECURITY.md, LICENSE
 test/*.test.js              node --test (pure Node; no Electron required)
@@ -123,7 +155,9 @@ test/vectors/*.json         shared test vectors for the mobile client (auth, lin
                             generated, never hand-edited: run make-mobile-fixtures.js after a change
                             (test/mobile-vectors.test.js fails until they match the code)
 test/support/               test helpers, not tests: fake-tailscale.js (fake tailnet over
-                            127.0.0.x), phone-sim.js (Node phone for the pairing tests)
+                            127.0.0.x), phone-sim.js (Node phone for the pairing tests),
+                            update-fixtures.js (throwaway update keys, signed manifests, a fake
+                            HTTPS transport: the updater tests open no socket)
 test/fixtures/              tailscale-*.json status samples, qr-golden.json (reference QR symbols)
 src/shared/protocol.js      UMD constants (main: require; renderer: window.TunnelviewProtocol)
 src/main/
@@ -139,6 +173,10 @@ src/main/
   viewer-client.js          outbound WS client for one viewer session
   windows.js                BrowserWindow factories (main, viewer, panel, prompt)
   ipc.js                    every ipcMain handler (validates sender + payloads)
+  updater.js                in-app updates: check, download + verify, install (the only traffic
+                            outside the tailnet, §1.10)
+  update-manifest.js        tunnelview-update.json: build, sign, strict verify (pure, Node built-ins only)
+  update-keys.js            the Ed25519 public keys that may sign the manifest (a list, for rotation)
   tray.js                   tray icon + menu
   icon-art.js               pure-Node pixel art (no electron): logo/tray rasterizer + PNG encoder
                             (used by icons.js at runtime AND scripts/make-icons.js at build time)
@@ -185,7 +223,9 @@ slot):
 - while a session is active, every other request is denied `busy`;
 - a request that needs a prompt while another viewer's prompt is pending is denied `busy`;
 - a password, trusted or same-user admission does not wait for that prompt: it **withdraws** it
-  (that viewer is denied `busy`, main gets `request-cancelled`) and is admitted.
+  (that viewer is denied `busy`, main gets `request-cancelled`) and is admitted;
+- while this computer installs an update, every request is denied `busy` (§7 `updater.js`,
+  *Sessions while installing*).
 
 A machine may run several outgoing viewer sessions.
 
@@ -208,6 +248,7 @@ A machine may run several outgoing viewer sessions.
   policy, refused with 403, because it reveals whether a host is unattended or busy; no Origin
   required since it carries nothing secret) → `200 application/json`:
   `{ app:'Tunnelview', protocol:2, version, hostname, os:'windows'|'macos', passwordSet, acceptMode, busy, features? }`.
+  `busy` is true while a session is active, a prompt is pending, or the host installs an update.
   `features` (`PROTOCOL.INFO_FEATURES`) is `['ident-v1', 'pair-v1']` while this computer's identity key
   is usable and `[]` while it is unavailable; a host without an identity module omits it.
   Everything else → 404.
@@ -478,8 +519,8 @@ shapes that other modules depend on are listed here as well.
 | `tailscale:refresh` | `refreshTailscale()` | re-reads `tailscale status` now → `AppState` |
 | `app:relaunch` | `relaunchApp()` | quits and restarts Tunnelview (e.g. *Quit & Reopen* after granting Screen Recording) |
 | `viewer:focus` | `focusViewer(id)` | brings the viewer window `id` (from `AppState.viewers`) to the front |
-| `session:connect` | `connect(opts)` | `{ok:true}` \| `{ok:true, existing:true}` (a viewer for that device was already open and was focused instead) \| `{ok:false, error, code}`; `code` adds `'AMBIGUOUS'` (several devices match the name; §7 `resolveTarget`) |
-| `settings:update` | `updateSettings(partial)` | while an **incoming session is active**, rejects changes to `acceptMode`, `allowFrom`, `allowList`, `autoAcceptSameUser`, `defaultPermissions` and `downloadDir` |
+| `session:connect` | `connect(opts)` | `{ok:true}` \| `{ok:true, existing:true}` (a viewer for that device was already open and was focused instead) \| `{ok:false, error, code}`; `code` adds `'AMBIGUOUS'` (several devices match the name; §7 `resolveTarget`) and `'UPDATING'` (an update is being installed on this computer: no outgoing session starts until Tunnelview restarts; `viewer:reconnect` then closes with reason `updating`) |
+| `settings:update` | `updateSettings(partial)` | while an **incoming session is active**, rejects changes to `acceptMode`, `allowFrom`, `allowList`, `autoAcceptSameUser`, `defaultPermissions`, `downloadDir` and `autoUpdateCheck` (`LOCKED_SETTING_KEYS`); never writes `password`, `loginItemApplied` or `lastUpdateCheckAt` |
 | `settings:set-password`, `settings:choose-download-dir` | `setPassword`, `chooseDownloadDir` | refused while an incoming session is active |
 | `pairing:start` | `startPairing()` | → `{ok:true, offerId, link, qr:{size, bits}, expiresAt, fingerprint, host:{name, ips, port}}` \| `{ok:false, code:'SESSION_ACTIVE'\|'HOSTING_OFF'\|'TS_DOWN'\|'NO_IDENTITY'}`. `qr` = `qr.encode(link)` (§7); `fingerprint` and `host` are read back from the link itself (`host.name` is `''` when the link has no MagicDNS name; the dialog then shows the first address, as the phone does). Replaces a live offer |
 | `pairing:cancel` | `cancelPairing(offerId)` | → `{ok}`; withdraws that offer only (a stale dialog never cancels a newer one) |
@@ -487,6 +528,14 @@ shapes that other modules depend on are listed here as well.
 | `security:identity` | `getIdentity()` | → `{available, fingerprint\|null, wasReset, error?}`; never key bytes |
 | `security:reset-identity` | `resetIdentity()` | new key (every paired phone must pair again), cancels a live offer → `{ok:true, …identity}` \| `{ok:false, code:'SESSION_ACTIVE'\|'WRITE_FAILED'\|'NO_IDENTITY', message?, …identity}`; **refused while an incoming session is active**, like the locked settings (`message` = the locked-settings sentence; `error` is always the identity's error code) |
 | `security:retry-identity` | `retryIdentity()` | loads `identity.json` again → identity info; cancels a live offer when the key changed. Never makes a new key once a key file existed in this run (both files gone → `error:'MISSING'`; Reset identity… makes one) |
+| `update:get-state` | `getUpdateState()` | → `UpdateState` (below) |
+| `update:check` | `checkForUpdates()` | checks GitHub now and resolves with the `UpdateState` after the check. Always allowed: during sessions and with `autoUpdateCheck` off |
+| `update:download` | `downloadUpdate()` | → `UpdateResult` once the file is verified or the download failed; progress arrives through `update:state` |
+| `update:install` | `installUpdate()` | → `UpdateResult`; only from the user's click. Refused with the `blocked` code during an incoming session, a pending incoming request or an outgoing session. While it runs (`updater.isInstalling()`, the UAC prompt included) no session starts in either direction (§7 `updater.js`, *Sessions while installing*). Windows resolves after the UAC answer (`{ok:true}` = Tunnelview quits now; `UAC_DECLINED`); macOS resolves `{ok:true}` once the swap helper runs, then quits and reopens updated |
+| `update:set-auto` | `setAutoUpdateCheck(enabled)` | → `UpdateResult`: `BAD_REQUEST` 'Invalid value.' for a non-boolean; `SETTINGS_LOCKED` 'Disconnect the remote session to change security settings.' while an incoming session is active and the value would change |
+| `update:reveal` | `revealUpdate()` | shows the downloaded file in Explorer / Finder → `UpdateResult`; `NOT_READY` when there is none |
+| `update:open-releases` | `openReleasesPage()` | opens `https://github.com/NamiNaone99/Tunnelview/releases/latest` in the browser → `{ok:true}` |
+| `update:state` (main → renderer) | `onUpdateState(cb)` | `UpdateState` on every change (`ipc.sanitizeUpdateState`) |
 
 - `AppState.host.warning: string|null` is a non-fatal problem while listening, e.g. a Windows
   Firewall rule that blocks Tunnelview.
@@ -494,6 +543,38 @@ shapes that other modules depend on are listed here as well.
   last `/tunnelview/v1/info` probe (`null` = not probed). `PeerInfo.tunnelview.port` is the port the
   device answered on. `connect` uses it when the user typed no port.
 - `recent` entries may carry `port` (§8).
+- **`update:*`** (§7 `updater.js`) answer only the main window. Any other sender (viewer, panel,
+  prompt, an unregistered frame) gets the invoke rejected with `Error('Forbidden')`. Without an
+  updater, download / install / reveal return `{ok:false, code:'NOT_SUPPORTED', message}` and
+  get-state / check return `status:'idle'`.
+- `UpdateState` always has every key and is rebuilt field by field (`ipc.sanitizeUpdateState`):
+  ```
+  { status: 'idle'|'checking'|'up-to-date'|'available'|'downloading'|'ready'|'installing'|'error',
+    phase: null|'preparing'|'waiting-for-approval'|'quitting',      // non-null only while installing
+    currentVersion, platform: 'windows'|'macos'|'other',
+    supported: bool,          // can install by itself: packaged, and Windows x64/arm64 installed
+                              //   by the NSIS installer (resources\elevate.exe and
+                              //   "Uninstall Tunnelview.exe" next to the exe) with its updates
+                              //   folder on a local disk, or macOS
+    autoCheck: bool,          // settings.autoUpdateCheck
+    lastCheckAt: number|null, // ms epoch of the last completed check
+    latest: null|{version:'X.Y.Z', date:'YYYY-MM-DDTHH:MM:SS.sssZ', notes, size},
+                              // notes: plain text, may contain \n and \t, ≤ 4000; render as text only
+    downloaded: bool,         // latest is downloaded and verified
+    progress: null|{received, total, percent:0..100},               // non-null only while downloading
+    error: null|{code, message},                                     // English, ready to show
+    blocked: null|'INCOMING_SESSION'|'INCOMING_REQUEST'|'OUTGOING_SESSION'|'SESSION_ACTIVE',
+    justUpdated: null|{from, to} }                                   // this start follows an in-app update
+  ```
+  `idle` = nothing checked yet in this run; `ready` = the verified file of `latest` is on disk: the
+  UI offers **Restart and install** (a confirmation, whose button says the same); `error` keeps
+  `latest` and `downloaded`, so Download or Install can still be offered.
+- `UpdateResult` = `{ok:true}` | `{ok:false, code, message}` (`ipc.sanitizeUpdateResult`; an
+  unknown failure becomes `UNKNOWN` 'The update failed.'). Refusals (`BUSY`, `NOT_READY`,
+  `NOT_AVAILABLE`, `NOT_SUPPORTED` and the session codes) leave the state as it is, also when
+  they come up only during an install (a session that started while the installer was verified,
+  Tunnelview quitting): the state goes back to `ready`. Failures set
+  `status:'error'`. The codes and their English messages are in §7 `updater.js`.
 
 **Session panel** (`preload/panel.js` → `window.tunnelviewPanel`)
 
@@ -606,7 +687,8 @@ invalid binding makes `verifyProof` return false and `computeProof` reject with 
 
 ### `host-server.js`
 ```js
-const host = new HostServer({ tailscale, settings, auth, appVersion, osName, identity });   // identity: identity.js or null
+const host = new HostServer({ tailscale, settings, auth, appVersion, osName, identity, busy });   // identity: identity.js or null
+                             //   busy: () => boolean (updater.isInstalling()); true → every admission is denied 'busy'
 await host.start(); await host.stop(); host.status() → {listening, addresses:[], port, error}
 host.on('request', req)      // req = {requestId, peer:{ip, hostname, os, user:{login,displayName}, stableId, tags, sameUser, isSelf}, viewer:{hostname,os,version}, respond({accept, permissions, trust}) }
                              //   peer.hostname = MagicDNS label (verified); viewer.hostname = self-reported, display only
@@ -707,8 +789,10 @@ Viewer phases: `connecting` → `hello` (host info known) → `auth-required` (p
 unless `hello.auth.autoAccept` or `hello.auth.passwordLocked`, or after `auth-failed`, with
 `remaining`) / `waiting` (pending prompt) → `accepted` (`{sessionId, permissions, host}`) →
 `closed` (`{reason, message, proofSent}`). Errors use phase `closed` with reasons
-`unreachable|not-tailnet|not-tailnet-route|not-tunnelview|timeout|protocol|rate-limited|denied:<reason>|host-ended|network`
+`unreachable|not-tailnet|not-tailnet-route|not-tunnelview|timeout|protocol|rate-limited|denied:<reason>|host-ended|network|updating`
 (and `local` when the viewer closed it itself):
+- `updating`: set by ipc.js, not the session: a reconnect while this computer installs an
+  update (`updater.isInstalling()`) does not dial;
 - `not-tailnet`: the target is not a device in the current `tailscale status` (below);
 - `not-tailnet-route`: the target is a tailnet device, but the socket's local address is not one
   of our own Tailscale IPs (below);
@@ -871,6 +955,341 @@ internet (Windows Mark-of-the-Web, macOS quarantine).
   time-boxed the same way (10 s → `no-access`); a create that completes late is closed and its file
   deleted. Until access is allowed, files sent to the Mac fail with `no-access`.
 
+### `updater.js` (in-app updates), `update-manifest.js`, `update-keys.js`
+```js
+const { createUpdater } = require('./updater');
+const updater = createUpdater(deps);  // every OS dependency is injectable: transport, fs, spawn, execFile,
+                                      //   timers, now, settings, sessionBlocker, quit, showItemInFolder, keys, …
+updater.init()            // → {justUpdated}: reads updates/pending.json left by an install, removes leftovers
+updater.start()           // automatic checks (packaged builds, autoUpdateCheck on)
+updater.reschedule()      // back from sleep / screen unlock: works the next check out from the wall clock again
+updater.isInstalling()    // → true from install() until it ends: no session may start meanwhile
+updater.dispose()         // timers off; a running check / download is aborted
+updater.getState()        // → UpdateState (§6)
+updater.check()           // → Promise<UpdateState>; never throws, a failure ends in status 'error'
+updater.download()        // → Promise<UpdateResult> once the file is verified (or the download failed)
+updater.install()         // → Promise<UpdateResult>; {ok:true} once the installer / helper runs, then the app quits
+updater.reveal()          // → UpdateResult: show the downloaded file in Explorer / Finder
+updater.settingsChanged(keys)   // autoUpdateCheck toggled → reschedule
+updater.sessionsChanged()       // re-evaluate `blocked`; emits 'state' when it changed
+updater.justUpdated       // {from, to} | null
+// events: 'state' (UpdateState) on every change
+// also exported: MANIFEST_URL, RELEASES_URL, ALLOWED_HOSTS, MESSAGES, messageFor, MAC_SWAP_SCRIPT,
+//   allowedUrl, assetUrl, platformKeyFor
+```
+
+**Network** (§1.10). The updater uses Node `https` with `agent:false`: no keep-alive, no shared
+sockets, Node's TLS defaults (certificate and host name verified). It does not use Electron's
+`net`, so it has no browser session, no cookies, no cache and no system proxy. A TLS-inspecting
+proxy makes it fail with `TLS`.
+- **Manifest:** `GET https://github.com/NamiNaone99/Tunnelview/releases/latest/download/tunnelview-update.json`
+  (`MANIFEST_URL`).
+  - At most **64 KiB**: a larger `Content-Length` or body gives `MANIFEST_TOO_LARGE`.
+  - **30 s** for the whole check.
+  - 404 → `NO_MANIFEST`.
+- **Asset:** `GET https://github.com/NamiNaone99/Tunnelview/releases/download/v<version>/<name>`
+  (`assetUrl`). `<version>` and `<name>` come from the **verified** manifest, so a release
+  published between the two requests cannot mix files. `<name>` must match the platform's
+  allow-list pattern (no path separators, no traversal) and equal the expected name for that
+  version.
+- **Redirects:** followed by hand, at most 5 (`MAX_REDIRECTS`). Every hop must be `https:` to
+  `github.com`, `objects.githubusercontent.com` or `release-assets.githubusercontent.com`
+  (`ALLOWED_HOSTS`), with no port and no user info (`allowedUrl`). Anything else stops the
+  request with `BAD_REDIRECT`.
+- **Responses:**
+  - 30 s socket idle timeout on both requests (`TIMEOUT`);
+  - a `Content-Encoding` other than `identity` → `BAD_RESPONSE`;
+  - any status other than 200 or a redirect → `HTTP_STATUS`.
+- **Headers:** exactly `User-Agent: Tunnelview-Updater/<version>` and
+  `Accept: application/octet-stream`. No cookies, no auth, no query string, no identifiers.
+
+**Manifest** `tunnelview-update.json`, attached to every release (`update-manifest.js`):
+```
+{"payload":"<base64 of the UTF-8 payload JSON>","sig":"<base64 Ed25519 signature over the payload bytes>","kid":"<16 hex>"}
+payload = {"v":1,"app":"Tunnelview","version":"X.Y.Z","date":"YYYY-MM-DDTHH:MM:SS.sssZ","notes":"…",
+           "files":{"win32-x64":{"name","size","sha256"},"win32-arm64":{…},"darwin-arm64":{…},"darwin-x64":{…}}}
+```
+- **Payload keys** in exactly this order: `v` (1), `app` (`'Tunnelview'`), `version`, `date`,
+  `notes`, `files`. `version` is X.Y.Z, digits only, no leading zeros. `date` is what
+  `Date#toISOString()` writes.
+- **`notes`:** plain text, at most 4000 UTF-16 code units. It allows no control characters except
+  `\n` and `\t`, no bidi controls, no U+2028 / U+2029, no BOM and no lone surrogates.
+- **`files`:** exactly the four keys below.
+  - `name` must be the release asset name for that key and version (the dmg files are not listed;
+    the updater ignores them).
+  - `size` is an integer from 1 to 400 MiB.
+  - `sha256` is 64 lowercase hex characters.
+
+  | key | name |
+  |---|---|
+  | `win32-x64` | `Tunnelview-Setup-<v>-x64.exe` |
+  | `win32-arm64` | `Tunnelview-Setup-<v>-arm64.exe` |
+  | `darwin-arm64` | `Tunnelview-<v>-mac-arm64.zip` |
+  | `darwin-x64` | `Tunnelview-<v>-mac-x64.zip` |
+
+  `platformKeyFor` picks the key. Windows keeps its own architecture: an arm64 installer would
+  install an app an x64 machine cannot start. A Mac under Rosetta gets `darwin-arm64`.
+- **Key id:** `kid` = the first 16 lowercase hex characters of SHA-256 of the raw 32-byte Ed25519
+  public key (`update-manifest.keyId`). The production key is
+  `HpauGGB_6J3ZetoaaXAdBZbrj4DXVpwzODsP2mzIiIE` (raw, base64url without padding), kid
+  `3f8c892c42f7ffac`. The same value is the repository variable `UPDATE_PUBLIC_KEY`. In a shell:
+  `node -e "const c=require('crypto');console.log(c.createHash('sha256').update(Buffer.from(process.argv[1],'base64url')).digest('hex').slice(0,16))" <publicKey>`.
+
+**Verification order** (`verifyManifest`; one code per failure, the first failing step wins):
+1. the file is at most 64 KiB, else `TOO_LARGE`;
+2. it is strict UTF-8 JSON with exactly the string keys `payload`, `sig` and `kid`; `kid` is 16
+   lowercase hex characters, `payload` is canonical base64 and `sig` is canonical base64 of 64
+   bytes. Else `MALFORMED`;
+3. an embedded key (`update-keys.js`) has that `kid`, else `UNKNOWN_KEY`. A list entry whose key
+   does not hash to its own `kid` never matches;
+4. the Ed25519 signature verifies over the decoded payload bytes, else `BAD_SIGNATURE`;
+5. the payload is strict UTF-8 JSON that follows every rule above, and re-encoding it in canonical
+   key order gives exactly the signed bytes (one spelling only). Else `INVALID`;
+6. the updater offers it only when `version` is **strictly greater** than the running version (a
+   prerelease build `X.Y.Z-…` also takes `X.Y.Z`). An older or equal version is `up-to-date`, so a
+   replayed old manifest cannot downgrade.
+
+The updater reports these as `MANIFEST_TOO_LARGE`, `MANIFEST_MALFORMED`, `MANIFEST_UNKNOWN_KEY`,
+`MANIFEST_BAD_SIGNATURE` and `MANIFEST_INVALID`.
+
+The download is streamed through a running SHA-256 and byte count:
+- more bytes than `size` stop it at once;
+- a `Content-Length` other than `size`, or a different final size, gives `SIZE_MISMATCH`;
+- a different hash gives `HASH_MISMATCH`.
+
+The file is deleted in each case.
+
+**Schedule.** Automatic checks run in packaged builds with `autoUpdateCheck` on:
+- the first check comes 60 s after start, then one every 24 h;
+- `lastUpdateCheckAt` is written after every completed check, automatic or manual. A restart within
+  24 h of it waits, and a value more than 24 h in the future (the clock moved back) counts as never;
+- a failed automatic check is quiet (status line only). A failure that may pass soon (`NETWORK`,
+  `TIMEOUT`, `NO_MANIFEST`, `HTTP_STATUS` 429 or 5xx) is not recorded. It is tried again after
+  2 h, then after 4, 8 and 16 h, then once a day until a check completes. Any other failure (a
+  manifest this version cannot verify, such as `MANIFEST_UNKNOWN_KEY` after a key rotation, a
+  refused redirect, …) would fail the same way again: it is recorded like a completed check, so
+  the next try comes a day later, restarts included;
+- the timers count awake time only on macOS, so `index.js` calls `reschedule()` on
+  `powerMonitor` `resume` and `unlock-screen`. It works the due time out from the wall clock
+  again: 60 s when the check is overdue, else the rest of the day;
+- an automatic check that falls during a download or an install moves by 30 min;
+- while the next-start error of a failed install (`INSTALL_INCOMPLETE`, `MAC_REPLACE_FAILED`) is
+  shown, an automatic check keeps it as long as that version is still the latest (offline too).
+
+*Check now* is always allowed.
+
+**Storage** (`updatesDir`: `%LOCALAPPDATA%\Tunnelview\updates\` on Windows, `userData/updates/`
+on macOS; §8). On Windows `userData` is the roaming `%APPDATA%`, which a domain can redirect to a
+network share; the elevated installer must run from a local disk, so `index.js` passes the local
+folder (`<home>\AppData\Local` when `LOCALAPPDATA` is not an absolute path).
+- `<version>/<name>.partial` is renamed to `<name>` once verified (mode 0600). Only the newest
+  version folder is kept. A check that finds the same version with another name, size or SHA-256
+  (a rebuilt release) deletes the earlier download and offers the new one.
+- `install-XXXXXX/` is the Windows staging folder (mkdtemp), and `<version>/x-XXXXXX/` the macOS
+  extraction folder.
+- `pending.json` = `{v:1, platform, from, to, at, staged | dest, stage, backup}` is written right
+  before the installer or helper starts.
+- `install-result` holds the macOS helper's outcome: `ok`, `timeout`, `busy`, `precondition`,
+  `move-old-failed`, `move-new-failed`, `rollback-failed` or `bad-args`.
+- Next to the macOS app: `<app parent>/.Tunnelview-update-XXXXXX/Tunnelview.app` (the staged
+  bundle) and `<app parent>/.Tunnelview-old-<12 hex>.app` (the old bundle during the swap).
+- At start, `init()` removes `install-*` folders, `.partial` files, extraction folders and version
+  folders that are not newer than the running version. On macOS it also removes
+  `.Tunnelview-update-XXXXXX` folders next to the app that belong to this user and are not
+  symlinks (a crash between staging and spawn). While an install from the previous run is still
+  at work (*Next start*), it keeps that install's files.
+
+**Session gating.** `install()` is refused, with the state unchanged and the reason as the code:
+- `INCOMING_SESSION`: an incoming session is active;
+- `INCOMING_REQUEST`: an incoming request's prompt is pending;
+- `OUTGOING_SESSION`: an outgoing viewer session is connecting or connected;
+- `SESSION_ACTIVE`: the blocker cannot be read.
+
+`index.js` provides the blocker (`updateBlocker`) and calls `sessionsChanged()` on every
+state push, so `UpdateState.blocked` shows the reason in advance. The gate is checked when the
+install starts and again right before the installer or helper is spawned. *Check now* and
+*Download* stay allowed during sessions, and `autoUpdateCheck` is locked during an incoming session
+(§6).
+
+**Sessions while installing** (the other direction of that gate). From the moment `install()`
+starts until it ends (`isInstalling()`; on Windows this includes the UAC prompt, which can stay
+open for long), no new session starts, because approving the prompt quits Tunnelview at once:
+- HostServer's `busy` option denies every admission (password, trusted device, same user, prompt,
+  and a prompt accepted meanwhile) with `busy`, and `/tunnelview/v1/info` reports `busy:true`;
+- `index.js` `onRequest` refuses a request without showing a prompt;
+- ipc refuses `session:connect` with `UPDATING`, and a viewer reconnect closes with reason
+  `updating` (§6).
+
+When the install ends without quitting (UAC declined, a failure), sessions are allowed again.
+
+**Install on Windows** (the NSIS per-machine installer needs administrator rights). `supported` is
+false without `resources\elevate.exe`, the elevation helper electron-builder ships with per-machine
+NSIS builds, and without `Uninstall Tunnelview.exe` next to the exe: a `dist\win-unpacked` or
+copied folder has elevate.exe too, but the silent installer would update the per-machine install
+instead of that copy. It is also false when the updates folder is a UNC path (`\\server\…`).
+1. The verified installer is moved into a fresh `updates\install-XXXXXX\` (gone meanwhile:
+   `NOT_READY`).
+2. It is opened with an exclusive lock (`UV_FS_O_EXLOCK`; `EBUSY` from an antivirus scan is retried
+   for about 10 s, then `LOCKED`, and the download is kept for another try), and its size and
+   SHA-256 are checked against the manifest again (`TAMPERED` otherwise, and the file is deleted).
+3. With no `await` in between, the updater checks the session gate again, writes `pending.json`,
+   closes the file and spawns
+   `<resources>\elevate.exe <LocalAppData>\Tunnelview\updates\install-XXXXXX\Tunnelview-Setup-<v>-<arch>.exe /S --updated --force-run`:
+   detached, `windowsHide`, no shell. Spawning the installer directly fails with `EACCES` and shows
+   no UAC prompt.
+4. `phase:'waiting-for-approval'` lasts until elevate.exe exits:
+   - exit 0: the installer runs and Tunnelview quits. The installer closes what is still running
+     (in other users' sessions too), keeps userData, the shortcuts and the login item, and
+     `--force-run` starts the new version;
+   - exit 1 with `…could not be launched: 1223`: `UAC_DECLINED`;
+   - anything else: `LAUNCH_FAILED` (with the Windows error number when known).
+
+   On a refusal the installer goes back to `updates\<version>\`, for another try or `reveal` (the
+   UI offers it after `UAC_DECLINED` and `LAUNCH_FAILED`).
+
+The installer's own exit code cannot be seen. The next start compares versions instead.
+
+**Install on macOS** (the ad-hoc signed zip):
+1. **The running bundle**, from `execPath` (`…/Tunnelview.app/Contents/MacOS/Tunnelview`):
+   - it is not a symlink;
+   - it is not under `AppTranslocation`, else `TRANSLOCATED`;
+   - its `CFBundleIdentifier` is `io.github.naminaone99.tunnelview`, else `NOT_TUNNELVIEW`.
+2. **The folder next to the app:** a probe folder `<parent>/.Tunnelview-update-XXXXXX` is created
+   and removed at once, which proves that this user can write the folder. `EROFS` gives
+   `READ_ONLY_LOCATION`, any other error `NOT_WRITABLE`. The bundle must belong to this user, else
+   `NOT_OWNER`. For `TRANSLOCATED`, `READ_ONLY_LOCATION`, `NOT_WRITABLE` and `NOT_OWNER` the zip is
+   shown in Finder, so that it can be installed by hand. The real staging folder is made only in
+   step 6, so a failure before it leaves nothing next to the app.
+3. The zip is hashed against the manifest again, else `TAMPERED`.
+4. `ditto -x -k --noqtn <zip> updates/<v>/x-XXXXXX` extracts it (`EXTRACT_FAILED`; the zip is
+   kept, since this is usually a full disk). The result must be exactly one real directory,
+   `Tunnelview.app` (`BAD_BUNDLE`).
+5. **Bundle checks**, after which a failure deletes the zip:
+   - `plutil` reads `CFBundleIdentifier` (`BAD_BUNDLE`), `CFBundleShortVersionString`, which must be
+     the manifest version (`WRONG_VERSION`), and `CFBundleExecutable` = `Tunnelview`
+     (`BAD_BUNDLE`);
+   - the executable's Mach-O header must contain this platform's CPU type (`WRONG_ARCH`);
+   - `codesign --verify --deep --strict --verbose=2` must pass (`CODESIGN_FAILED`);
+   - the quarantine attribute is removed and must then be absent (`QUARANTINED`).
+6. The staging folder `<parent>/.Tunnelview-update-XXXXXX` is created and the bundle moves into
+   it, on the same volume as the app, so the swap is two renames. Across volumes (`EXDEV`) it is
+   copied with `ditto` and checked with `codesign` again; a failure of either is `NOT_WRITABLE`.
+7. The updater checks the session gate again, writes `pending.json` (`DISK_ERROR` when it cannot)
+   and spawns
+   `/bin/sh -c <MAC_SWAP_SCRIPT> tunnelview-update <pid> <bundle> <stageDir> <backup> <resultFile> io.github.naminaone99.tunnelview`:
+   detached, `cwd:/`, and the environment only `PATH=/usr/bin:/bin:/usr/sbin:/sbin` and `HOME`
+   (`SPAWN_FAILED` if that fails). Then Tunnelview quits.
+8. **The helper** is a constant script: paths arrive only as arguments, and each is checked
+   against its pattern.
+   - It waits for the PID to exit (at most 120 s, else `timeout`).
+   - It waits until no process runs from inside the bundle (`/bin/ps -axo comm=`; Tunnelview's
+     helper processes can outlive the main one) for at most 5 s, else it writes `busy` and opens
+     the app again.
+   - It checks its preconditions: the staged bundle is a directory, the backup name is free, and
+     nothing is a symlink.
+   - It moves the old bundle to `.Tunnelview-old-<12 hex>.app` and the new one into place. If that
+     fails, it moves the old one back.
+   - It deletes the old bundle and runs `tccutil reset` for ScreenCapture, Accessibility and
+     SystemPolicyDownloadsFolder. Each build has a new ad-hoc code identity, as with
+     `scripts/mac-install.sh`.
+   - It writes `ok` and opens the app.
+   - After a failed precondition or move, it writes the failure word and opens the app at its path
+     again (the old bundle, moved back if needed). After `timeout` or `bad-args` it only writes the
+     word.
+
+**Next start** (`init()`). The updater reads `pending.json` and `install-result`, then deletes
+both.
+- **Still at work:** a start during the install (the user opened Tunnelview again, or `--force-run`
+  came early) leaves both files and that install's folders alone and reports nothing; a later
+  start decides. On Windows that is a `pending.json` younger than 15 min whose staged installer
+  is still locked by the running installer; on macOS a `pending.json` younger than 150 s with no
+  `install-result` yet (the helper waits up to 120 s for Tunnelview to quit).
+- **Running version ≥ `to`:** `justUpdated = {from, to}`. On macOS (`justUpdated` with
+  `platform:'macos'`) the main window shows the re-grant banner, and `index.js` registers the
+  login item again (below).
+- **Otherwise:** `status:'error'` with `INSTALL_INCOMPLETE`, or `MAC_REPLACE_FAILED` when the
+  helper wrote `precondition`, `move-old-failed` or `move-new-failed`. The download is kept (on
+  Windows the staged installer is moved back) for another try or `reveal`.
+- **macOS leftovers** are removed at the paths recorded in `pending.json`: the staging folder
+  always, the old bundle only after a success. A hard crash between staging and spawn can leave a
+  hidden `.Tunnelview-update-XXXXXX` folder next to the app; the sweep in *Storage* removes it at
+  the next start.
+
+**Error codes** (`MESSAGES`, English, shown as they are; `messageFor(code, info)`):
+
+| Group | Codes |
+|---|---|
+| checking / downloading | `NETWORK`, `TIMEOUT`, `TLS`, `HTTP_STATUS`, `NO_MANIFEST`, `BAD_REDIRECT`, `BAD_RESPONSE`, `MANIFEST_TOO_LARGE`, `MANIFEST_MALFORMED`, `MANIFEST_UNKNOWN_KEY`, `MANIFEST_BAD_SIGNATURE`, `MANIFEST_INVALID`, `SIZE_MISMATCH`, `HASH_MISMATCH`, `DISK_ERROR` |
+| refusals (state unchanged) | `INCOMING_SESSION`, `INCOMING_REQUEST`, `OUTGOING_SESSION`, `SESSION_ACTIVE`, `NOT_SUPPORTED`, `NOT_AVAILABLE`, `NOT_READY`, `BUSY` |
+| Windows install | `UAC_DECLINED`, `LAUNCH_FAILED`, `TAMPERED`, `LOCKED` |
+| macOS install | `TRANSLOCATED`, `READ_ONLY_LOCATION`, `NOT_WRITABLE`, `NOT_OWNER`, `NOT_TUNNELVIEW`, `EXTRACT_FAILED`, `BAD_BUNDLE`, `WRONG_VERSION`, `WRONG_ARCH`, `CODESIGN_FAILED`, `QUARANTINED`, `SPAWN_FAILED` |
+| next start | `INSTALL_INCOMPLETE`, `MAC_REPLACE_FAILED` |
+
+The IPC layer adds `BAD_REQUEST`, `SETTINGS_LOCKED` and `UNKNOWN` (§6).
+
+**Release pipeline** (`.github/workflows/build.yml`). On a `v*` tag, once the `windows` and `macos`
+jobs have built and tested, the job `update-manifest` signs the manifest.
+- **The job:** environment `release` (owner approval, `v*` tags only), `permissions: contents:
+  read`. It runs no npm install and no project dependency. Its checkout keeps no credentials, and
+  every action is pinned to a commit SHA.
+- **What it runs:** it downloads the build artifacts and runs
+  `node scripts/sign-update.js --version <tag without v> --dir assets --pub "$UPDATE_PUBLIC_KEY" [--notes-file .github/release-notes/v<version>.txt]`.
+  `UPDATE_SIGNING_KEY` (the Ed25519 PKCS8 PEM) is a `release` environment secret, given to that
+  step only.
+- **sign-update.js** refuses a `--pub` that is not in `update-keys.js` under its kid, and a private
+  key that does not match `--pub`. It hashes the four assets, signs, and verifies the file against
+  `--pub` and against `update-keys.js` before it writes `<dir>/tunnelview-update.json`. It never
+  prints the key. Exit codes: 0 written, 1 failed, 2 usage.
+- **The `release` job** needs `update-manifest`, so no release is published without its manifest.
+  Before it publishes, it checks that the manifest is there and that the four files it lists are
+  the files being attached (`sha256sum --check` against the payload).
+
+**Key rotation** (`update-keys.js` exports a list, `KEYS = [{kid, publicKey}]`):
+1. Make a new Ed25519 key pair offline.
+2. Add its public key and kid to the list, and ship that release still signed with the **old** key.
+3. Once users run it, switch the `release` secret `UPDATE_SIGNING_KEY` and the variable
+   `UPDATE_PUBLIC_KEY` to the new key. Later releases are signed with it.
+4. Drop the old key from the list in a later release.
+
+A copy older than the release that added the new key reports `MANIFEST_UNKNOWN_KEY` and must be
+updated by hand. A leaked key stays trusted by every copy that lists it. The remedy is a release,
+signed with a key those copies still trust, whose list drops the leaked key. Copies that have not
+installed that release stay exposed.
+
+**Threat notes.**
+- **The trust root is the Ed25519 key,** not GitHub, the CDN or TLS. Someone who controls the
+  release, the network path or a TLS-inspecting proxy can hide updates or serve garbage, which is
+  rejected. They cannot make Tunnelview install a file that the key did not sign. There is no
+  freshness guarantee: an attacker can keep serving an older valid manifest, which is only ever
+  `up-to-date`, never a downgrade.
+- **What GitHub learns:** the source IP, the time and the running version (from the User-Agent).
+- **Release notes** are signed plain text. Control and bidi characters are refused in the
+  manifest and stripped again in `ipc`, and the notes are rendered as text, never as HTML.
+- **The signing key** exists only as the `release` environment secret. The build jobs, which run
+  `npm ci` with third-party code, never see it. The signing job signs whatever those jobs built,
+  so a signature proves "built by this repository's CI for a tag the owner approved". It does not
+  prove that the dependencies were clean.
+- **Residual risk: a same-user file swap.** The staged installer or bundle lives in folders the user
+  can write. Malware running as the same user could swap it between the last hash check and its
+  use. The exclusive lock covers the check and is released right before the spawn; the macOS
+  helper moves the bundle after Tunnelview has quit.
+  - **Windows:** the swapped file then runs with administrator rights once the user approves UAC.
+    Windows builds are not Authenticode-signed, so UAC shows "Unknown publisher" for the genuine
+    installer too, and a swapped file looks the same.
+  - **Why it is accepted:** such malware can already inject into Tunnelview (and use its macOS
+    permissions) or ask for elevation on its own. The window is kept short.
+  - **What would remove it:** an Authenticode-signed installer whose signature the updater checks,
+    or staging in a folder only administrators can write.
+- **macOS signatures:** the builds are ad-hoc signed, so `codesign --verify` only proves that the
+  bundle is internally consistent, not who made it. Authenticity comes from the manifest's hash of
+  the zip. Screen Recording, Accessibility and the Downloads folder must be allowed again after
+  each update (the helper resets them).
+- **Unverified on real machines:** the macOS helper surviving the quit, App Management blocking the
+  moves, `tccutil` without sudo, the SMAppService login item after the swap, `ps -axo comm=`
+  printing full executable paths for the helper's wait, the UAC prompt opening behind other
+  windows, elevate.exe's exit codes, and what the NSIS uninstaller leaves in
+  `%LOCALAPPDATA%\Tunnelview`. The tests use fakes.
+
 ### `index.js` (lifecycle and wiring)
 - After `app` is ready and before HostServer is built, main loads `userData/identity.json`
   (`identity.js`) and passes it to HostServer and ipc. Only the state and the fingerprint are
@@ -895,7 +1314,9 @@ internet (Windows Mark-of-the-Web, macOS quarantine).
   re-registering. macOS reads the **SMAppService status** (`app.getLoginItemSettings().status`) and
   never re-registers over the user:
   - wanted + `not-registered` after Tunnelview had registered it (`loginItemApplied`, §8): the user
-    removed it in System Settings › General › Login Items, so `startAtLogin` is turned off;
+    removed it in System Settings › General › Login Items, so `startAtLogin` is turned off. The one
+    exception is the first start after an in-app update (`updater.justUpdated`): the replaced bundle
+    is a new ad-hoc code identity that may read as not registered, so main registers it again;
   - wanted + `requires-approval`: registered, waiting for the user; a hint notification that opens
     the Login Items settings is shown once per process;
   - wanted + `enabled`: nothing to do; wanted + never registered, `not-found` or unknown: register;
@@ -911,6 +1332,28 @@ internet (Windows Mark-of-the-Web, macOS quarantine).
   `unlock-screen` and `getSystemIdleState` for the locked OS session, `ipc.listViewers()` for
   outgoing viewer sessions (checked on each coalesced state push, which re-schedules the warm-up
   once the last viewer session closed).
+- **Updater** (§7 `updater.js`):
+  - **Creation.** It is created after the identity is loaded and before the login item is
+    reconciled, so that the first start after an update is known there. `init()` runs at once, and
+    `start()` runs after the login item.
+  - **State.** Its `'state'` events go to the main window as `update:state`
+    (`ipc.sanitizeUpdateState`). Every coalesced state push calls `updater.sessionsChanged()`.
+  - **Where it stores.** `updatesDir`: `%LOCALAPPDATA%\Tunnelview\updates` on Windows (not the
+    roaming `userData`), `userData/updates` on macOS.
+  - **Session gate.** `updateBlocker()` returns `INCOMING_SESSION` while a host session is active,
+    `INCOMING_REQUEST` while a prompt is pending, and `OUTGOING_SESSION` while any viewer window is
+    not `closed`. The other direction, `updateInstalling()` (`updater.isInstalling()`), is
+    HostServer's `busy` option; `onRequest` refuses requests with `busy` without a prompt while it
+    is true, and ipc refuses outgoing sessions (*Sessions while installing*).
+  - **Sleep.** `powerMonitor` `resume` and `unlock-screen` call `updater.reschedule()`.
+  - **Quitting for the installer or helper** (`quitForUpdate`). It sets `isQuitting`, so windows
+    really close instead of hiding to the tray. The usual `before-quit` shutdown (bye to every peer,
+    `.part` files removed) gets a 1.5 s cap instead of 4 s, because the Windows installer closes
+    what is still running after a few seconds. If the quit still stalls for 10 s, `app.exit(0)`.
+  - **Shutdown.** `updater.dispose()` runs on shutdown: no new check starts, and a running download
+    stops. An installer or helper that was already started runs on.
+  - **Settings.** A change to `autoUpdateCheck` reschedules the automatic check
+    (`settingsChanged`).
 
 ## 8. Settings (`userData/settings.json`, written atomically)
 
@@ -945,7 +1388,13 @@ internet (Windows Mark-of-the-Web, macOS quarantine).
   closeToTray: true,
   favorites: [],                   // peer stableIds
   recent: [],                      // [{stableId, hostname, ip, os, ts, port?}] max 20 (port: last port used)
-  theme: 'system'                  // 'system' | 'dark' | 'light'
+  theme: 'system',                 // 'system' | 'dark' | 'light'
+  autoUpdateCheck: true,           // daily signed-update check on GitHub (updater.js, §1.10); false = no
+                                   //   automatic request at all (Check now stays). Locked like the
+                                   //   security settings while an incoming session is active (§6)
+  lastUpdateCheckAt: null          // main-only: ms epoch of the last completed check (updater.js); never
+                                   //   accepted from the renderer (ipc settings:update drops it), but
+                                   //   visible in PublicSettings
 }
 ```
 `settings.get()` returns a deep copy; `settings.update(partial)` validates every field (unknown
@@ -960,6 +1409,17 @@ is a working private key, and a `.corrupt-<ms>` one may hold most of one. Tunnel
 them; removing them only gives up the chance to restore one of those keys by hand. It is never stored in `settings.json` and never sent to a
 renderer: the main window gets only the fingerprint and, while a pairing dialog is open, the link
 (public key + that offer's token).
+
+**`userData/updates/`** (on Windows `%LOCALAPPDATA%\Tunnelview\updates\`, outside `userData`;
+uninstalling Tunnelview may leave it, as it leaves `userData`) belongs to the updater (§7 `updater.js`, *Storage*).
+It holds the following, and nothing in it is a setting or is read by a renderer:
+- `<version>/<name>.partial` and then `<name>`: the verified download of the newest release only;
+- `install-XXXXXX/` (Windows staging) and `<version>/x-XXXXXX/` (macOS extraction);
+- `pending.json` (`{v:1, platform, from, to, at, staged | dest, stage, backup}`) and the macOS
+  helper's `install-result`, both read and deleted on the next start.
+
+Leftovers are cleaned at start. Removing the folder by hand is safe while no update is being
+installed.
 
 ## 9. Quality presets (`src/renderer/shared/rtc.js`)
 
@@ -1155,3 +1615,13 @@ export const SPECIAL_KEYS = [ { id, label, codes:[…], hosts:['windows'|'macos'
   banner (`host-state.inputBlocked`, §5), and the person at the host must handle that screen.
 - Viewer system shortcuts (Alt+Tab, Win, Cmd+Tab) are only captured in fullscreen via
   `navigator.keyboard.lock()`.
+- **In-app updates** (§7 `updater.js`):
+  - **Windows:** they need a UAC approval, which shows "Unknown publisher" because the builds are
+    not Authenticode-signed. Only the copy the NSIS installer put in place installs updates by
+    itself (not `dist\win-unpacked` or a copied folder). Downloads are staged under
+    `%LOCALAPPDATA%\Tunnelview\updates`, never the roaming profile.
+  - **macOS:** each one is a new ad-hoc code identity, so Screen Recording, Accessibility and the
+    Downloads folder must be allowed again. An update can only replace a bundle that this user owns,
+    in a writable folder (not translocated, not on the disk image). App Management (macOS 13+) may
+    block the swap, which gives `MAC_REPLACE_FAILED` on the next start.
+  - **0.2.x:** copies before 0.3.0 have no updater and must be updated by hand once.

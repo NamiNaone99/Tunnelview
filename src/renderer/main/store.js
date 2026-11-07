@@ -17,7 +17,7 @@ export const PROTO = window.TunnelviewProtocol || Object.freeze({
 /* ---------------------------------------------------------------- event bus */
 
 const bus = new EventTarget();
-/** subscribe('state'|'settings'|'peers'|'identity', fn) → unsubscribe */
+/** subscribe('state'|'settings'|'peers'|'identity'|'update', fn) → unsubscribe */
 export function subscribe(type, fn) {
   const l = () => { try { fn(); } catch (err) { console.error(`[Tunnelview] ${type} listener failed`, err); } };
   bus.addEventListener(type, l);
@@ -164,6 +164,8 @@ export function normSettings(raw) {
       })).filter((r) => r.stableId || r.ip || r.hostname)
       : [],
     theme: oneOf(s.theme, ['system', 'dark', 'light'], 'system'),
+    autoUpdateCheck: s.autoUpdateCheck !== false,
+    lastUpdateCheckAt: Number.isFinite(s.lastUpdateCheckAt) && s.lastUpdateCheckAt > 0 ? s.lastUpdateCheckAt : null,
   };
 }
 
@@ -320,10 +322,119 @@ export function pairingBlocker(state = store.state, identity = store.identity) {
   return null;
 }
 
+/* ---------------------------------------------------------------- in-app updates */
+
+const UPDATE_STATUSES = new Set(['idle', 'checking', 'up-to-date', 'available', 'downloading', 'ready', 'installing', 'error']);
+const UPDATE_PHASES = new Set(['preparing', 'waiting-for-approval', 'quitting']);
+const UPDATE_BLOCKERS = new Set(['INCOMING_SESSION', 'INCOMING_REQUEST', 'OUTGOING_SESSION', 'SESSION_ACTIVE']);
+const UPDATE_VERSION_RE = /^\d{1,9}\.\d{1,9}\.\d{1,9}$/;
+const UPDATE_NOTES_MAX = 4000;
+// Release notes stay multi-line plain text: \n and \t survive; every other control character,
+// zero-width / bidi control and line / paragraph separator goes. The signed manifest and main
+// already refuse them; this is defense in depth (safeText() does the same for one-line strings,
+// but it would also remove the line breaks).
+// eslint-disable-next-line no-control-regex
+const NOTES_UNSAFE_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b\u200c\u200e\u200f\u061c\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]/g;
+const nonNeg = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
+
+/** Release notes → bounded multi-line plain text (for textContent only, never markup). */
+export function cleanNotes(v) {
+  if (typeof v !== 'string') return '';
+  return v.slice(0, UPDATE_NOTES_MAX)
+    .replace(/[\ud800-\udbff]$/, '') // a surrogate pair cut in half by the cap
+    .replace(NOTES_UNSAFE_RE, '')
+    .replace(/^(?:[ \t]*\n)+/, '')
+    .trimEnd();
+}
+
+/** UpdateState (src/preload/main.js) → a checked copy with every key; null when main sent nothing usable. */
+export function normUpdateState(raw) {
+  if (!isObj(raw)) return null;
+  const status = UPDATE_STATUSES.has(raw.status) ? raw.status : 'idle';
+  const l = isObj(raw.latest) && typeof raw.latest.version === 'string' && UPDATE_VERSION_RE.test(raw.latest.version) ? raw.latest : null;
+  const p = status === 'downloading' && isObj(raw.progress) ? raw.progress : null;
+  const e = isObj(raw.error) && typeof raw.error.code === 'string' && ERROR_CODE_RE.test(raw.error.code) ? raw.error : null;
+  const j = isObj(raw.justUpdated) && typeof raw.justUpdated.to === 'string' && UPDATE_VERSION_RE.test(raw.justUpdated.to) ? raw.justUpdated : null;
+  return {
+    status,
+    phase: status === 'installing' && UPDATE_PHASES.has(raw.phase) ? raw.phase : null,
+    currentVersion: str(raw.currentVersion, 64),
+    platform: raw.platform === 'windows' || raw.platform === 'macos' ? raw.platform : 'other',
+    supported: raw.supported === true,
+    autoCheck: raw.autoCheck === true,
+    lastCheckAt: nonNeg(raw.lastCheckAt) || null,
+    latest: l ? {
+      version: l.version,
+      date: typeof l.date === 'string' && l.date.length <= 32 && Number.isFinite(Date.parse(l.date)) ? l.date : '',
+      notes: cleanNotes(l.notes),
+      size: Math.floor(nonNeg(l.size) || 0),
+    } : null,
+    downloaded: raw.downloaded === true && !!l,
+    progress: p ? {
+      received: nonNeg(p.received) || 0,
+      total: nonNeg(p.total) || 0,
+      percent: Math.min(100, Math.floor(nonNeg(p.percent) || 0)),
+    } : null,
+    error: e ? { code: e.code, message: str(e.message, 500) || 'The update failed.' } : null,
+    blocked: UPDATE_BLOCKERS.has(raw.blocked) ? raw.blocked : null,
+    justUpdated: j ? { from: typeof j.from === 'string' && UPDATE_VERSION_RE.test(j.from) ? j.from : '', to: j.to } : null,
+  };
+}
+
+/** UpdateResult → {ok:true} | {ok:false, code, message}. */
+export function normUpdateResult(r) {
+  if (isObj(r) && r.ok === true) return { ok: true };
+  const code = isObj(r) && typeof r.code === 'string' && ERROR_CODE_RE.test(r.code) ? r.code : 'UNKNOWN';
+  return { ok: false, code, message: (isObj(r) && str(r.message, 500)) || 'The update failed.' };
+}
+
+export const hasUpdateApi = () => !!api && typeof api.getUpdateState === 'function';
+
+export function setUpdateState(raw) {
+  const next = normUpdateState(raw);
+  if (next) store.update = next;
+  emit('update'); // also when unchanged: controls snap back to what main reports
+}
+
+export async function refreshUpdateState() {
+  if (!hasUpdateApi()) return;
+  try {
+    setUpdateState(await api.getUpdateState());
+  } catch (err) {
+    console.error('[Tunnelview] getUpdateState failed', err);
+    emit('update');
+  }
+}
+
+/** A click this window is still waiting on (check / download / install), so it is not sent twice. */
+export function setUpdateOp(name, on) {
+  if (!Object.prototype.hasOwnProperty.call(store.updateOps, name)) return;
+  store.updateOps[name] = !!on;
+  emit('update');
+}
+
+/**
+ * Call an update:* preload function that answers with an UpdateResult. Never throws: a missing
+ * function is NOT_SUPPORTED, a rejected invoke is UNKNOWN with main's message.
+ * @returns {Promise<{ok:true}|{ok:false, code:string, message:string}>}
+ */
+export async function updateAction(name, ...args) {
+  if (!api || typeof api[name] !== 'function') {
+    return { ok: false, code: 'NOT_SUPPORTED', message: 'This copy of Tunnelview cannot update itself. Get the new version from the GitHub releases page.' };
+  }
+  try {
+    return normUpdateResult(await api[name](...args));
+  } catch (err) {
+    return { ok: false, code: 'UNKNOWN', message: errMsg(err) || 'The update failed.' };
+  }
+}
+
 export const store = {
   state: normState(null),
   settings: normSettings(null),
   identity: null, // normIdentity(): this computer's identity for phones; null until loaded
+  update: null, // normUpdateState(): in-app updates; null until main answered (or no updater API)
+  updateOps: { check: false, download: false, install: false }, // clicks still waiting for main
   // Raw PublicSettings as returned by main. Used when writing arrays of objects back
   // (e.g. trustedNodes) so we never send display-normalized copies to the validator.
   rawSettings: null,
@@ -365,7 +476,8 @@ export const tsRunning = () => store.state.tailscale.state === 'running';
 /**
  * While someone is connected to this computer, main refuses changes to security settings
  * (accept mode, who can connect, allow list, auto-accept, default permissions, password,
- * download folder) so the remote controller can't weaken them. Views disable those controls.
+ * download folder, the daily update check) so the remote controller can't weaken them. Views
+ * disable those controls.
  */
 export const securityLocked = (state = store.state) => !!(state && state.host && state.host.session);
 

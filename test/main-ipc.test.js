@@ -175,7 +175,7 @@ const files = {
 const captureFake = {}; // filled per test
 let quitCalls = 0;
 const inputFacade = { available: true, reason: null, blocked: 'elevated-window', handle() {}, releaseAll() {} };
-ipc.register({
+const ctx = {
   settings,
   tailscale: ts,
   auth: fakeAuth,
@@ -194,7 +194,8 @@ ipc.register({
   quit: () => { quitCalls++; },
   appVersion: '0.0.0-test',
   osName: 'windows',
-});
+};
+ipc.register(ctx);
 
 const mainWin = addEntry('main');
 const invoke = (ch, win, ...args) => handlers.get(ch)({ sender: { id: win.webContents.id } }, ...args);
@@ -441,6 +442,44 @@ test('denied:locked forgets the password only when a proof was sent; rate-limite
   assert.equal(ipc.sanitizeStatus({ phase: 'waiting', proofSent: false }).proofSent, undefined, 'only on closed');
   assert.equal(ipc.sanitizeStatus({ phase: 'closed', reason: 'denied:locked', proofSent: false }).proofSent, false);
   assert.equal((await scenario({ reason: 'denied:locked', proofSent: 0 })).next, null);
+});
+
+/* ------------------------------------------------------------------ an update being installed */
+
+test('while an update installs no outgoing session starts: connect → UPDATING, reconnect → closed "updating"', async () => {
+  ts.state = 'running';
+  ts.peers = [PEER];
+  const { win, vs } = await openViewer();
+  vs.emit('closed', { reason: 'network', message: 'lost' });
+  let installing = true;
+  ctx.updater = { isInstalling: () => installing };
+  try {
+    const viewers = createdViewers.length;
+    const sessions = FakeViewerSession.instances.length;
+    const r = await invoke('session:connect', mainWin, { target: '100.100.1.3' });
+    assert.equal(r.ok, false);
+    assert.equal(r.code, 'UPDATING');
+    assert.match(r.error, /installing an update/);
+    assert.equal(createdViewers.length, viewers, 'no viewer window');
+    assert.deepEqual(await invoke('viewer:reconnect', win), { ok: false });
+    assert.equal(FakeViewerSession.instances.length, sessions, 'no ViewerSession constructed');
+    const st = lastStatus(win);
+    assert.equal(st.phase, 'closed');
+    assert.equal(st.reason, 'updating');
+    assert.match(st.message, /Connect again after it restarts/);
+    // A throwing isInstalling() never blocks connecting for good.
+    ctx.updater = { isInstalling: () => { throw new Error('boom'); } };
+    assert.deepEqual(await invoke('viewer:reconnect', win), { ok: true });
+    assert.equal(FakeViewerSession.instances.length, sessions + 1);
+    // Done installing (it failed, or was cancelled at the UAC prompt): connecting works again.
+    ctx.updater = { isInstalling: () => installing };
+    installing = false;
+    FakeViewerSession.instances[sessions].emit('closed', { reason: 'network' });
+    assert.deepEqual(await invoke('viewer:reconnect', win), { ok: true });
+  } finally {
+    delete ctx.updater;
+    closeAll();
+  }
 });
 
 /* ------------------------------------------------------------------ ux-8: one window per device */

@@ -53,6 +53,12 @@ const DEFAULTS = Object.freeze({
   favorites: [],
   recent: [],
   theme: 'system',
+  // In-app updates (updater.js): check GitHub once a day for a signed update. The only traffic
+  // outside the tailnet (ARCHITECTURE §1); locked like the security settings during a session.
+  autoUpdateCheck: true,
+  // Main-process bookkeeping (updater.js): ms since the epoch of the last completed check, so
+  // restarts do not check more than once a day. ipc.js drops it from renderer updates.
+  lastUpdateCheckAt: null,
 });
 
 const LIMITS = Object.freeze({
@@ -201,6 +207,10 @@ const VALIDATORS = {
     return list ? list.sort((a, b) => b.ts - a.ts) : undefined;
   },
   theme: (v) => (oneOf(['system', 'dark', 'light'])(v) ? v : undefined),
+  autoUpdateCheck: (v) => (isBool(v) ? v : undefined),
+  // Main-process bookkeeping (updater.js); ipc.js drops it from renderer updates. A value far in
+  // the future (clock moved back) is ignored by the updater when it schedules, not here.
+  lastUpdateCheckAt: (v) => (v === null || (Number.isSafeInteger(v) && v >= 0) ? v : undefined),
 };
 
 /** Synchronous sleep (used only for short rename retries while an AV scanner holds the file). */

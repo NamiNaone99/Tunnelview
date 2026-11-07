@@ -1,7 +1,7 @@
 /*
  * Tunnelview viewer — human-friendly text for every way a session can end.
  * Reasons come from main (ARCHITECTURE §7 viewer phases: unreachable|not-tunnelview|timeout|protocol|
- * denied:<reason>|host-ended|network|not-tailnet|not-tailnet-route|rate-limited) or are raised
+ * denied:<reason>|host-ended|network|not-tailnet|not-tailnet-route|rate-limited|updating) or are raised
  * locally by the viewer (local, media-failed, media-timeout, non-tailnet-path, reconnect-failed,
  * init-failed).
  *
@@ -128,6 +128,9 @@ export function describeClose(reason, ctx) {
     case 'reconnect-failed':
       return { tone: 'danger', icon: 'refresh', title: "Couldn't reconnect",
         message: `Starting a new connection to ${host} failed. Check that Tailscale is running and try again.` };
+    case 'updating': // main: this computer is installing a Tunnelview update (ipc.js)
+      return { tone: 'info', icon: 'refresh', title: 'Tunnelview is updating',
+        message: 'This computer is installing a Tunnelview update, so no session can start now. Connect again after Tunnelview restarts.', detail: '' };
     case 'init-failed':
       return { tone: 'danger', icon: 'alert', title: "Couldn't start the session",
         message: 'The viewer could not be initialized. Close this window and connect again from Tunnelview.' };

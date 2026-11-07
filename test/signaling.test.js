@@ -40,9 +40,9 @@ function once(emitter, event, { timeout = 5000, filter = () => true } = {}) {
 
 const phase = (vs, p, timeout) => once(vs, 'status', { filter: (s) => s.phase === p, timeout });
 
-async function startHost(t, { settings = {}, ts = new FakeTailscale() } = {}) {
+async function startHost(t, { settings = {}, ts = new FakeTailscale(), busy } = {}) {
   const s = new FakeSettings(settings);
-  const host = new HostServer({ tailscale: ts, settings: s, auth, appVersion: '0.1.0-test', osName: 'windows' });
+  const host = new HostServer({ tailscale: ts, settings: s, auth, appVersion: '0.1.0-test', osName: 'windows', busy });
   await host.start();
   t.after(() => host.stop());
   const st = host.status();
@@ -367,6 +367,46 @@ test('second viewer while busy (pending prompt, then active session) → denied:
   assert.equal((await once(c, 'closed')).reason, 'denied:busy');
   const info = await getJson(port, PROTOCOL.INFO_PATH);
   assert.equal(info.body.busy, true);
+});
+
+test('while main installs an update (deps.busy) every admission is denied busy, a prompt answered meanwhile too', async (t) => {
+  let updating = true;
+  const { host, ts, port } = await startHost(t, { settings: { password: STORED }, busy: () => updating });
+  const requests = [];
+  host.on('request', (r) => requests.push(r));
+  const sessions = [];
+  host.on('session-start', (s) => sessions.push(s));
+  // A correct password (no prompt) and a prompt request: both refused, no prompt shown.
+  const pw = viewerFor(t, ts, port, { password: PASSWORD });
+  pw.connect();
+  assert.equal((await once(pw, 'closed')).reason, 'denied:busy');
+  const ask = viewerFor(t, ts, port);
+  ask.connect();
+  assert.equal((await once(ask, 'closed')).reason, 'denied:busy');
+  assert.equal(requests.length, 0, 'no prompt while installing');
+  assert.equal((await getJson(port, PROTOCOL.INFO_PATH)).body.busy, true);
+  // The install starts while a prompt is showing: accepting it does not start a session.
+  updating = false;
+  const late = viewerFor(t, ts, port);
+  late.connect();
+  await phase(late, 'waiting');
+  assert.equal(requests.length, 1);
+  updating = true;
+  requests[0].respond({ accept: true });
+  assert.equal((await once(late, 'closed')).reason, 'denied:busy');
+  assert.equal(sessions.length, 0);
+  // Installed (or failed): sessions start again.
+  updating = false;
+  const ok = viewerFor(t, ts, port, { password: PASSWORD });
+  ok.connect();
+  assert.equal((await phase(ok, 'accepted')).via, 'password');
+});
+
+test('a throwing busy callback counts as not busy', async (t) => {
+  const { ts, port } = await startHost(t, { settings: { password: STORED }, busy: () => { throw new Error('boom'); } });
+  const vs = viewerFor(t, ts, port, { password: PASSWORD });
+  vs.connect();
+  assert.equal((await phase(vs, 'accepted')).via, 'password');
 });
 
 test('viewer disconnect while pending → request-cancelled', async (t) => {

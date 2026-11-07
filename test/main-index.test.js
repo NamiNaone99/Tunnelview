@@ -241,6 +241,31 @@ async function load({ platform, settings: initialSettings = null, loginItem = nu
   });
   stub('main/tailscale.js', ts);
   h.ts = ts;
+  // The real updater would schedule a GitHub check (isPackaged is true here): a recording fake.
+  // h.updaterJustUpdated (set in `before`) is what its init() reports.
+  stub('main/updater.js', {
+    createUpdater(deps) {
+      const u = Object.assign(new EventEmitter(), {
+        deps,
+        calls: [],
+        justUpdated: h.updaterJustUpdated || null,
+        init() { u.calls.push('init'); return { justUpdated: u.justUpdated }; },
+        start() { u.calls.push('start'); },
+        dispose() { u.calls.push('dispose'); },
+        getState() { return { status: 'idle', currentVersion: deps.appVersion }; },
+        sessionsChanged() { u.calls.push('sessionsChanged'); },
+        settingsChanged(keys) { u.calls.push(['settingsChanged', keys]); },
+        isInstalling() { return h.updaterInstalling === true; },
+        reschedule() { u.calls.push('reschedule'); },
+        async check() { return u.getState(); },
+        async download() { return { ok: true }; },
+        async install() { return { ok: true }; },
+        reveal() { return { ok: true }; },
+      });
+      h.updater = u;
+      return u;
+    },
+  });
 
   // Real modules this harness observes.
   h.capture = require(path.join(SRC, 'main/capture.js'));
@@ -769,4 +794,175 @@ test('pairing: main withdraws the offer when the main window\'s page goes withou
   main.destroy();
   assert.deepEqual(cancels, [[null, 'cancelled'], [null, 'cancelled'], [null, 'cancelled'], [null, 'cancelled']]);
   await settle();
+});
+
+/* ================================================================== in-app updates (updater.js) */
+
+test('updater: created with the app facts, init() before start(); install is blocked by incoming, pending and outgoing sessions', async () => {
+  const h = await load({ platform: 'win32' });
+  const u = h.updater;
+  assert.ok(u, 'createUpdater called');
+  assert.deepEqual(u.calls.filter((c) => c === 'init' || c === 'start'), ['init', 'start']);
+  const d = u.deps;
+  assert.equal(d.appVersion, '0.0.0-test');
+  assert.equal(d.isPackaged, true);
+  assert.equal(d.settings, h.settings);
+  assert.equal(d.userData, path.join(h.userData, 'userData'));
+  assert.equal(d.platform, 'win32');
+  assert.equal(d.resourcesPath, process.resourcesPath);
+  assert.equal(d.execPath, process.execPath);
+  assert.equal(typeof d.quit, 'function');
+  assert.equal(typeof d.showItemInFolder, 'function');
+  assert.equal(d.translated(), false);
+  assert.equal(d.sessionBlocker(), null);
+
+  startSession(h);
+  await settle();
+  assert.equal(d.sessionBlocker(), 'INCOMING_SESSION');
+  h.host.endSession('test-done');
+  await settle();
+  assert.equal(d.sessionBlocker(), null);
+
+  request(h);
+  await settle();
+  assert.equal(d.sessionBlocker(), 'INCOMING_REQUEST');
+  await invoke(h, 'prompt:respond', live(h, 'Incoming')[0], { accept: false });
+  await settle();
+  assert.equal(d.sessionBlocker(), null);
+
+  const peer = { ...PEER, ips: ['100.100.1.2'], dnsName: 'studio.tail1.ts.net' };
+  const realResolve = h.ts.resolveTarget;
+  h.ts.resolveTarget = async () => ({ ip: '100.100.1.2', port: 47800, peer: JSON.parse(JSON.stringify(peer)), portExplicit: true });
+  try {
+    assert.deepEqual(await invoke(h, 'session:connect', mainWindow(h), { target: '100.100.1.2' }), { ok: true });
+    assert.equal(d.sessionBlocker(), 'OUTGOING_SESSION', 'connecting to another device counts');
+    live(h, '').find((w) => h.windowsMod.getKind(w.webContents) === 'viewer').destroy();
+    await settle();
+    assert.equal(d.sessionBlocker(), null);
+  } finally {
+    h.ts.resolveTarget = realResolve;
+  }
+});
+
+test('updater: its state reaches the main window cleaned; session changes and autoUpdateCheck reach the updater', async () => {
+  const h = await load({ platform: 'win32' });
+  const u = h.updater;
+  const main = mainWindow(h);
+  main.webContents.sent.length = 0;
+  u.emit('state', { status: 'available', latest: { version: '0.4.0', date: '2026-11-07T12:00:00.000Z', notes: 'a\u0007b\nc', size: 5 }, file: 'C:\\x' });
+  const sent = main.webContents.sent.filter(([ch]) => ch === 'update:state');
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0][1].latest, { version: '0.4.0', date: '2026-11-07T12:00:00.000Z', notes: 'ab\nc', size: 5 });
+  assert.equal('file' in sent[0][1], false);
+  // The same updater answers update:get-state (ipc ctx.updater).
+  const viaIpc = await invoke(h, 'update:get-state', main);
+  assert.equal(viaIpc.status, 'idle');
+  assert.equal(viaIpc.currentVersion, '0.0.0-test');
+
+  const before = u.calls.filter((c) => c === 'sessionsChanged').length;
+  startSession(h);
+  await sleep(80); // the coalesced state push
+  assert.ok(u.calls.filter((c) => c === 'sessionsChanged').length > before, 'blocked is re-evaluated on state pushes');
+  h.host.endSession('test-done');
+  await settle();
+
+  h.settings.update({ autoUpdateCheck: false });
+  assert.deepEqual(u.calls.filter((c) => Array.isArray(c)).pop(), ['settingsChanged', ['autoUpdateCheck']]);
+  const n = u.calls.length;
+  h.settings.update({ lastUpdateCheckAt: 5 });
+  assert.equal(u.calls.slice(n).filter((c) => Array.isArray(c)).length, 0, 'its own bookkeeping does not reschedule');
+});
+
+test('updater: Windows stages under %LOCALAPPDATA% (never the roaming or redirected AppData), macOS under userData', async () => {
+  const saved = process.env.LOCALAPPDATA;
+  const restore = () => { if (saved === undefined) delete process.env.LOCALAPPDATA; else process.env.LOCALAPPDATA = saved; };
+  const local = path.join(os.tmpdir(), 'tunnelview-localappdata');
+  try {
+    process.env.LOCALAPPDATA = local;
+    let h = await load({ platform: 'win32' });
+    assert.equal(h.updater.deps.updatesDir, path.join(local, 'Tunnelview', 'updates'));
+    assert.notEqual(path.dirname(h.updater.deps.updatesDir), h.updater.deps.userData);
+    // Not set (or not an absolute path): the profile's AppData/Local.
+    for (const v of [undefined, 'relative/dir']) {
+      if (v === undefined) delete process.env.LOCALAPPDATA; else process.env.LOCALAPPDATA = v;
+      h = await load({ platform: 'win32' });
+      assert.equal(h.updater.deps.updatesDir, path.join(h.userData, 'home', 'AppData', 'Local', 'Tunnelview', 'updates'), String(v));
+    }
+    process.env.LOCALAPPDATA = local;
+    h = await load({ platform: 'darwin' });
+    assert.equal(h.updater.deps.updatesDir, path.join(h.userData, 'userData', 'updates'));
+  } finally {
+    restore();
+  }
+});
+
+test('updater: while it installs no session starts (HostServer busy, no prompt, no outgoing connect); waking from sleep reschedules', async () => {
+  const h = await load({ platform: 'win32' });
+  const busy = h.host.deps.busy;
+  assert.equal(typeof busy, 'function', 'HostServer got the busy gate');
+  assert.equal(busy(), false);
+  h.updaterInstalling = true;
+  assert.equal(busy(), true);
+
+  const prompts = live(h, 'Incoming').length;
+  const req = request(h);
+  await settle();
+  assert.deepEqual(req.answers, [{ accept: false, reason: 'busy' }]);
+  assert.equal(live(h, 'Incoming').length, prompts, 'no prompt window');
+  assert.equal(h.updater.deps.sessionBlocker(), null, 'nothing pending');
+
+  const peer = { ...PEER, ips: ['100.100.1.2'], dnsName: 'studio.tail1.ts.net' };
+  const realResolve = h.ts.resolveTarget;
+  h.ts.resolveTarget = async () => ({ ip: '100.100.1.2', port: 47800, peer: JSON.parse(JSON.stringify(peer)), portExplicit: true });
+  try {
+    const r = await invoke(h, 'session:connect', mainWindow(h), { target: '100.100.1.2' });
+    assert.equal(r.ok, false);
+    assert.equal(r.code, 'UPDATING');
+    assert.equal(live(h, '').filter((w) => h.windowsMod.getKind(w.webContents) === 'viewer').length, 0);
+    // Not installing any more (UAC cancelled, or it failed): everything works again.
+    h.updaterInstalling = false;
+    assert.equal(busy(), false);
+    const again = request(h);
+    await settle();
+    assert.deepEqual(again.answers, []);
+    assert.equal(live(h, 'Incoming').length, prompts + 1, 'prompt shown');
+    await invoke(h, 'prompt:respond', live(h, 'Incoming')[0], { accept: false });
+    await settle();
+  } finally {
+    h.ts.resolveTarget = realResolve;
+  }
+
+  const pm = h.electron.powerMonitor;
+  const n = h.updater.calls.filter((c) => c === 'reschedule').length;
+  pm.emit('resume');
+  pm.emit('unlock-screen');
+  assert.equal(h.updater.calls.filter((c) => c === 'reschedule').length, n + 2, 'resume and unlock-screen re-read the wall clock');
+});
+
+test('updater: the quit for an install really exits — no hiding to the tray, short shutdown cap, updater disposed', async () => {
+  const h = await load({ platform: 'win32' });
+  const main = mainWindow(h);
+  // A host that never finishes stopping: shutdown() would wait 2 s for it.
+  h.host.stop = () => new Promise(() => {});
+  h.updater.deps.quit();
+  assert.equal(h.quitCalls, 1);
+  h.app.emit('before-quit', { preventDefault() {} });
+  main.close();
+  assert.equal(main.destroyed, true, 'closed, not hidden to the tray (closeToTray is on)');
+  await sleep(50);
+  assert.ok(h.updater.calls.includes('dispose'), 'no check or download continues');
+  await sleep(1650);
+  assert.equal(h.quitCalls, 2, 'the second app.quit() came after the 1.5 s cap, not the usual 4 s');
+});
+
+test('macOS login item after an in-app update: registered again instead of being turned off', async () => {
+  const h = await load({
+    platform: 'darwin',
+    settings: { startAtLogin: true, loginItemApplied: true },
+    loginItem: { status: 'not-registered' },
+    before: (x) => { x.updaterJustUpdated = { from: '0.3.0', to: '0.4.0' }; },
+  });
+  assert.deepEqual(h.loginCalls, [{ openAtLogin: true }]);
+  assert.equal(h.settings.get().startAtLogin, true);
+  assert.equal(h.settings.get().loginItemApplied, true);
 });

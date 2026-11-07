@@ -1,5 +1,8 @@
 # Builds Tunnelview for Windows (x64 + arm64 NSIS installers) and macOS (arm64 + x64 dmg/zip).
-# Tag pushes (v*) also publish a GitHub release with every artifact attached.
+# Tag pushes (v*) also sign the in-app update manifest (job update-manifest, environment `release`)
+# and then publish a GitHub release with every artifact and tunnelview-update.json attached.
+# Release tags must be exactly vX.Y.Z (= package.json "version"): the manifest and the updater know
+# no pre-release versions, so a tag like v0.4.0-beta.1 fails. Use workflow_dispatch for test builds.
 name: build
 
 on:
@@ -39,6 +42,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
+          re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          [[ "$GITHUB_REF_NAME" =~ $re ]] || { echo "::error::release tags must be vX.Y.Z (no pre-release suffix): $GITHUB_REF_NAME"; exit 1; }
           want="$(node -p "require('./package.json').version")"
           if [ "${GITHUB_REF_NAME#v}" != "$want" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match package.json version $want"; exit 1
@@ -104,6 +109,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
+          re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          [[ "$GITHUB_REF_NAME" =~ $re ]] || { echo "::error::release tags must be vX.Y.Z (no pre-release suffix): $GITHUB_REF_NAME"; exit 1; }
           want="$(node -p "require('./package.json').version")"
           if [ "${GITHUB_REF_NAME#v}" != "$want" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match package.json version $want"; exit 1
@@ -154,10 +161,74 @@ jobs:
             dist/*.zip
           if-no-files-found: error
 
+  # Signs tunnelview-update.json, the manifest the in-app updater trusts (docs/ARCHITECTURE.md §7
+  # updater.js). The only job that sees UPDATE_SIGNING_KEY: the `release` environment holds it,
+  # deploys only from v* tags and waits for the owner's approval. It runs no npm install and no
+  # project dependency (scripts/sign-update.js uses Node built-ins only), never persists the
+  # checkout token, and every action is pinned to a full commit SHA (the tag is the comment).
+  update-manifest:
+    name: Signed update manifest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+
+      - name: Release tag matches package.json version
+        shell: bash
+        run: |
+          re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          [[ "$GITHUB_REF_NAME" =~ $re ]] || { echo "::error::release tags must be vX.Y.Z (no pre-release suffix): $GITHUB_REF_NAME"; exit 1; }
+          want="$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_NAME#v}" != "$want" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $want"; exit 1
+          fi
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: Tunnelview-*
+          path: assets
+          merge-multiple: true
+
+      # Release notes are optional: .github/release-notes/v<version>.txt (plain text, at most 4000
+      # characters) when it exists in the tagged commit. The secret is given to this step only.
+      - name: Sign tunnelview-update.json
+        shell: bash
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+          UPDATE_PUBLIC_KEY: ${{ vars.UPDATE_PUBLIC_KEY }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          notes=".github/release-notes/v${version}.txt"
+          set -- --version "$version" --dir assets --pub "$UPDATE_PUBLIC_KEY"
+          if [ -f "$notes" ]; then
+            set -- "$@" --notes-file "$notes"
+          else
+            echo "No $notes: the manifest carries no release notes."
+          fi
+          node scripts/sign-update.js "$@"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: Tunnelview-update-manifest
+          path: assets/tunnelview-update.json
+          if-no-files-found: error
+
   release:
     name: GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, macos]
+    # update-manifest too: a release is never published without its signed manifest.
+    needs: [windows, macos, update-manifest]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -167,6 +238,18 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+
+      # The manifest is there, and the four files it lists (installers and zips; the dmgs are not
+      # listed) are byte for byte the ones this release attaches. Reads the payload only; the app
+      # verifies the signature.
+      - name: Signed update manifest matches the assets
+        shell: bash
+        run: |
+          test -s artifacts/tunnelview-update.json || { echo "::error::tunnelview-update.json is missing"; exit 1; }
+          jq -r '.payload' artifacts/tunnelview-update.json | base64 -d \
+            | jq -r '.files[] | "\(.sha256)  \(.name)"' > manifest.sha256
+          test "$(wc -l < manifest.sha256)" -eq 4 || { echo "::error::the manifest does not list 4 files"; exit 1; }
+          (cd artifacts && sha256sum --check --strict ../manifest.sha256)
 
       - name: Create or update the release
         env:

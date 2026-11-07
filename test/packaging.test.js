@@ -1,6 +1,8 @@
 'use strict';
-/* node --test test/packaging.test.js — electron-builder.yml fuses, scripts/verify-fuses.js helpers
- * and the Windows installer hooks (build/installer.nsh). Pure Node: reads files, builds nothing. */
+/* node --test test/packaging.test.js — electron-builder.yml fuses, scripts/verify-fuses.js helpers,
+ * the Windows installer hooks (build/installer.nsh), the release workflow's signing job
+ * (.github/workflows/build.yml) and the docs that describe them. Pure Node: reads files, builds
+ * nothing, opens no socket. */
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -500,4 +502,415 @@ test('installer: the Run value name is the AppUserModelId Electron uses for setL
   for (const call of main.matchAll(/setLoginItemSettings\(\s*\{([^}]*)\}/g)) {
     assert.doesNotMatch(call[1], /\bname\s*:/);
   }
+});
+
+// ---------------------------------------------------------------------------------------------
+// .github/workflows/build.yml — the signed update manifest (job update-manifest) and the release
+// ---------------------------------------------------------------------------------------------
+
+const WORKFLOW = readText('.github/workflows/build.yml');
+const TAG_GATE = "startsWith(github.ref, 'refs/tags/v')";
+
+/** Each job of the workflow as text: { id → the lines under `  <id>:` up to the next job }. */
+function workflowJobs(yml) {
+  const lines = yml.split('\n');
+  const start = lines.findIndex((l) => /^jobs:\s*$/.test(l));
+  assert.ok(start >= 0, 'no jobs: in build.yml');
+  const jobs = {};
+  let id = null;
+  for (const l of lines.slice(start + 1)) {
+    if (/^\S/.test(l)) break; // the next top-level key
+    const m = /^ {2}([A-Za-z0-9_-]+):\s*$/.exec(l);
+    if (m) { id = m[1]; jobs[id] = []; continue; }
+    if (id) jobs[id].push(l);
+  }
+  for (const k of Object.keys(jobs)) jobs[k] = jobs[k].join('\n');
+  return jobs;
+}
+
+/** A job-level `key: value` (4-space indent), or null. */
+function jobKey(job, key) {
+  const m = new RegExp(`^ {4}${key}:[ \\t]*(.*)$`, 'm').exec(job);
+  return m ? m[1].trim() : null;
+}
+
+/** The job's job-level `needs:` as a sorted list (flow `[a, b]` or a single name). */
+function jobNeeds(job) {
+  const v = jobKey(job, 'needs');
+  if (!v) return [];
+  const list = /^\[(.*)\]$/.exec(v);
+  return (list ? list[1].split(',') : [v]).map((s) => s.trim()).filter(Boolean).sort();
+}
+
+/** The lines of a block-mapping key at `indent` (e.g. permissions:), as {k: v}. */
+function jobMapping(job, key, indent = 4) {
+  const lines = job.split('\n');
+  const i = lines.findIndex((l) => l === `${' '.repeat(indent)}${key}:`);
+  assert.ok(i >= 0, `no ${key}: block`);
+  const out = {};
+  for (const l of lines.slice(i + 1)) {
+    if (/^\s*(#.*)?$/.test(l)) continue;
+    const m = new RegExp(`^ {${indent + 2}}([A-Za-z0-9_-]+):\\s*(.*)$`).exec(l);
+    if (!m) break;
+    out[m[1]] = m[2];
+  }
+  return out;
+}
+
+/** The text without YAML comments (whole-line ones and ` # …` after a value). */
+const withoutComments = (text) => text.split('\n').filter((l) => !/^\s*#/.test(l)).map((l) => l.replace(/\s+#\s.*$/, '')).join('\n');
+
+const JOBS = workflowJobs(WORKFLOW);
+
+test('build.yml: update-manifest signs only for v* tags, in environment release, after both builds', () => {
+  const job = JOBS['update-manifest'];
+  assert.ok(job, 'no update-manifest job');
+  assert.equal(jobKey(job, 'if'), TAG_GATE);
+  assert.equal(jobKey(job, 'environment'), 'release');
+  assert.deepEqual(jobNeeds(job), ['macos', 'windows']);
+  assert.deepEqual(jobMapping(job, 'permissions'), { contents: 'read' });
+  // The workflow default stays read-only too: only the release job may write.
+  assert.match(WORKFLOW, /^permissions:\n {2}contents: read\n/m);
+});
+
+test('build.yml: update-manifest runs no npm install or project dependency', () => {
+  const code = withoutComments(JOBS['update-manifest']);
+  assert.doesNotMatch(code, /\b(npm|npx|yarn|pnpm|corepack)\b/);
+  assert.doesNotMatch(code, /node_modules/);
+  assert.doesNotMatch(code, /^\s+cache(-dependency-path)?:/m, 'setup-node must not restore a cache');
+  assert.match(code, /^\s+node-version: 22$/m);
+  assert.match(code, /^\s+node scripts\/sign-update\.js "\$@"$/m);
+  // The checkout token is not left in .git/config for the steps that follow.
+  assert.match(code, /- uses: actions\/checkout@[0-9a-f]{40}\n\s+with:\n\s+persist-credentials: false\n/);
+});
+
+test('build.yml: every action in update-manifest is pinned to a full commit SHA, its tag as the comment', () => {
+  const job = JOBS['update-manifest'];
+  const uses = [...job.matchAll(/^\s+(?:- )?uses: (.*)$/gm)].map((m) => m[1]);
+  assert.ok(uses.length >= 4, 'too few actions found');
+  const pinned = {};
+  for (const u of uses) {
+    const m = /^([\w.-]+\/[\w.-]+)@([0-9a-f]{40}) # (v\d+(?:\.\d+){0,2})$/.exec(u);
+    assert.ok(m, `not pinned to a 40-hex commit SHA with a # vN comment: ${u}`);
+    pinned[m[1]] = { sha: m[2], tag: m[3] };
+  }
+  assert.deepEqual(Object.keys(pinned).sort(), ['actions/checkout', 'actions/download-artifact', 'actions/setup-node', 'actions/upload-artifact']);
+  // The comment names the same tag the other jobs use for that action (one version per action).
+  for (const [action, { tag }] of Object.entries(pinned)) {
+    for (const m of WORKFLOW.matchAll(new RegExp(`uses: ${action.replace('/', '\\/')}@(v[\\d.]+)\\s*$`, 'gm'))) {
+      assert.equal(m[1], tag, `${action}: pinned as ${tag}, used elsewhere as ${m[1]}`);
+    }
+  }
+});
+
+test('build.yml: the signing key reaches the sign step only; --pub is vars.UPDATE_PUBLIC_KEY; version from the tag', () => {
+  const job = JOBS['update-manifest'];
+  assert.equal(WORKFLOW.split('secrets.UPDATE_SIGNING_KEY').length - 1, 1, 'UPDATE_SIGNING_KEY must appear once in build.yml');
+  assert.deepEqual([...job.matchAll(/secrets\.([A-Za-z0-9_]+)/g)].map((m) => m[1]), ['UPDATE_SIGNING_KEY']);
+  // Step-level env (10 spaces), not job- or workflow-level.
+  assert.match(job, /^ {10}UPDATE_SIGNING_KEY: \$\{\{ secrets\.UPDATE_SIGNING_KEY \}\}$/m);
+  assert.match(job, /^ {10}UPDATE_PUBLIC_KEY: \$\{\{ vars\.UPDATE_PUBLIC_KEY \}\}$/m);
+  assert.equal(jobKey(job, 'env'), null, 'no job-level env');
+  const code = withoutComments(job);
+  assert.match(code, /--pub "\$UPDATE_PUBLIC_KEY"/);
+  assert.match(code, /version="\$\{GITHUB_REF_NAME#v\}"/);
+  assert.match(code, /--version "\$version" --dir assets/);
+  assert.match(code, /--notes-file "\$notes"/);
+  // The existing tag / package.json check stays in both builds (and the signing job repeats it).
+  for (const id of ['windows', 'macos', 'update-manifest']) {
+    assert.ok(JOBS[id].includes('- name: Release tag matches package.json version'), `${id} lost the tag/version check`);
+  }
+});
+
+test('build.yml: release tags must be exactly vX.Y.Z (a pre-release tag would sign a manifest no updater accepts)', () => {
+  const { validVersion } = require('../src/main/update-manifest');
+  for (const id of ['windows', 'macos', 'update-manifest']) {
+    const job = JOBS[id];
+    const at = job.indexOf('- name: Release tag matches package.json version');
+    assert.ok(at >= 0, `${id} lost the tag/version check`);
+    const end = job.indexOf('\n\n', at);
+    const step = job.slice(at, end < 0 ? undefined : end);
+    const re = /^ +re='([^']+)'$/m.exec(step);
+    assert.ok(re, `${id}: no tag pattern`);
+    assert.match(step, /\[\[ "\$GITHUB_REF_NAME" =~ \$re \]\] \|\| \{ echo "::error::[^"]*"; exit 1; \}/, `${id}: the pattern must stop the job`);
+    assert.ok(step.indexOf('=~ $re') < step.indexOf('want='), `${id}: the pattern is checked first`);
+    // POSIX ERE; for this pattern JavaScript reads it the same way.
+    const tag = new RegExp(re[1]);
+    for (const ok of ['v0.4.0', 'v1.0.0', 'v10.20.30']) {
+      assert.ok(tag.test(ok), `${id} refuses ${ok}`);
+      assert.ok(validVersion(ok.slice(1)), `${ok} is not a manifest version`);
+    }
+    for (const bad of ['v0.4.0-beta.1', 'v0.4.0-rc1', 'v1.2.3+build', 'v01.2.3', 'v1.02.3', 'v1.2', 'v1.2.3.4', '0.4.0', 'vx.y.z']) {
+      assert.equal(tag.test(bad), false, `${id} accepts ${bad}`);
+    }
+  }
+});
+
+test('build.yml: the manifest is uploaded, and release needs update-manifest and checks it before publishing', () => {
+  const { MANIFEST_NAME } = require('../src/main/update-manifest');
+  const job = JOBS['update-manifest'];
+  assert.match(job, new RegExp(`^\\s+path: assets/${MANIFEST_NAME.replace('.', '\\.')}\\n\\s+if-no-files-found: error$`, 'm'));
+  const rel = JOBS.release;
+  assert.ok(rel, 'no release job');
+  assert.equal(jobKey(rel, 'if'), TAG_GATE);
+  assert.deepEqual(jobNeeds(rel), ['macos', 'update-manifest', 'windows']);
+  const check = rel.indexOf(`test -s artifacts/${MANIFEST_NAME}`);
+  assert.ok(check >= 0, 'release does not check that the manifest is there');
+  assert.ok(rel.indexOf('sha256sum --check') > check, 'release does not check the assets against the manifest');
+  assert.ok(rel.indexOf('gh release') > rel.indexOf('sha256sum --check'), 'the checks must run before publishing');
+  // The signing job is the only one with an environment (the release job holds no secret).
+  for (const [id, j] of Object.entries(JOBS)) {
+    if (id !== 'update-manifest') assert.equal(jobKey(j, 'environment'), null, `${id} has an environment`);
+  }
+});
+
+test('build.yml: parsed with js-yaml, update-manifest and release have the same shape', (t) => {
+  let yaml;
+  try { yaml = require('js-yaml'); } catch { return t.skip('js-yaml not installed'); }
+  const wf = yaml.load(WORKFLOW);
+  const job = wf.jobs['update-manifest'];
+  assert.equal(job.if, TAG_GATE);
+  assert.equal(job.environment, 'release');
+  assert.deepEqual([...job.needs].sort(), ['macos', 'windows']);
+  assert.deepEqual(job.permissions, { contents: 'read' });
+  assert.equal(job.env, undefined);
+  for (const step of job.steps) {
+    if (step.uses) assert.match(step.uses, /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/);
+    if (step.run) assert.doesNotMatch(step.run, /\b(npm|npx|yarn|pnpm)\b/);
+    if (step.uses && step.uses.startsWith('actions/setup-node@')) assert.equal(step.with.cache, undefined);
+    if (step.uses && step.uses.startsWith('actions/checkout@')) assert.equal(step.with['persist-credentials'], false);
+    const env = step.env || {};
+    if (!step.run || !step.run.includes('scripts/sign-update.js')) assert.equal('UPDATE_SIGNING_KEY' in env, false);
+  }
+  assert.ok(job.steps.some((s) => s.env && s.env.UPDATE_SIGNING_KEY === '${{ secrets.UPDATE_SIGNING_KEY }}'));
+  assert.ok(wf.jobs.release.needs.includes('update-manifest'));
+  assert.equal(wf.jobs.release.if, TAG_GATE);
+});
+
+// ---------------------------------------------------------------------------------------------
+// docs ↔ updater: ARCHITECTURE / README state what updater.js, update-manifest.js and
+// update-keys.js do
+// ---------------------------------------------------------------------------------------------
+
+/** Backticked host names in a text (`github.com`), not file names such as `update-keys.js`. */
+const docHosts = (text) => new Set([...text.matchAll(/`([a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|io))`/g)].map((m) => m[1]));
+
+/** The `- **<label>**` bullet of a section, up to the next bullet at the same indent. */
+function docBullet(section, label) {
+  const start = section.indexOf(`- **${label}**`);
+  assert.ok(start >= 0, `no bullet **${label}**`);
+  const rest = section.slice(start + 2);
+  const end = rest.search(/\n- /);
+  return end < 0 ? rest : rest.slice(0, end);
+}
+
+test('docs: ARCHITECTURE states the manifest URL, the asset URL and the redirect hosts as updater.js has them', () => {
+  const u = require('../src/main/updater');
+  const doc = readText('docs/ARCHITECTURE.md');
+  const s1 = docSection(doc, 1);
+  const item10 = s1.slice(s1.search(/^10\. \*\*/m));
+  assert.ok(item10.startsWith('10. **The updater is the single path outside the tailnet**'), '§1 has no item 10 for the updater');
+  const s7 = docSection(doc, 7);
+  for (const [name, text] of [['§1.10', item10], ['§7', s7]]) {
+    assert.ok(text.includes(u.MANIFEST_URL), `${name} does not state MANIFEST_URL`);
+  }
+  assert.deepEqual([...docHosts(item10)].sort(), [...u.ALLOWED_HOSTS].sort(), '§1.10 hosts');
+  const redirects = docBullet(s7, 'Redirects:');
+  assert.deepEqual([...docHosts(redirects)].sort(), [...u.ALLOWED_HOSTS].sort(), '§7 redirect allow-list');
+  assert.ok(flat(redirects).includes(`at most ${u.MAX_REDIRECTS} (\`MAX_REDIRECTS\`)`), 'MAX_REDIRECTS');
+  // No other GitHub content host is named anywhere.
+  for (const m of doc.matchAll(/[a-z0-9.-]+\.githubusercontent\.com/g)) assert.ok(u.ALLOWED_HOSTS.includes(m[0]), `${m[0]} is not allowed by updater.js`);
+  // The allow-list itself: https only, those hosts only, no port, no user info.
+  assert.ok(u.allowedUrl('https://objects.githubusercontent.com/x'));
+  for (const bad of ['http://github.com/x', 'https://github.com:8443/x', 'https://a@github.com/x', 'https://evil.example/x', 'https://github.com.evil.example/x']) {
+    assert.equal(u.allowedUrl(bad), null, bad);
+  }
+  const asset = u.assetUrl('win32-x64', '9.9.9', 'Tunnelview-Setup-9.9.9-x64.exe');
+  assert.ok(s7.includes(asset.replace('v9.9.9/Tunnelview-Setup-9.9.9-x64.exe', 'v<version>/<name>')), 'asset URL pattern');
+  assert.ok(docSection(doc, 6).includes(u.RELEASES_URL), '§6 update:open-releases URL');
+});
+
+test('docs: ARCHITECTURE names every embedded update key and its kid as update-keys.js has them', () => {
+  const { KEYS } = require('../src/main/update-keys');
+  const m = require('../src/main/update-manifest');
+  const s7 = docSection(readText('docs/ARCHITECTURE.md'), 7);
+  assert.ok(KEYS.length >= 1);
+  for (const k of KEYS) {
+    assert.equal(m.keyId(m.decodeB64url(k.publicKey, 32)), k.kid, `kid of ${k.publicKey}`);
+    assert.ok(s7.includes(`\`${k.publicKey}\``), `§7 does not name the key ${k.publicKey}`);
+    assert.ok(flat(s7).includes(`\`${k.publicKey}\` (raw, base64url without padding), kid \`${k.kid}\``), `§7 does not name kid ${k.kid} with its key`);
+  }
+  // The documented derivation command gives the documented kid.
+  const cmd = /`node -e "([^"]+)" <publicKey>`/.exec(s7);
+  assert.ok(cmd, 'no kid derivation command in §7');
+  const derive = Function('process', 'require', 'console', cmd[1]);
+  for (const k of KEYS) {
+    let out = '';
+    derive({ argv: ['node', k.publicKey] }, require, { log: (s) => { out = s; } });
+    assert.equal(out, k.kid);
+  }
+});
+
+test('docs: ARCHITECTURE updater numbers, asset names, codes and helper outcomes match the code', () => {
+  const u = require('../src/main/updater');
+  const m = require('../src/main/update-manifest');
+  const src = read('src/main/updater.js');
+  const doc = readText('docs/ARCHITECTURE.md');
+  const s7 = flat(docSection(doc, 7));
+  const s1 = flat(docSection(doc, 1));
+  const h = (ms) => ms / 3600000;
+  const want = [
+    `At most **${m.MAX_MANIFEST_BYTES / 1024} KiB**`,
+    `**${srcNumber(src, 'CHECK_DEADLINE_MS') / 1000} s** for the whole check`,
+    `${srcNumber(src, 'SOCKET_IDLE_MS') / 1000} s socket idle timeout`,
+    `the first check comes ${u.FIRST_CHECK_DELAY_MS / 1000} s after start, then one every ${h(u.CHECK_INTERVAL_MS)} h`,
+    `A restart within ${h(u.CHECK_INTERVAL_MS)} h of it waits, and a value more than ${h(u.CHECK_INTERVAL_MS)} h in the future`,
+    `It is tried again after ${h(u.RETRY_AFTER_FAILURE_MS)} h`,
+    `moves by ${srcNumber(src, 'BUSY_RETRY_MS') / 60000} min`,
+    `\`size\` is an integer from 1 to ${m.MAX_ASSET_BYTES / 1048576} MiB`,
+    `at most ${m.MAX_NOTES_LENGTH} UTF-16 code units`,
+    `for about ${(srcNumber(src, 'LOCK_RETRIES') * srcNumber(src, 'LOCK_RETRY_MS')) / 1000} s`,
+    '/S --updated --force-run',
+    `\`${u.APP_ID}\``,
+  ];
+  for (const w of want) assert.ok(s7.includes(w), `§7 updater lacks: ${w}`);
+  assert.ok(s1.includes(`first check comes ${u.FIRST_CHECK_DELAY_MS / 1000} s after start, and none within ${h(u.CHECK_INTERVAL_MS)} h`), '§1.10 schedule');
+  assert.match(src, /\[staged, '\/S', '--updated', '--force-run'\]/);
+  // The helper's wait: <n> polls of <s> seconds.
+  const polls = /-ge (\d+) \]/.exec(u.MAC_SWAP_SCRIPT);
+  const nap = /\/bin\/sleep ([\d.]+)\n/.exec(u.MAC_SWAP_SCRIPT);
+  assert.ok(polls && nap, 'helper wait loop');
+  assert.ok(s7.includes(`at most ${Math.round(Number(polls[1]) * Number(nap[1]))} s, else \`timeout\``), 'helper wait');
+  // Asset names, one table row per platform key.
+  for (const key of m.PLATFORM_KEYS) {
+    const row = `| \`${key}\` | \`${m.assetName(key, '9.9.9').replace('9.9.9', '<v>')}\` |`;
+    assert.ok(s7.includes(row), `§7 lacks the asset row ${row}`);
+  }
+  // The error-code table lists exactly the codes updater.js has messages for.
+  const raw7 = docSection(doc, 7);
+  const heading = raw7.indexOf('**Error codes**');
+  assert.ok(heading >= 0, 'no error-code table in §7');
+  const table = raw7.slice(raw7.indexOf('\n| Group |', heading) + 1);
+  const rows = table.slice(0, table.search(/\n\n/)).split('\n').filter((l) => /^\| [a-zA-Z]/.test(l) && !l.startsWith('| Group'));
+  assert.ok(rows.length >= 5, 'error-code table rows');
+  const listed = rows.flatMap((r) => [...r.split('|')[2].matchAll(/`([A-Z_]+)`/g)].map((x) => x[1]));
+  assert.deepEqual([...listed].sort(), Object.keys(u.MESSAGES).sort());
+  // Every outcome word the macOS helper can write.
+  const words = new Set([...u.MAC_SWAP_SCRIPT.matchAll(/\bsay ([a-z-]+)/g)].map((x) => x[1]));
+  assert.ok(words.size >= 7);
+  const at = raw7.indexOf("- `install-result` holds the macOS helper's outcome:");
+  assert.ok(at >= 0, 'no install-result bullet in §7');
+  const outcome = raw7.slice(at + 2, at + 2 + raw7.slice(at + 2).search(/\n- /));
+  const documented = [...outcome.matchAll(/`([a-z-]+)`/g)].map((x) => x[1]).filter((w) => w !== 'install-result');
+  assert.deepEqual([...documented].sort(), [...words].sort(), '§7 helper outcomes');
+  // pending.json keys, as written by both installs.
+  const keys = new Set(['v']);
+  for (const call of src.matchAll(/_writePending\(\{([^}]*)\}\)/g)) {
+    for (const part of call[1].split(',')) keys.add(part.split(':')[0].trim());
+  }
+  for (const s of [raw7, docSection(doc, 8)]) {
+    const doc8 = /`pending\.json` = `\{([^}]*)\}`|`pending\.json` \(`\{([^}]*)\}`\)/.exec(s);
+    assert.ok(doc8, 'no pending.json shape');
+    const documented = new Set((doc8[1] || doc8[2]).split(/[,|]/).map((p) => p.split(':')[0].trim()));
+    assert.deepEqual([...documented].sort(), [...keys].sort(), 'pending.json keys');
+  }
+});
+
+test('docs: the updater sends exactly the headers ARCHITECTURE documents (fake transport, no network)', async () => {
+  const { createUpdater, MANIFEST_URL } = require('../src/main/updater');
+  const seen = [];
+  const updater = createUpdater({
+    appVersion: '1.2.3',
+    isPackaged: false,
+    platform: 'win32',
+    arch: 'x64',
+    userData: 'C:\\tunnelview-docs-test',
+    settings: { get: () => ({ autoUpdateCheck: false, lastUpdateCheckAt: null }), update: () => {} },
+    transport: {
+      get: async (url, opts) => {
+        seen.push({ url, headers: opts.headers });
+        return { statusCode: 404, headers: {}, destroy() {} };
+      },
+    },
+    log: { log() {}, warn() {}, error() {} },
+  });
+  const state = await updater.check();
+  updater.dispose();
+  assert.equal(state.error && state.error.code, 'NO_MANIFEST');
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].url, MANIFEST_URL);
+  assert.deepEqual(seen[0].headers, { 'User-Agent': 'Tunnelview-Updater/1.2.3', Accept: 'application/octet-stream' });
+  const doc = readText('docs/ARCHITECTURE.md');
+  for (const n of [1, 7]) {
+    const s = flat(docSection(doc, n));
+    for (const [k, v] of Object.entries(seen[0].headers)) {
+      const line = `\`${k}: ${v.replace('1.2.3', '<version>')}\``;
+      assert.ok(s.includes(line), `§${n} does not state the header ${line}`);
+    }
+  }
+  assert.ok(readText('README.md').includes('`Tunnelview-Updater/<version>`'), 'README names the user agent');
+});
+
+test('docs: ARCHITECTURE §6 lists every update:* channel ipc.js handles, with its preload function', () => {
+  const s6 = docSection(readText('docs/ARCHITECTURE.md'), 6);
+  const channels = [...read('src/main/ipc.js').matchAll(/handle\('(update:[a-z-]+)'/g)].map((x) => x[1]);
+  assert.ok(channels.length >= 7, 'update:* handlers not found in ipc.js');
+  const preload = read('src/preload/main.js');
+  for (const ch of channels) {
+    const fn = new RegExp(`(\\w+): \\([^)]*\\) => ipcRenderer\\.invoke\\('${ch}'`).exec(preload);
+    assert.ok(fn, `preload/main.js has no function for ${ch}`);
+    assert.ok(s6.includes(`| \`${ch}\` | \`${fn[1]}(`), `§6 lacks the row ${ch} / ${fn[1]}()`);
+  }
+  assert.match(preload, /onUpdateState: \(cb\) => on\('update:state', cb\)/);
+  assert.ok(s6.includes('| `update:state` (main → renderer) | `onUpdateState(cb)` |'), '§6 lacks update:state');
+  // The locked keys of settings:update are the ones ipc.js locks.
+  const locked = /const LOCKED_SETTING_KEYS = \[([^\]]*)\]/.exec(read('src/main/ipc.js'));
+  assert.ok(locked, 'no LOCKED_SETTING_KEYS');
+  const row = s6.split('\n').find((l) => l.startsWith('| `settings:update` |'));
+  assert.ok(row, 'no settings:update row');
+  for (const k of [...locked[1].matchAll(/'([A-Za-z]+)'/g)].map((x) => x[1])) assert.ok(row.includes(`\`${k}\``), `settings:update row lacks ${k}`);
+});
+
+test('docs: ARCHITECTURE §2 names every main-process module and every script', () => {
+  const s2 = docSection(readText('docs/ARCHITECTURE.md'), 2);
+  for (const f of fs.readdirSync(path.join(root, 'src', 'main')).filter((n) => n.endsWith('.js'))) {
+    assert.match(s2, new RegExp(`^ {2}${f.replace('.', '\\.')}\\s`, 'm'), `§2 does not list src/main/${f}`);
+  }
+  for (const f of fs.readdirSync(path.join(root, 'scripts'))) {
+    assert.ok(s2.includes(`scripts/${f}`), `§2 does not list scripts/${f}`);
+  }
+});
+
+test('docs: README Updating replaces "does not update itself" and describes the signed, opt-out check', () => {
+  const readme = readText('README.md');
+  assert.doesNotMatch(readme, /Tunnelview does not update itself/);
+  const start = readme.indexOf('\n## Updating\n');
+  assert.ok(start >= 0, 'no ## Updating section');
+  const rest = readme.slice(start + 1);
+  const section = rest.slice(0, rest.slice(3).search(/\n## /) + 3);
+  assert.ok(readme.includes('- [Updating](#updating)'), 'Contents lacks Updating');
+  for (const w of ['tunnelview-update.json', 'Ed25519', 'only connection outside your tailnet', 'UAC', 'Screen Recording and Accessibility', '0.2.x', 'Obtainium']) {
+    assert.ok(section.includes(w), `README Updating lacks: ${w}`);
+  }
+  // The Android signing certificate, in both spellings.
+  const colon = /^((?:[0-9A-F]{2}:){31}[0-9A-F]{2})$/m.exec(section);
+  assert.ok(colon, 'no colon-separated SHA-256 certificate fingerprint');
+  assert.ok(section.includes(`\`${colon[1].replace(/:/g, '').toLowerCase()}\``), 'the apksigner spelling differs');
+});
+
+test('docs: README and ARCHITECTURE name the update buttons the Updates page shows (DECISIONS U6)', () => {
+  const ui = read('src/renderer/main/updates.js');
+  const labels = ['Download and install', 'Restart and install'];
+  assert.match(ui, /label: busy \? 'Downloading…' : 'Download and install'/);
+  assert.ok(ui.includes(`label: '${labels[1]}'`), `updates.js has no '${labels[1]}' button`);
+  assert.doesNotMatch(ui, /Install and restart/);
+  const readme = readText('README.md');
+  const start = readme.indexOf('\n## Updating\n');
+  const rest = readme.slice(start + 1);
+  const section = flat(rest.slice(0, rest.slice(3).search(/\n## /) + 3));
+  const click = section.slice(section.indexOf('**Only on your click.**'));
+  assert.ok(click.indexOf(`**${labels[0]}**`) >= 0 && click.indexOf(`**${labels[0]}**`) < click.indexOf(`**${labels[1]}**`), 'README: download first, then restart');
+  const s6 = flat(docSection(readText('docs/ARCHITECTURE.md'), 6));
+  assert.ok(s6.includes(`the UI offers **${labels[1]}**`), '§6 ready');
+  for (const doc of [readText('README.md'), readText('docs/ARCHITECTURE.md')]) assert.doesNotMatch(flat(doc), /Install and restart/);
 });

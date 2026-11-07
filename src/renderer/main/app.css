@@ -549,6 +549,57 @@ span.dc-ip { cursor: default; }
 .id-title .mono { font-weight: 500; overflow-wrap: anywhere; }
 .id-banner .id-actions { margin-top: 8px; }
 
+/* ============================================================ in-app updates (updates.js) */
+/* Banner above Remote Desk. */
+.update-banner { align-items: center; padding: 10px 8px 10px 14px; }
+.update-banner > svg { flex: none; }
+.update-banner.banner-accent > svg { color: var(--accent); }
+.update-banner.banner-warn > svg { color: var(--warn); }
+.update-banner.banner-ok > svg { color: var(--ok); }
+.update-banner-sub { overflow-wrap: anywhere; }
+.update-banner-actions { flex: none; }
+
+/* Settings › Updates */
+.set-card-head h3[tabindex]:focus { outline: none; }
+.set-card-head h3[tabindex]:focus-visible { box-shadow: var(--focus); border-radius: 4px; }
+.update-lock-hint { display: flex; align-items: center; gap: 6px; }
+.update-lock-hint svg { flex: none; color: var(--warn); }
+.update-head { align-items: center; }
+.update-status { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--text); }
+.update-status.is-danger { align-items: flex-start; color: var(--danger); }
+.update-status-icon { display: inline-grid; place-items: center; flex: none; width: 14px; min-height: 18px; }
+.update-status-icon .dot { width: 7px; height: 7px; }
+.update-status-text { min-width: 0; overflow-wrap: anywhere; }
+.update-detail { margin-top: -6px; padding-left: 22px; }
+.dot-accent { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.update-progress { margin-left: 22px; }
+.update-notes-head { align-items: baseline; flex-wrap: wrap; }
+/* Release notes: text only, line breaks and tabs kept, scrolls inside a capped height. */
+.update-notes {
+  max-height: 200px; overflow-y: auto; margin-top: 6px; padding: 10px 12px;
+  font-size: 12.5px; line-height: 1.5; color: var(--text-dim);
+  white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4;
+  background: var(--bg-sunken); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.update-notes:focus-visible { outline: none; box-shadow: var(--focus); }
+.update-notes.is-empty { color: var(--text-faint); font-style: italic; }
+.update-actions { flex-wrap: wrap; }
+.update-hint { display: flex; align-items: flex-start; gap: 6px; color: var(--warn); }
+.update-hint svg { flex: none; margin-top: 2px; }
+/* Busy (check / download / install running), or not usable now while it has the keyboard focus:
+   looks disabled but keeps the focus. Only a busy one shows the progress cursor. */
+.btn[aria-disabled="true"] { opacity: 0.6; cursor: default; }
+.btn[aria-disabled="true"][data-busy] { cursor: progress; }
+.btn[aria-disabled="true"]:active { transform: none; }
+.modal-update { width: min(460px, 100%); }
+.update-confirm .banner svg { flex: none; color: var(--warn); margin-top: 1px; }
+
+/* Read by screen readers, not shown. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
 /* fatal (preload missing) */
 .fatal { margin: auto; max-width: 420px; padding: 32px; text-align: center; display: grid; gap: 10px; justify-items: center; }
 .fatal-icon { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 16px; color: var(--danger); background: var(--danger-soft); }

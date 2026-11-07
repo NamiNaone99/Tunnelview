@@ -1402,3 +1402,600 @@ test('settings: this computer\'s ID, the unavailable banner with Retry, Reset id
   store.identity = null;
   removePairingApi();
 });
+
+/* ------------------------------------------------------------------ in-app updates (DECISIONS U6) */
+
+const LATEST = { version: '0.3.0', date: '2026-11-01T10:00:00.000Z', notes: 'Faster reconnects.\n\tIndented line', size: 104857600 };
+/** A full UpdateState (src/preload/main.js) with `patch` applied. */
+function updateState(patch = {}) {
+  return {
+    status: 'idle', phase: null, currentVersion: '0.2.0', platform: 'windows', supported: true, autoCheck: true,
+    lastCheckAt: null, latest: null, downloaded: false, progress: null, error: null, blocked: null, justUpdated: null,
+    ...patch,
+  };
+}
+const UPDATE_API_KEYS = ['getUpdateState', 'checkForUpdates', 'downloadUpdate', 'installUpdate', 'setAutoUpdateCheck', 'revealUpdate', 'openReleasesPage', 'onUpdateState'];
+
+/**
+ * Preload update:* calls, recorded. push(s) is main's side: it becomes what getUpdateState answers
+ * and is pushed (update:state) to the store at once.
+ */
+async function installUpdateApi(over = {}) {
+  const { setUpdateState } = await load('main/store.js');
+  let st = updateState();
+  Object.assign(api, {
+    getUpdateState: async () => { calls.push(['getUpdateState']); return clone(st); },
+    checkForUpdates: async () => { calls.push(['checkForUpdates']); return clone(st); },
+    downloadUpdate: async () => { calls.push(['downloadUpdate']); return { ok: true }; },
+    installUpdate: async () => { calls.push(['installUpdate']); return { ok: true }; },
+    setAutoUpdateCheck: async (v) => { calls.push(['setAutoUpdateCheck', v]); st = { ...st, autoCheck: v }; return { ok: true }; },
+    revealUpdate: async () => { calls.push(['revealUpdate']); return { ok: true }; },
+    openReleasesPage: async () => { calls.push(['openReleasesPage']); return { ok: true }; },
+    onUpdateState: () => () => {},
+  }, over);
+  return { push: (s) => { st = clone(s); setUpdateState(clone(s)); } };
+}
+async function removeUpdateApi() {
+  const { store } = await load('main/store.js');
+  for (const k of UPDATE_API_KEYS) delete api[k];
+  store.update = null;
+}
+const updateSection = (sheet) => sheet.querySelector('#set-updates');
+const statusText = (sec) => sec.querySelector('.update-status-text').textContent;
+const primaryButton = (sec) => sec.querySelector('.update-actions').querySelector('.btn-primary');
+
+test('store.normUpdateState: every key, enums and versions checked, notes stay multi-line plain text', async () => {
+  const { normUpdateState, cleanNotes, normUpdateResult } = await load('main/store.js');
+  assert.equal(normUpdateState(null), null);
+  assert.equal(normUpdateState('idle'), null);
+  const keys = ['status', 'phase', 'currentVersion', 'platform', 'supported', 'autoCheck', 'lastCheckAt', 'latest', 'downloaded', 'progress', 'error', 'blocked', 'justUpdated'];
+  assert.deepEqual(Object.keys(normUpdateState({})).sort(), [...keys].sort());
+  assert.equal(normUpdateState({ status: 'bogus' }).status, 'idle');
+
+  const s = normUpdateState(updateState({
+    status: 'downloading',
+    latest: { ...LATEST, notes: 'a\n\tb\u202e\u0000\u2028c' },
+    progress: { received: 5, total: 10, percent: 50.7 },
+    error: { code: '<b>x</b>', message: 'm' },
+    blocked: 'SOMETHING_ELSE',
+    justUpdated: { from: '0.1.0', to: 'v0.3' },
+  }));
+  assert.equal(s.latest.notes, 'a\n\tbc', 'line breaks and tabs kept; bidi, NUL and U+2028 removed');
+  assert.deepEqual(s.progress, { received: 5, total: 10, percent: 50 });
+  assert.equal(s.error, null);
+  assert.equal(s.blocked, null);
+  assert.equal(s.justUpdated, null);
+  assert.equal(normUpdateState(updateState({ status: 'ready', progress: { percent: 5 } })).progress, null, 'progress only while downloading');
+  assert.equal(normUpdateState(updateState({ status: 'ready', phase: 'quitting' })).phase, null, 'phase only while installing');
+  assert.equal(normUpdateState(updateState({ status: 'installing', phase: 'quitting' })).phase, 'quitting');
+  assert.equal(normUpdateState(updateState({ latest: { ...LATEST, version: '1.0' } })).latest, null);
+  assert.equal(normUpdateState(updateState({ downloaded: true })).downloaded, false, 'nothing is downloaded without a latest version');
+  assert.deepEqual(normUpdateState(updateState({ justUpdated: { from: 'x', to: '0.3.0' } })).justUpdated, { from: '', to: '0.3.0' });
+  assert.equal(normUpdateState(updateState({ error: { code: 'NETWORK', message: '' } })).error.message, 'The update failed.');
+
+  assert.equal(cleanNotes('x'.repeat(5000)).length, 4000);
+  assert.equal(cleanNotes('\n\n  \nHello\n  world\n\n'), 'Hello\n  world', 'leading blank lines and trailing space go, indentation stays');
+  assert.equal(cleanNotes(42), '');
+
+  assert.deepEqual(normUpdateResult({ ok: true, extra: 1 }), { ok: true });
+  assert.deepEqual(normUpdateResult({ ok: false, code: 'UAC_DECLINED', message: 'm' }), { ok: false, code: 'UAC_DECLINED', message: 'm' });
+  assert.deepEqual(normUpdateResult(null), { ok: false, code: 'UNKNOWN', message: 'The update failed.' });
+});
+
+test('updates: the status line and the buttons follow UpdateState', async () => {
+  const { normUpdateState } = await load('main/store.js');
+  const { describeUpdate, updatePlan, BLOCKED_TEXT, NOT_SUPPORTED_TEXT } = await load('main/updates.js');
+  const u = (patch) => normUpdateState(updateState(patch));
+  const text = (patch) => describeUpdate(u(patch)).text;
+  assert.equal(text({ status: 'idle' }), '', 'nothing checked yet: no status line');
+  assert.equal(text({ status: 'checking' }), 'Checking for updates…');
+  assert.equal(text({ status: 'up-to-date' }), 'Up to date');
+  assert.equal(text({ status: 'available', latest: LATEST }), 'Update 0.3.0 available');
+  const dl = describeUpdate(u({ status: 'downloading', latest: LATEST, progress: { received: 52428800, total: 104857600, percent: 50 } }));
+  assert.equal(dl.text, 'Downloading 50%');
+  assert.equal(dl.progress, 50);
+  assert.equal(dl.detail, '50 MB of 100 MB');
+  assert.doesNotMatch(dl.announce, /%/, 'the live region is not told every percent');
+  assert.equal(text({ status: 'ready', latest: LATEST, downloaded: true }), 'Ready to install');
+  assert.equal(text({ status: 'installing', phase: 'waiting-for-approval', latest: LATEST, downloaded: true }), 'Waiting for administrator permission…');
+  const net = 'Could not reach GitHub. Check the internet connection and try again.';
+  const err = describeUpdate(u({ status: 'error', error: { code: 'NETWORK', message: net } }));
+  assert.deepEqual([err.tone, err.text], ['danger', net]);
+  assert.equal(describeUpdate(u({ status: 'available', latest: LATEST, supported: false })).detail, NOT_SUPPORTED_TEXT);
+
+  const plan = (patch, ops) => updatePlan(u(patch), ops);
+  assert.equal(plan({ status: 'up-to-date' }).primary, null);
+  assert.deepEqual(plan({ status: 'up-to-date' }).check, { enabled: true, busy: false });
+  assert.deepEqual(plan({ status: 'available', latest: LATEST }).primary, { action: 'download', label: 'Download and install', enabled: true, busy: false });
+  assert.deepEqual(plan({ status: 'downloading', latest: LATEST }).primary, { action: 'download', label: 'Downloading…', enabled: false, busy: true });
+  assert.deepEqual(plan({ status: 'ready', latest: LATEST, downloaded: true }).primary, { action: 'install', label: 'Restart and install', enabled: true, busy: false });
+  assert.equal(plan({ status: 'installing', phase: 'preparing', latest: LATEST, downloaded: true }).primary.label, 'Installing…');
+
+  // A session: Install waits and says why; Check now and Download keep working.
+  for (const b of ['INCOMING_SESSION', 'INCOMING_REQUEST', 'OUTGOING_SESSION', 'SESSION_ACTIVE']) {
+    const p = plan({ status: 'ready', latest: LATEST, downloaded: true, blocked: b });
+    assert.equal(p.primary.enabled, false, b);
+    assert.equal(p.hint, BLOCKED_TEXT[b]);
+    assert.equal(p.check.enabled, true);
+  }
+  assert.equal(BLOCKED_TEXT.INCOMING_SESSION, 'Someone is connected to this computer. Install the update after the session ends.');
+  const dlBlocked = plan({ status: 'available', latest: LATEST, blocked: 'INCOMING_SESSION' });
+  assert.equal(dlBlocked.primary.enabled, true);
+  assert.equal(dlBlocked.hint, BLOCKED_TEXT.INCOMING_SESSION);
+  assert.equal(plan({ status: 'up-to-date', blocked: 'INCOMING_SESSION' }).hint, '', 'nothing to install, nothing to explain');
+
+  // A declined prompt can be tried again, and the file shown; a damaged download is fetched again.
+  const declined = plan({ status: 'error', latest: LATEST, downloaded: true, error: { code: 'UAC_DECLINED', message: 'x' } });
+  assert.deepEqual([declined.primary.label, declined.primary.enabled, declined.reveal], ['Restart and install', true, true]);
+  const damaged = plan({ status: 'error', latest: LATEST, error: { code: 'HASH_MISMATCH', message: 'x' } });
+  assert.deepEqual([damaged.primary.label, damaged.reveal], ['Download and install', false]);
+  assert.equal(plan({ status: 'error', error: { code: 'INSTALL_INCOMPLETE', message: 'x' } }).reveal, true, 'next start: the installer can be shown');
+  assert.equal(plan({ status: 'error', error: { code: 'NETWORK', message: 'x' } }).reveal, false);
+
+  // This copy cannot update itself: the GitHub releases page instead.
+  const ns = plan({ status: 'available', latest: LATEST, supported: false });
+  assert.deepEqual([ns.primary.action, ns.primary.enabled, ns.releases], ['releases', true, false]);
+
+  // Busy (stays focusable) vs. not usable now; a click this window still waits on counts too.
+  assert.deepEqual(plan({ status: 'checking' }).check, { enabled: false, busy: true });
+  assert.deepEqual(plan({ status: 'up-to-date' }, { check: true }).check, { enabled: false, busy: true });
+  assert.deepEqual(plan({ status: 'downloading', latest: LATEST }).check, { enabled: false, busy: false });
+  assert.deepEqual(plan({ status: 'ready', latest: LATEST, downloaded: true }, { install: true }).primary,
+    { action: 'install', label: 'Restart and install', enabled: false, busy: true });
+});
+
+test('settings › Updates: version, status, notes as text only, the daily check (locked in a session), Check now', async () => {
+  const { setState, setSettings } = await load('main/store.js');
+  const { createSettingsView } = await load('main/settings-view.js');
+  const fake = await installUpdateApi();
+  setState(clone(MAC_STATE));
+  setSettings({});
+  const notes = 'Faster reconnects.\n\n\t<img src=x onerror=alert(1)> stays text\nLast line';
+  fake.push(updateState({ status: 'available', lastCheckAt: Date.now() - 5 * 60000, latest: { ...LATEST, notes } }));
+  const view = createSettingsView();
+  try {
+    view.open('updates', { focusSection: true });
+    const sheet = document.body.querySelectorAll('.sheet-layer').pop();
+    const sec = updateSection(sheet);
+    assert.ok(sec, 'Updates section');
+    assert.ok(byText(sheet.querySelector('.sheet-nav'), 'Updates'), 'nav chip');
+    assert.equal(document.activeElement, sec.querySelector('#set-updates-title'), 'the banner’s "View update" lands in the section');
+    assert.equal(sec.querySelector('#set-updates-title').getAttribute('tabindex'), '-1');
+    assert.match(sheet.textContent, /Remote sessions stay inside your tailnet; only update checks go to GitHub/);
+    assert.match(sheet.querySelector('#set-about').textContent, /The only connection outside your tailnet goes to GitHub, for updates/);
+
+    assert.match(sec.textContent, /Tunnelview 0\.2\.0/);
+    assert.match(sec.textContent, /Last checked 5 min ago/);
+    assert.equal(statusText(sec), 'Update 0.3.0 available');
+    assert.match(sec.textContent, /Download size: 100 MB\./);
+
+    // Release notes: the exact text, no element made from it, scrollable by keyboard, labelled.
+    const box = sec.querySelector('.update-notes');
+    assert.equal(box.textContent, notes);
+    assert.equal(box.children.length, 0, 'nothing in the notes became an element');
+    assert.equal(box.getAttribute('tabindex'), '0');
+    assert.equal(box.getAttribute('role'), 'region');
+    assert.equal(sec.querySelector(`#${box.getAttribute('aria-labelledby')}`).textContent, 'What’s new in 0.3.0');
+    assert.equal(sec.querySelector('.update-notes-head').textContent, 'What’s new in 0.3.0Released 2026-11-01');
+
+    const live = sec.querySelector('[aria-live="polite"]');
+    assert.ok(live && live.getAttribute('role') === 'status', 'status changes are announced');
+
+    // The daily check: labelled, sent to main, shows what main stored.
+    const auto = sec.querySelector('[aria-label="Check for updates automatically (contacts GitHub once a day)"]');
+    assert.ok(auto);
+    assert.equal(auto.checked, true);
+    assert.match(sec.textContent, /Contacts GitHub once a day/);
+    calls.length = 0;
+    auto.checked = false;
+    auto.dispatch('change');
+    await sleep(5);
+    assert.deepEqual(calls.filter((c) => c[0] === 'setAutoUpdateCheck'), [['setAutoUpdateCheck', false]]);
+    assert.equal(auto.checked, false);
+
+    // Locked while someone is connected to this computer (like the security settings).
+    assert.ok(auto.hasAttribute('data-lock'));
+    setState({ ...clone(MAC_STATE), host: { ...MAC_STATE.host, session: SESSION } });
+    assert.equal(auto.disabled, true);
+    assert.equal(sec.querySelector('.update-lock-hint').hidden, false);
+    assert.equal(byText(sec, 'Check now').disabled, false, 'Check now stays available');
+    assert.equal(primaryButton(sec).disabled, false, 'so does the download');
+    setState(clone(MAC_STATE));
+    assert.equal(auto.disabled, false);
+    assert.equal(sec.querySelector('.update-lock-hint').hidden, true);
+
+    // main refuses the change anyway: its words are shown and the toggle snaps back.
+    api.setAutoUpdateCheck = async (v) => { calls.push(['setAutoUpdateCheck', v]); return { ok: false, code: 'SETTINGS_LOCKED', message: 'Disconnect the remote session to change security settings.' }; };
+    auto.checked = true;
+    auto.dispatch('change');
+    await sleep(5);
+    assert.equal(auto.checked, false);
+    assert.ok(toasts().includes('Disconnect the remote session to change security settings.'), toasts().join(' | '));
+
+    // Check now
+    fake.push(updateState({ status: 'available', latest: { ...LATEST, notes } }));
+    const checkBtn = byText(sec, 'Check now');
+    checkBtn.focus();
+    let answer;
+    api.checkForUpdates = async () => {
+      calls.push(['checkForUpdates']);
+      fake.push(updateState({ status: 'checking', latest: { ...LATEST, notes } }));
+      await new Promise((r) => { answer = r; });
+      return updateState({ status: 'up-to-date', lastCheckAt: Date.now() });
+    };
+    calls.length = 0;
+    checkBtn.click();
+    await sleep(5);
+    assert.equal(checkBtn.textContent, 'Checking…');
+    assert.equal(checkBtn.getAttribute('aria-disabled'), 'true');
+    assert.equal(document.activeElement, checkBtn, 'the focus stays on the busy button');
+    assert.equal(live.textContent, 'Checking for updates…');
+    checkBtn.click();
+    answer();
+    await sleep(5);
+    assert.deepEqual(calls.map((c) => c[0]), ['checkForUpdates'], 'once');
+    assert.equal(checkBtn.textContent, 'Check now');
+    assert.equal(checkBtn.hasAttribute('aria-disabled'), false);
+    assert.equal(statusText(sec), 'Up to date');
+    assert.equal(live.textContent, 'Up to date');
+    assert.equal(sec.querySelector('.update-notes-block').hidden, true);
+    assert.equal(primaryButton(sec).hidden, true, 'nothing to download');
+    assert.match(sec.textContent, /Last checked just now/);
+  } finally {
+    view.close();
+    await removeUpdateApi();
+  }
+});
+
+test('settings › Updates: Download and install shows progress, then asks; Cancel installs nothing, Restart and install does', async () => {
+  const { setState, setSettings } = await load('main/store.js');
+  const { createSettingsView } = await load('main/settings-view.js');
+  await sleep(200); // earlier dialogs hand the focus back 160 ms after they close
+  let release;
+  const fake = await installUpdateApi({
+    downloadUpdate: async () => {
+      calls.push(['downloadUpdate']);
+      fake.push(updateState({ status: 'downloading', latest: LATEST, progress: { received: 26214400, total: 104857600, percent: 25 } }));
+      await new Promise((r) => { release = r; });
+      fake.push(updateState({ status: 'ready', latest: LATEST, downloaded: true }));
+      return { ok: true };
+    },
+  });
+  setState(clone(MAC_STATE));
+  setSettings({});
+  fake.push(updateState({ status: 'available', latest: LATEST }));
+  const view = createSettingsView();
+  try {
+    view.open('updates');
+    const sec = updateSection(document.body.querySelectorAll('.sheet-layer').pop());
+    const btn = primaryButton(sec);
+    assert.equal(btn.textContent, 'Download and install');
+    btn.focus();
+    calls.length = 0;
+    btn.click();
+    await sleep(5);
+    assert.deepEqual(calls.map((c) => c[0]), ['downloadUpdate']);
+    assert.equal(statusText(sec), 'Downloading 25%');
+    const bar = sec.querySelector('[role="progressbar"]');
+    assert.equal(bar.hidden, false);
+    assert.equal(bar.getAttribute('aria-valuenow'), '25');
+    assert.equal(bar.getAttribute('aria-label'), 'Download progress');
+    assert.equal(bar.querySelector('i').style.width, '25%');
+    assert.equal(btn.textContent, 'Downloading…');
+    assert.equal(btn.getAttribute('aria-disabled'), 'true');
+    assert.equal(document.activeElement, btn, 'the focus stays on the busy button');
+    btn.click();
+    await sleep(5);
+    assert.equal(calls.filter((c) => c[0] === 'downloadUpdate').length, 1, 'a busy button does nothing');
+    assert.equal(sec.querySelector('[aria-live="polite"]').textContent, 'Downloading update 0.3.0…');
+
+    // Verified: the confirmation, Windows wording, Cancel focused.
+    release();
+    await sleep(10);
+    assert.equal(bar.hidden, true);
+    let modal = topModal();
+    assert.ok(modal.querySelector('.modal-update'));
+    assert.match(modal.textContent, /Install Tunnelview 0\.3\.0\?/);
+    assert.match(modal.textContent, /Windows will ask for permission \(UAC\)\. Tunnelview closes and reopens after the update\./);
+    assert.match(modal.textContent, /Unknown publisher/);
+    assert.doesNotMatch(modal.textContent, /Screen Recording/);
+    assert.equal(document.activeElement, byText(modal, 'Cancel'), 'a stray Enter cancels');
+    byText(modal, 'Cancel').click();
+    await sleep(5);
+    assert.equal(calls.some((c) => c[0] === 'installUpdate'), false, 'nothing installed');
+    assert.equal(statusText(sec), 'Ready to install');
+    assert.equal(btn.textContent, 'Restart and install');
+    assert.equal(btn.disabled, false);
+    await sleep(200);
+    assert.equal(document.activeElement, btn, 'the focus comes back to the button');
+
+    // Restart and install → confirm → update:install.
+    btn.click();
+    await sleep(5);
+    modal = topModal();
+    byText(modal.querySelector('.modal-foot'), 'Restart and install').click();
+    await sleep(5);
+    assert.deepEqual(calls.filter((c) => c[0] === 'installUpdate'), [['installUpdate']]);
+
+    // A declined UAC prompt: main's words in the status line (no toast), and the file can be shown.
+    await sleep(200);
+    const declined = 'Update cancelled: administrator permission was not given.';
+    api.installUpdate = async () => {
+      calls.push(['installUpdate']);
+      fake.push(updateState({ status: 'error', latest: LATEST, downloaded: true, error: { code: 'UAC_DECLINED', message: declined } }));
+      return { ok: false, code: 'UAC_DECLINED', message: declined };
+    };
+    fake.push(updateState({ status: 'ready', latest: LATEST, downloaded: true }));
+    btn.click();
+    await sleep(5);
+    byText(topModal().querySelector('.modal-foot'), 'Restart and install').click();
+    await sleep(10);
+    assert.equal(statusText(sec), declined);
+    assert.ok(sec.querySelector('.update-status').classList.contains('is-danger'));
+    assert.ok(!toasts().includes(declined), 'shown once, in the status line');
+    assert.equal(btn.textContent, 'Restart and install', 'can be tried again');
+    const reveal = byText(sec, 'Show in folder');
+    assert.ok(reveal && !reveal.hidden);
+    calls.length = 0;
+    reveal.click();
+    await sleep(5);
+    assert.deepEqual(calls, [['revealUpdate']]);
+  } finally {
+    view.close();
+    await removeUpdateApi();
+    await sleep(200);
+  }
+});
+
+test('settings › Updates: macOS warns about Screen Recording and Accessibility; Install waits during a session; refusals are explained', async () => {
+  const { setState, setSettings } = await load('main/store.js');
+  const { createSettingsView } = await load('main/settings-view.js');
+  const fake = await installUpdateApi();
+  setState(clone(MAC_STATE));
+  setSettings({});
+  fake.push(updateState({ platform: 'macos', status: 'ready', latest: LATEST, downloaded: true, blocked: 'OUTGOING_SESSION' }));
+  const view = createSettingsView();
+  try {
+    view.open('updates');
+    const sec = updateSection(document.body.querySelectorAll('.sheet-layer').pop());
+    const btn = primaryButton(sec);
+    assert.equal(btn.textContent, 'Restart and install');
+    assert.equal(btn.disabled, true);
+    const hint = sec.querySelector('#update-hint');
+    assert.equal(hint.hidden, false);
+    assert.equal(hint.textContent, 'You are connected to another device. Install the update after you disconnect.');
+    assert.equal(btn.getAttribute('aria-describedby'), 'update-hint');
+    calls.length = 0;
+    btn.click();
+    await sleep(5);
+    assert.deepEqual(calls, [], 'disabled: nothing happens');
+
+    fake.push(updateState({ platform: 'macos', status: 'ready', latest: LATEST, downloaded: true }));
+    assert.equal(btn.disabled, false);
+    assert.equal(hint.hidden, true);
+    btn.click();
+    await sleep(5);
+    const modal = topModal();
+    assert.match(modal.textContent, /Tunnelview quits, replaces itself with version 0\.3\.0 and opens again\./);
+    assert.match(modal.textContent, /Allow Screen Recording and Accessibility again afterwards/);
+    assert.match(modal.textContent, /ad-hoc signed/);
+    assert.doesNotMatch(modal.textContent, /UAC/);
+
+    // Someone asked to connect meanwhile: main refuses, says why, nothing changes.
+    const refusal = 'Someone is asking to connect to this computer. Install the update after you answer.';
+    api.installUpdate = async () => { calls.push(['installUpdate']); return { ok: false, code: 'INCOMING_REQUEST', message: refusal }; };
+    byText(modal.querySelector('.modal-foot'), 'Restart and install').click();
+    await sleep(10);
+    assert.deepEqual(calls.map((c) => c[0]), ['installUpdate', 'getUpdateState']);
+    assert.ok(toasts().includes(refusal), toasts().join(' | '));
+    assert.equal(statusText(sec), 'Ready to install');
+    assert.equal(byText(sec, 'Show in Finder').hidden, true);
+
+    // The waiting phases have their own words.
+    fake.push(updateState({ platform: 'macos', status: 'installing', phase: 'quitting', latest: LATEST, downloaded: true }));
+    assert.equal(statusText(sec), 'Restarting Tunnelview…');
+    assert.equal(btn.textContent, 'Installing…');
+    assert.equal(byText(sec, 'Check now').disabled, true);
+  } finally {
+    view.close();
+    await removeUpdateApi();
+    await sleep(200);
+  }
+});
+
+test('settings › Updates: a button that becomes unusable while it has the keyboard focus keeps it (aria-disabled) and does nothing', async () => {
+  const { setState, setSettings } = await load('main/store.js');
+  const { createSettingsView } = await load('main/settings-view.js');
+  const fake = await installUpdateApi();
+  setState(clone(MAC_STATE));
+  setSettings({});
+  const ready = updateState({ status: 'ready', latest: LATEST, downloaded: true });
+  fake.push(ready);
+  const view = createSettingsView();
+  try {
+    view.open('updates');
+    const sec = updateSection(document.body.querySelectorAll('.sheet-layer').pop());
+    const btn = primaryButton(sec);
+    assert.equal(btn.textContent, 'Restart and install');
+    btn.focus();
+    // Someone asks to connect while Install has the focus: Chromium would move the focus of a
+    // disabled control to <body>, out of the sheet.
+    fake.push({ ...ready, blocked: 'INCOMING_REQUEST' });
+    assert.equal(btn.disabled, false, 'not disabled while it has the focus');
+    assert.equal(btn.getAttribute('aria-disabled'), 'true');
+    assert.equal(btn.hasAttribute('data-busy'), false, 'unavailable, not busy: no progress cursor');
+    assert.equal(document.activeElement, btn);
+    assert.equal(sec.querySelector('#update-hint').hidden, false, 'the reason stays in view');
+    calls.length = 0;
+    btn.click();
+    await sleep(5);
+    assert.deepEqual(calls, [], 'a click does nothing');
+    assert.equal(topModal() && topModal().querySelector('.modal-update'), null, 'no confirmation');
+    // The request is answered: usable again.
+    fake.push(ready);
+    assert.equal(btn.hasAttribute('aria-disabled'), false);
+    assert.equal(btn.disabled, false);
+    // An automatic check starts while Install has the focus: the same.
+    fake.push({ ...ready, status: 'checking' });
+    assert.equal(btn.disabled, false);
+    assert.equal(btn.getAttribute('aria-disabled'), 'true');
+    assert.equal(byText(sec, 'Checking…').getAttribute('data-busy'), '', 'the busy Check now shows the progress cursor');
+    fake.push(ready);
+    // Without the focus, a button that cannot be used now is really disabled.
+    btn.blur();
+    fake.push({ ...ready, blocked: 'INCOMING_REQUEST' });
+    assert.equal(btn.disabled, true);
+    assert.equal(btn.hasAttribute('aria-disabled'), false);
+  } finally {
+    view.close();
+    await removeUpdateApi();
+    await sleep(200);
+  }
+});
+
+test('settings › Updates: a copy that cannot update itself points to GitHub; without the updater API there is no section', async () => {
+  const { setState, setSettings } = await load('main/store.js');
+  const { createSettingsView } = await load('main/settings-view.js');
+  const fake = await installUpdateApi();
+  setState(clone(MAC_STATE));
+  setSettings({});
+  fake.push(updateState({ status: 'available', supported: false, latest: LATEST }));
+  let view = createSettingsView();
+  view.open('updates');
+  const sec = updateSection(document.body.querySelectorAll('.sheet-layer').pop());
+  const btn = primaryButton(sec);
+  assert.equal(btn.textContent, 'Get 0.3.0 from GitHub');
+  assert.equal(byText(sec, 'Releases page').hidden, true, 'one way to GitHub is enough');
+  assert.match(sec.textContent, /This copy of Tunnelview cannot update itself\./);
+  calls.length = 0;
+  btn.click();
+  await sleep(5);
+  assert.deepEqual(calls, [['openReleasesPage']]);
+  view.close();
+  await removeUpdateApi();
+
+  view = createSettingsView();
+  view.open('updates');
+  const sheet = document.body.querySelectorAll('.sheet-layer').pop();
+  assert.equal(updateSection(sheet), null);
+  assert.equal(byText(sheet.querySelector('.sheet-nav'), 'Updates'), null);
+  assert.doesNotMatch(sheet.textContent, /GitHub/);
+  view.close();
+});
+
+test('update banner: a newer version, "View update" opens Settings › Updates, dismissed for that version only', async () => {
+  const { setState, setUpdateState, store } = await load('main/store.js');
+  const { mountUpdateBanner } = await load('main/updates.js');
+  setState(clone(MAC_STATE));
+  store.update = null;
+  const root = mount();
+  const opened = [];
+  let handedOn = 0;
+  mountUpdateBanner(root, { openSettings: (s, o) => opened.push([s, o]), afterDismiss: () => { handedOn++; } });
+  try {
+    assert.equal(root.hidden, true);
+    setUpdateState(updateState({ status: 'up-to-date' }));
+    assert.equal(root.hidden, true);
+
+    setUpdateState(updateState({ status: 'available', latest: LATEST }));
+    assert.equal(root.hidden, false);
+    const banner = root.querySelector('.update-banner');
+    assert.equal(banner.getAttribute('role'), 'status');
+    assert.equal(root.querySelector(`#${banner.getAttribute('aria-labelledby')}`).textContent, 'Tunnelview 0.3.0 is available');
+    assert.match(root.textContent, /You have 0\.2\.0\./);
+    byText(root, 'View update').click();
+    assert.deepEqual(opened, [['updates', { focusSection: true }]]);
+
+    setUpdateState(updateState({ status: 'downloading', latest: LATEST, progress: { received: 1, total: 2, percent: 50 } }));
+    assert.match(root.textContent, /Downloading Tunnelview 0\.3\.0…/);
+    assert.doesNotMatch(root.textContent, /%/, 'no per-percent changes in a live region');
+    setUpdateState(updateState({ status: 'ready', latest: LATEST, downloaded: true }));
+    assert.match(root.textContent, /Tunnelview 0\.3\.0 is ready to install/);
+
+    // ✕: gone for 0.3.0 and the focus is handed on; back for 0.3.1.
+    const x = root.querySelector('[aria-label="Dismiss: Tunnelview 0.3.0 is ready to install"]');
+    assert.ok(x);
+    x.focus();
+    x.click();
+    assert.equal(root.hidden, true);
+    assert.equal(handedOn, 1);
+    setUpdateState(updateState({ status: 'available', latest: LATEST }));
+    assert.equal(root.hidden, true, 'still dismissed for 0.3.0');
+    setUpdateState(updateState({ status: 'available', latest: { ...LATEST, version: '0.3.1' } }));
+    assert.equal(root.hidden, false);
+    assert.match(root.textContent, /Tunnelview 0\.3\.1 is available/);
+
+    // Not while it installs (Tunnelview is about to quit).
+    setUpdateState(updateState({ status: 'installing', phase: 'preparing', latest: { ...LATEST, version: '0.3.1' }, downloaded: true }));
+    assert.equal(root.hidden, true);
+  } finally {
+    root.remove();
+    store.update = null;
+  }
+});
+
+test('update banner: after an in-app update macOS asks for the permissions again; an install that did not take is reported', async () => {
+  const { setState, setUpdateState, store } = await load('main/store.js');
+  const { mountUpdateBanner } = await load('main/updates.js');
+  setState(clone(MAC_STATE)); // Screen Recording and Accessibility: denied
+  store.update = null;
+  const root = mount();
+  const opened = [];
+  mountUpdateBanner(root, { openSettings: (s, o) => opened.push([s, o]) });
+  try {
+    setUpdateState(updateState({ platform: 'macos', currentVersion: '0.3.0', justUpdated: { from: '0.2.0', to: '0.3.0' } }));
+    assert.equal(root.hidden, false);
+    assert.match(root.textContent, /Tunnelview was updated to 0\.3\.0/);
+    assert.match(root.textContent, /macOS asks again for Screen Recording and Accessibility after every update/);
+    assert.ok(root.querySelector('.banner-warn'));
+    assert.equal(byText(root, 'View update'), null);
+    setState({ ...clone(MAC_STATE), permissions: { screen: 'granted', accessibility: 'granted' } });
+    assert.equal(root.hidden, true, 'both allowed again: nothing left to do');
+
+    setUpdateState(updateState({ platform: 'windows', currentVersion: '0.3.0', justUpdated: { from: '0.2.0', to: '0.3.0' } }));
+    assert.equal(root.hidden, false);
+    assert.match(root.textContent, /Tunnelview was updated to 0\.3\.0/);
+    assert.ok(root.querySelector('.banner-ok'));
+    root.querySelector('[aria-label="Dismiss: Tunnelview was updated to 0.3.0"]').click();
+    assert.equal(root.hidden, true);
+
+    const msg = 'The update to 0.3.0 did not complete; Tunnelview 0.2.0 is still installed. Check for updates to try again.';
+    setUpdateState(updateState({ status: 'error', error: { code: 'INSTALL_INCOMPLETE', message: msg } }));
+    assert.match(root.textContent, /The update did not complete/);
+    assert.ok(root.textContent.includes(msg));
+    byText(root, 'Details').click();
+    assert.deepEqual(opened, [['updates', { focusSection: true }]]);
+  } finally {
+    root.remove();
+    store.update = null;
+  }
+});
+
+test('remote: the Tailscale banner no longer claims Tunnelview never goes outside the tailnet', async () => {
+  const { setState } = await load('main/store.js');
+  const { mountTsBanner } = await load('main/remote.js');
+  const root = mount();
+  setState({ ...clone(MAC_STATE), tailscale: { state: 'not-installed', message: '', self: null } });
+  mountTsBanner(root);
+  assert.match(root.textContent, /Tunnelview connects to other devices only inside a Tailscale network \(tailnet\), never over the open internet\./);
+  assert.doesNotMatch(root.textContent, /it never connects over the open internet/);
+  setState(clone(MAC_STATE));
+  root.remove();
+});
+
+test('app.css: release notes keep their line breaks and scroll inside a capped height; busy buttons look disabled', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'main', 'app.css'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'main', 'index.html'), 'utf8');
+  const rule = (sel) => {
+    const m = new RegExp(`^${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'm').exec(css);
+    assert.ok(m, `no ${sel} rule`);
+    return m[1].replace(/\s+/g, ' ');
+  };
+  const notes = rule('.update-notes');
+  for (const decl of ['max-height: 200px', 'overflow-y: auto', 'white-space: pre-wrap', 'overflow-wrap: anywhere']) assert.ok(notes.includes(decl), `${decl} in .update-notes`);
+  assert.match(rule('.btn[aria-disabled="true"]'), /opacity/);
+  assert.match(rule('.sr-only'), /position: absolute/);
+  assert.match(html, /<div class="update-banner-slot" id="update-banner" hidden><\/div>/);
+});

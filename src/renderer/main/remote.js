@@ -13,7 +13,7 @@ const DOWNLOAD_LINK = Symbol('download-link');
 const TS_BANNERS = {
   'not-installed': {
     title: 'Tailscale isn’t installed',
-    text: ['Tunnelview works only inside a Tailscale network (tailnet) — it never connects over the open internet. Install Tailscale from ',
+    text: ['Tunnelview connects to other devices only inside a Tailscale network (tailnet), never over the open internet. Install Tailscale from ',
       DOWNLOAD_LINK, ', sign in, and this window updates on its own.'],
     action: 'download',
   },
