@@ -470,7 +470,7 @@ function main() {
     for (const e of errors) console.error(`  - ${e}`);
     process.exit(1);
   }
-  console.log('✓ all checks passed');
+  if (!opt.print) console.log('✓ all checks passed');
 }
 
 if (require.main === module) main();

@@ -42,6 +42,22 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
+// Plugins with native code (flutter_zxing, jni) build with the plugin project's NDK and CMake.
+// Left alone, those are AGP's defaults (NDK 28.2, CMake 3.22.1), which the CI runner does not
+// have, so every build would download them. Use the preinstalled ones, like the app does.
+subprojects {
+    plugins.withId("com.android.library") {
+        extensions.getByName("android").withGroovyBuilder {
+            "setNdkVersion"("27.3.13750724")
+            "externalNativeBuild" {
+                "cmake" {
+                    "setVersion"("3.31.5")
+                }
+            }
+        }
+    }
+}
+
 tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
 }
