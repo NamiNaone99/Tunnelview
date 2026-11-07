@@ -34,10 +34,7 @@ void main() {
   test('no address of any other device appears', () {
     // Per-peer routes (other devices), a router gateway and a router DNS.
     final state = deriveTailnetState(
-      snap([
-        wifi(),
-        tun(hostRoutes: true, exitNode: true),
-      ]),
+      snap([wifi(), tun(hostRoutes: true, exitNode: true)]),
     );
     final selfTest = evaluateSelfTest(
       outcome: ownCandidates(),

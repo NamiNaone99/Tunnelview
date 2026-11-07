@@ -61,16 +61,8 @@ NetworkEntry tun({
   ],
   routes: [
     if (hostRoutes) ...const [
-      RouteEntry(
-        destination: '100.88.1.4',
-        prefix: 32,
-        interfaceName: 'tun0',
-      ),
-      RouteEntry(
-        destination: '100.77.2.9',
-        prefix: 32,
-        interfaceName: 'tun0',
-      ),
+      RouteEntry(destination: '100.88.1.4', prefix: 32, interfaceName: 'tun0'),
+      RouteEntry(destination: '100.77.2.9', prefix: 32, interfaceName: 'tun0'),
     ] else
       RouteEntry(
         destination: '100.64.0.0',

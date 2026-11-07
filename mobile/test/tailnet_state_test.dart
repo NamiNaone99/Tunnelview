@@ -16,10 +16,16 @@ void main() {
       expect(chooseTailnet([]).reason, TailnetReason.none);
     });
 
-    test('a VPN with only a 100.64/10 address is "no-fd7a" (WARP, NetBird)', () {
-      expect(chooseTailnet([wifi(), otherVpn()]).reason, TailnetReason.noFd7a);
-      expect(chooseTailnet([tun(v6: null)]).reason, TailnetReason.noFd7a);
-    });
+    test(
+      'a VPN with only a 100.64/10 address is "no-fd7a" (WARP, NetBird)',
+      () {
+        expect(
+          chooseTailnet([wifi(), otherVpn()]).reason,
+          TailnetReason.noFd7a,
+        );
+        expect(chooseTailnet([tun(v6: null)]).reason, TailnetReason.noFd7a);
+      },
+    );
 
     test('two Tailscale networks are "several"', () {
       final c = chooseTailnet([tun(), tun(handle: tun2Handle)]);
@@ -140,10 +146,10 @@ void main() {
 
     test('a refused bind means Tunnelview is excluded (split tunnelling)', () {
       final s = deriveTailnetState(
-        snap(
-          [wifi(), tun()],
-          binding: const BindingInfo(attempted: tunHandle, ok: false),
-        ),
+        snap([
+          wifi(),
+          tun(),
+        ], binding: const BindingInfo(attempted: tunHandle, ok: false)),
       );
       expect(s.status, TailnetStatus.excluded);
       expect(s.reason, 'excluded');
@@ -152,10 +158,7 @@ void main() {
 
     test('bound to an older network only: still checking', () {
       final s = deriveTailnetState(
-        snap(
-          [wifi(), tun()],
-          binding: const BindingInfo(process: tun2Handle),
-        ),
+        snap([wifi(), tun()], binding: const BindingInfo(process: tun2Handle)),
       );
       expect(s.status, TailnetStatus.checking);
       expect(s.reason, 'binding');

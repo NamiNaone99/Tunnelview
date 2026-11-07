@@ -35,8 +35,10 @@ String buildDiagnosticsReport({
   b
     ..writeln()
     ..writeln('[Tailscale]')
-    ..writeln('Status: ${Strings.pill(state)} (${state.status.name}, '
-        '${state.reason})')
+    ..writeln(
+      'Status: ${Strings.pill(state)} (${state.status.name}, '
+      '${state.reason})',
+    )
     ..writeln(
       'Sessions: ${Strings.sessionRefusal(sessionRefusal(state, selfTest))}',
     );
@@ -44,17 +46,23 @@ String buildDiagnosticsReport({
   if (n != null) {
     final routes = RouteSummary.of(n);
     b
-      ..writeln('Network: handle ${n.handle}, interface '
-          '${n.interfaceName ?? '?'}, transports ${_list(n.transports)}')
+      ..writeln(
+        'Network: handle ${n.handle}, interface '
+        '${n.interfaceName ?? '?'}, transports ${_list(n.transports)}',
+      )
       ..writeln('Own Tailscale addresses: ${_list(state.selfAddrs)}')
       ..writeln('Process bound to it: ${state.bound ? 'yes' : 'no'}')
       ..writeln('Route mode: ${routes.mode}')
       ..writeln('IPv6 /48 route: ${routes.tailnetV6Route ? 'yes' : 'no'}')
-      ..writeln('Default route on the tunnel (exit node): '
-          '${routes.defaultRoute ? 'yes' : 'no'}')
+      ..writeln(
+        'Default route on the tunnel (exit node): '
+        '${routes.defaultRoute ? 'yes' : 'no'}',
+      )
       ..writeln('Routes on the tunnel: ${routes.tunRoutes}')
-      ..writeln('Tunnel DNS: ${_list(n.dns.where(_isQuad100).toList())}'
-          '${n.dns.any((d) => !_isQuad100(d)) ? ' (+ others not shown)' : ''}');
+      ..writeln(
+        'Tunnel DNS: ${_list(n.dns.where(_isQuad100).toList())}'
+        '${n.dns.any((d) => !_isQuad100(d)) ? ' (+ others not shown)' : ''}',
+      );
   }
   if (snap != null) {
     b.writeln(
@@ -91,11 +99,15 @@ String buildDiagnosticsReport({
   } else {
     final o = selfTest.outcome;
     b
-      ..writeln('Self-test: ${selfTest.verdict.name} at '
-          '${selfTest.at.toUtc().toIso8601String()}')
+      ..writeln(
+        'Self-test: ${selfTest.verdict.name} at '
+        '${selfTest.at.toUtc().toIso8601String()}',
+      )
       ..writeln(Strings.selfTestVerdict(selfTest.verdict))
-      ..writeln('Gathering: ${o.completed ? 'complete' : 'not complete'} in '
-          '${o.elapsed.inMilliseconds} ms${o.error == null ? '' : ', error ${o.error}'}')
+      ..writeln(
+        'Gathering: ${o.completed ? 'complete' : 'not complete'} in '
+        '${o.elapsed.inMilliseconds} ms${o.error == null ? '' : ', error ${o.error}'}',
+      )
       ..writeln('Compared with: ${_list(selfTest.selfAddrs)}')
       ..writeln('Candidates: ${o.candidates.length}');
     final foreign = selfTest.foreign.toSet();
@@ -111,7 +123,8 @@ String buildDiagnosticsReport({
   return b.toString();
 }
 
-bool _isQuad100(String a) => a == '100.100.100.100' || a == 'fd7a:115c:a1e0::53';
+bool _isQuad100(String a) =>
+    a == '100.100.100.100' || a == 'fd7a:115c:a1e0::53';
 
 String _list(List<String> items) => items.isEmpty ? '(none)' : items.join(', ');
 

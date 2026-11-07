@@ -111,7 +111,7 @@ class GatheredCandidate {
   /// "vpn", "wifi", ... or "unknown".
   String get adapterLabel {
     final parts = <String>[
-      if (networkType != null) networkType!,
+      ?networkType,
       if (adapterType != null && adapterType != networkType) adapterType!,
       if (vpn == true && networkType != 'vpn' && adapterType != 'vpn') 'vpn',
     ];

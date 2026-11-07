@@ -111,10 +111,10 @@ void main() {
   });
 
   test('excluded from Tailscale: no self-test, sessions refused', () async {
-    platform.current = snap(
-      [wifi(), tun()],
-      binding: const BindingInfo(attempted: tunHandle, ok: false),
-    );
+    platform.current = snap([
+      wifi(),
+      tun(),
+    ], binding: const BindingInfo(attempted: tunHandle, ok: false));
     await controller.start();
     await settle();
     expect(controller.tailnet.status, TailnetStatus.excluded);
@@ -141,8 +141,16 @@ void main() {
 
   group('sessionRefusal', () {
     final ok = deriveTailnetState(snap([wifi(), tun()]));
+    // Candidates on exactly [addrs] (the fixture's own tun addresses).
     SelfTestResult pass(List<String> addrs) => evaluateSelfTest(
-      outcome: ownCandidates(),
+      outcome: GatherOutcome(
+        candidates: [
+          for (final c in ownCandidates().candidates)
+            if (addrs.contains(c.address)) c,
+        ],
+        completed: true,
+        elapsed: Duration.zero,
+      ),
       selfAddrs: addrs,
       at: DateTime.utc(2026),
     );

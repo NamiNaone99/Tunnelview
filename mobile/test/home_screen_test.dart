@@ -23,10 +23,7 @@ void main() {
   setUp(() {
     platform = FakeTailnetPlatform(snap([wifi()], at: 0));
     gatherer = FakeGatherer(ownCandidates());
-    controller = ConnectivityController(
-      platform: platform,
-      gatherer: gatherer,
-    );
+    controller = ConnectivityController(platform: platform, gatherer: gatherer);
   });
 
   tearDown(() async {
@@ -36,7 +33,9 @@ void main() {
 
   Future<void> pumpHome(WidgetTester tester) async {
     await tester.pumpWidget(
-      MaterialApp(home: HomeScreen(controller: controller, info: info)),
+      MaterialApp(
+        home: HomeScreen(controller: controller, info: info),
+      ),
     );
     await controller.start();
     await tester.pump();
@@ -56,7 +55,9 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      MaterialApp(home: HomeScreen(controller: controller, info: info)),
+      MaterialApp(
+        home: HomeScreen(controller: controller, info: info),
+      ),
     );
     expect(pillText(tester), 'Checking Tailscale…');
     expect(find.byKey(const Key('tailscale-card')), findsNothing);
@@ -95,6 +96,7 @@ void main() {
     await pumpHome(tester);
     controller.monitor.apply(snap([wifi(), otherVpn()], at: 10));
     await tester.pump();
+    await tester.pump();
     expect(pillText(tester), 'Another VPN is on');
     expect(
       find.textContaining('Android allows one VPN at a time'),
@@ -109,14 +111,13 @@ void main() {
       ),
     );
     await tester.pump();
+    await tester.pump();
     expect(pillText(tester), 'Not using Tailscale');
     expect(find.text('Tunnelview is excluded from Tailscale'), findsOneWidget);
-    expect(
-      find.textContaining('App-based split tunneling'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('App-based split tunneling'), findsOneWidget);
 
     controller.monitor.apply(snap([tun(), tun(handle: tun2Handle)], at: 30));
+    await tester.pump();
     await tester.pump();
     expect(pillText(tester), 'Tailscale network unclear');
   });
@@ -180,8 +181,11 @@ void main() {
     expect(row('diag-sessions'), 'Allowed');
     expect(row('diag-self-addrs'), contains('100.101.12.7'));
     expect(row('diag-route-mode'), startsWith('2 host routes'));
-    expect(row('diag-binding'), 'bound to the Tailscale network, last '
-        'attempt succeeded (handle $tunHandle)');
+    expect(
+      row('diag-binding'),
+      'bound to the Tailscale network, last '
+      'attempt succeeded (handle $tunHandle)',
+    );
     expect(row('diag-selftest'), startsWith('Passed'));
     expect(row('diag-candidates'), contains('100.101.12.7 41234 udp host'));
   });

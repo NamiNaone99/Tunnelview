@@ -105,9 +105,7 @@ class DiagnosticsScreen extends StatelessWidget {
               ),
               _Row(
                 'Own Tailscale addresses',
-                state.selfAddrs.isEmpty
-                    ? '(none)'
-                    : state.selfAddrs.join('\n'),
+                state.selfAddrs.isEmpty ? '(none)' : state.selfAddrs.join('\n'),
                 key: const Key('diag-self-addrs'),
               ),
               _Row(
@@ -292,8 +290,8 @@ class _NetworkTile extends StatelessWidget {
     return _Row(
       '${n.interfaceName ?? '?'} (handle ${n.handle})',
       '$flags\n'
-      '${addrs.isEmpty ? 'no addresses' : addrs.join('\n')}\n'
-      '${n.routes.length} routes · ${n.dns.length} DNS servers',
+          '${addrs.isEmpty ? 'no addresses' : addrs.join('\n')}\n'
+          '${n.routes.length} routes · ${n.dns.length} DNS servers',
     );
   }
 }

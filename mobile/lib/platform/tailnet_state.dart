@@ -230,8 +230,7 @@ class TailnetState {
 /// Derives the state from one snapshot.
 TailnetState deriveTailnetState(TailnetSnapshot s) {
   final choice = chooseTailnet(s.networks);
-  if (choice.reason != s.reason ||
-      choice.network?.handle != s.tailnetHandle) {
+  if (choice.reason != s.reason || choice.network?.handle != s.tailnetHandle) {
     // The platform and the Dart rules disagree: never report OK.
     return TailnetState(
       status: TailnetStatus.checking,

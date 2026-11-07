@@ -24,7 +24,10 @@ void main() {
 
     test('malformed lines are null', () {
       expect(GatheredCandidate.fromLine('a=end-of-candidates'), isNull);
-      expect(GatheredCandidate.fromLine('candidate:1 1 udp 1 x 1 host'), isNull);
+      expect(
+        GatheredCandidate.fromLine('candidate:1 1 udp 1 x 1 host'),
+        isNull,
+      );
     });
 
     test('stats entries carry the adapter type', () {
@@ -181,7 +184,10 @@ void main() {
         SelfTestVerdict.incomplete,
       );
       final failed = evaluateSelfTest(
-        outcome: const GatherOutcome.failed('webrtc-unavailable', Duration.zero),
+        outcome: const GatherOutcome.failed(
+          'webrtc-unavailable',
+          Duration.zero,
+        ),
         selfAddrs: own,
         at: at,
       );
