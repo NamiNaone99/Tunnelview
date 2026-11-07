@@ -70,15 +70,23 @@ class TailscalePill extends StatelessWidget {
 
 /// The inline card under the pill; empty when the state needs none.
 class TailscaleStatusCard extends StatelessWidget {
-  const TailscaleStatusCard({super.key, required this.state});
+  const TailscaleStatusCard({
+    super.key,
+    required this.state,
+    this.onOpenDiagnostics,
+  });
 
   final TailnetState state;
+
+  /// Shown as a button on cards that point to Diagnostics.
+  final VoidCallback? onOpenDiagnostics;
 
   @override
   Widget build(BuildContext context) {
     final text = Strings.card(state);
     if (text == null) return const SizedBox.shrink();
     final theme = Theme.of(context);
+    final open = onOpenDiagnostics;
     return Card(
       key: const Key('tailscale-card'),
       child: Padding(
@@ -89,6 +97,14 @@ class TailscaleStatusCard extends StatelessWidget {
             Text(text.title, style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             Text(text.message),
+            if (text.pointsToDiagnostics && open != null) ...[
+              const SizedBox(height: 8),
+              TextButton(
+                key: const Key('tailscale-card-diagnostics'),
+                onPressed: open,
+                child: const Text(Strings.diagnostics),
+              ),
+            ],
           ],
         ),
       ),

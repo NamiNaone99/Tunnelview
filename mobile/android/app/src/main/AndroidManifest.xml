@@ -73,8 +73,17 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
-            <!-- The only intent filter. No VIEW filters: pairing links are scanned or pasted,
-                 never opened from other apps. -->
+            <!-- This activity is exported (it is the launcher), so any installed app can start it
+                 with an explicit Intent, which bypasses intent filters. Flutter would turn that
+                 Intent's data URI into a route (its default when this value is missing).
+                 MainActivity also drops the launch Intent's data and extras before Flutter reads
+                 them. scripts/check-apk.js fails the build without this value. -->
+            <meta-data
+              android:name="flutter_deeplinking_enabled"
+              android:value="false" />
+            <!-- The only intent filter. No VIEW filters, and no deep links: pairing links are
+                 scanned or pasted inside the app; a link or Intent from another app never
+                 reaches Flutter. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>

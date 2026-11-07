@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../app/connectivity.dart';
 import '../app_info.dart';
 import '../diagnostics/report.dart';
 import '../platform/tailnet.dart';
+import '../platform/ui_platform.dart';
 import '../rtc/engine.dart';
 import '../rtc/self_test.dart';
 import 'strings.dart';
@@ -53,10 +53,16 @@ class DiagnosticsScreen extends StatelessWidget {
     now: (now ?? DateTime.now)(),
   );
 
+  // The report holds this phone's name and addresses: the clip is marked
+  // sensitive (security.md §8.4).
   Future<void> _copy(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
-    await Clipboard.setData(ClipboardData(text: _report()));
-    messenger.showSnackBar(const SnackBar(content: Text(Strings.reportCopied)));
+    final ok = await copySensitiveText(_report(), label: 'Tunnelview report');
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(ok ? Strings.reportCopied : Strings.reportCopyFailed),
+      ),
+    );
   }
 
   Widget _build(BuildContext context) {
@@ -100,8 +106,9 @@ class DiagnosticsScreen extends StatelessWidget {
                 'Chosen network',
                 'handle ${network.handle} · '
                     '${network.interfaceName ?? '?'} · '
-                    '${network.transports.join(', ')}'
+                    '${describeTransports(network.transports)}'
                     '${network.validated ? ' · validated' : ''}',
+                key: const Key('diag-network'),
               ),
               _Row(
                 'Own Tailscale addresses',
@@ -281,8 +288,8 @@ class _NetworkTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final n = network;
     final flags = [
-      n.transports.isEmpty ? 'no transport' : n.transports.join(', '),
-      if (n.isVpn) 'VPN',
+      describeTransports(n.transports),
+      if (n.isVpn && !n.transports.contains('vpn')) 'VPN',
       if (n.isActive) 'default',
       if (n.validated) 'validated',
     ].join(' · ');

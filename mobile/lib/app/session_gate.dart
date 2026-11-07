@@ -40,10 +40,15 @@ String? sessionRefusal(TailnetState tailnet, SelfTestResult? selfTest) {
   }
   if (selfTest == null) return SessionRefusal.selfTestPending;
   if (!selfTest.allowsSessions) return SessionRefusal.selfTestFailed;
-  final tested = {for (final a in selfTest.selfAddrs) canonicalAddress(a)};
-  final now = {for (final a in tailnet.selfAddrs) canonicalAddress(a)};
-  if (tested.length != now.length || !tested.containsAll(now)) {
+  if (!sameAddressSet(selfTest.selfAddrs, tailnet.selfAddrs)) {
     return SessionRefusal.selfTestStale;
   }
   return null;
+}
+
+/// True iff [a] and [b] hold the same addresses (canonical form, any order).
+bool sameAddressSet(List<String> a, List<String> b) {
+  final x = {for (final s in a) canonicalAddress(s)};
+  final y = {for (final s in b) canonicalAddress(s)};
+  return x.length == y.length && x.containsAll(y);
 }

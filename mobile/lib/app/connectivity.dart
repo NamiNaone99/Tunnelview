@@ -63,14 +63,12 @@ class ConnectivityController extends ChangeNotifier {
 
   void _onState(TailnetState s) {
     _notify();
-    if (!s.isOk || _running != null) return;
-    // Once per app start after Tailscale is found, and again only if the
-    // phone's Tailscale addresses changed since the last run.
-    final last = _selfTest;
-    if (last == null ||
-        sessionRefusal(s, last) == SessionRefusal.selfTestStale) {
-      unawaited(runSelfTest());
-    }
+    _maybeRunSelfTest(s);
+  }
+
+  void _maybeRunSelfTest(TailnetState s) {
+    if (_disposed || !s.isOk || _running != null) return;
+    if (needsSelfTest(s, _selfTest)) unawaited(runSelfTest());
   }
 
   /// Runs the local ICE gathering self-test against the current own
@@ -80,13 +78,13 @@ class ConnectivityController extends ChangeNotifier {
     if (running != null) return running;
     final state = tailnet;
     if (!state.isOk) return Future.value(_selfTest);
-    final future = _run(state.selfAddrs);
+    final future = _run(state.selfAddrs, state.network?.handle);
     _running = future;
     _notify();
     return future;
   }
 
-  Future<SelfTestResult?> _run(List<String> selfAddrs) async {
+  Future<SelfTestResult?> _run(List<String> selfAddrs, int? handle) async {
     GatherOutcome outcome;
     try {
       outcome = await gatherer.gather(timeout: selfTestTimeout);
@@ -96,11 +94,14 @@ class ConnectivityController extends ChangeNotifier {
     final result = evaluateSelfTest(
       outcome: outcome,
       selfAddrs: selfAddrs,
+      networkHandle: handle,
       at: _now(),
     );
     _selfTest = result;
     _running = null;
     _notify();
+    // A change that arrived while the test ran was not acted on.
+    _maybeRunSelfTest(tailnet);
     return result;
   }
 
@@ -124,4 +125,20 @@ class ConnectivityController extends ChangeNotifier {
     unawaited(monitor.dispose());
     super.dispose();
   }
+}
+
+/// Whether the self-test should run (again) on its own for the OK state [s],
+/// given the stored result [last]:
+/// - once per app start, after Tailscale is found;
+/// - whenever the phone's own Tailscale addresses differ from the ones
+///   [last] was compared with, whatever its verdict;
+/// - after a failure, once more on a new tailnet network (Tailscale
+///   reconnected or rebuilt its tunnel).
+///
+/// A failure is never re-run on the same network and addresses; the user can
+/// run it again from Diagnostics.
+bool needsSelfTest(TailnetState s, SelfTestResult? last) {
+  if (last == null) return true;
+  if (!sameAddressSet(last.selfAddrs, s.selfAddrs)) return true;
+  return !last.allowsSessions && last.networkHandle != s.network?.handle;
 }

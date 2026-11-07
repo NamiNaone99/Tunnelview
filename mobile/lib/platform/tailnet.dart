@@ -109,9 +109,14 @@ class TailnetChange {
 /// "VPN re-established" (DECISIONS M-S4, CRITIQUE S4): Tailscale on Android
 /// rebuilds its VPN interface on configuration changes, which ends every
 /// socket. When a new tailnet network appears within [reestablishWindowMs]
-/// of the previous one's loss (or replaces it directly), the state carries
-/// [TailnetState.vpnReestablished], so a session can end with a specific
-/// reason and offer Reconnect instead of "Tailscale is off".
+/// of the previous one's loss (or replaces it directly), the states of that
+/// network carry [TailnetState.vpnReestablished] while it is usable (OK), so
+/// a session can end with a specific reason and offer Reconnect instead of
+/// "Tailscale is off". The flag stays on every later state of that network
+/// (Android follows onAvailable at once with capability and link-property
+/// callbacks) until the network is lost or replaced. A replacement the app
+/// cannot use (for example Tunnelview newly excluded from Tailscale) never
+/// carries it.
 class TailnetMonitor {
   TailnetMonitor(this.platform);
 
@@ -130,6 +135,10 @@ class TailnetMonitor {
 
   int? _lastHandle;
   int? _lostAt;
+
+  /// The tailnet network that re-established the tunnel, until it is lost or
+  /// replaced.
+  int? _reestablishedHandle;
   bool _started = false;
   bool _closed = false;
 
@@ -183,15 +192,17 @@ class TailnetMonitor {
     final handle = next.network?.handle;
     final previous = _state;
     if (handle == null) {
+      _reestablishedHandle = null;
       if (_lastHandle != null && _lostAt == null) {
         _lostAt = s.at;
         _log(TailnetChange(at: s.at, kind: 'lost', status: next.status));
       }
     } else if (handle != _lastHandle) {
+      _reestablishedHandle = null;
       if (_lastHandle == null) {
         _log(TailnetChange(at: s.at, kind: 'appeared', status: next.status));
       } else if (_lostAt == null) {
-        next = next.withReestablished(true);
+        _reestablishedHandle = handle;
         _log(
           TailnetChange(
             at: s.at,
@@ -203,7 +214,7 @@ class TailnetMonitor {
       } else {
         final gap = s.at - _lostAt!;
         final within = gap >= 0 && gap <= reestablishWindowMs;
-        next = next.withReestablished(within);
+        if (within) _reestablishedHandle = handle;
         _log(
           TailnetChange(
             at: s.at,
@@ -218,6 +229,10 @@ class TailnetMonitor {
     } else if (_lostAt != null) {
       // The same network is back (it was only briefly unusable).
       _lostAt = null;
+    }
+    // Only a usable network re-establishes the tunnel.
+    if (handle != null && handle == _reestablishedHandle && next.isOk) {
+      next = next.withReestablished(true);
     }
     if (next.status != previous.status &&
         (_changes.isEmpty || _changes.last.at != s.at)) {

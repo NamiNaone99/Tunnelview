@@ -193,6 +193,7 @@ class SelfTestResult {
     required this.outcome,
     required this.selfAddrs,
     required this.at,
+    this.networkHandle,
   });
 
   final SelfTestVerdict verdict;
@@ -201,6 +202,9 @@ class SelfTestResult {
   /// The own Tailscale addresses the candidates were compared with.
   final List<String> selfAddrs;
   final DateTime at;
+
+  /// The tailnet network the test ran on (null if unknown).
+  final int? networkHandle;
 
   /// Sessions may start only after a passing self-test.
   bool get allowsSessions => verdict == SelfTestVerdict.pass;
@@ -231,6 +235,7 @@ SelfTestResult evaluateSelfTest({
   required GatherOutcome outcome,
   required List<String> selfAddrs,
   required DateTime at,
+  int? networkHandle,
 }) {
   SelfTestVerdict verdict;
   if (outcome.error != null) {
@@ -249,5 +254,6 @@ SelfTestResult evaluateSelfTest({
     outcome: outcome,
     selfAddrs: List.unmodifiable(selfAddrs),
     at: at,
+    networkHandle: networkHandle,
   );
 }

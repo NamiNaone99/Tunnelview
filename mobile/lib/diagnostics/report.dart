@@ -48,7 +48,7 @@ String buildDiagnosticsReport({
     b
       ..writeln(
         'Network: handle ${n.handle}, interface '
-        '${n.interfaceName ?? '?'}, transports ${_list(n.transports)}',
+        '${n.interfaceName ?? '?'}, ${describeTransports(n.transports)}',
       )
       ..writeln('Own Tailscale addresses: ${_list(state.selfAddrs)}')
       ..writeln('Process bound to it: ${state.bound ? 'yes' : 'no'}')
@@ -127,6 +127,16 @@ bool _isQuad100(String a) =>
     a == '100.100.100.100' || a == 'fd7a:115c:a1e0::53';
 
 String _list(List<String> items) => items.isEmpty ? '(none)' : items.join(', ');
+
+/// A network's transports in words. Android adds the underlying network's
+/// transports to a VPN network, so the Tailscale network reads
+/// "vpn (over wifi)" or "vpn (over cellular)".
+String describeTransports(List<String> transports) {
+  if (transports.isEmpty) return 'no transport';
+  if (!transports.contains('vpn')) return transports.join(', ');
+  final under = transports.where((t) => t != 'vpn').toList();
+  return under.isEmpty ? 'vpn' : 'vpn (over ${under.join(', ')})';
+}
 
 /// The process binding in words.
 String describeBinding(BindingInfo binding, int? tailnetHandle) {

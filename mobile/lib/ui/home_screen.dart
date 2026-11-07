@@ -54,7 +54,11 @@ class HomeScreen extends StatelessWidget {
               child: TailscalePill(state: state),
             ),
             const SizedBox(height: 12),
-            TailscaleStatusCard(state: state),
+            TailscaleStatusCard(
+              state: state,
+              onOpenDiagnostics: () =>
+                  openDiagnostics(context, controller, app),
+            ),
             if (selfTest != null && !selfTest.allowsSessions)
               Card(
                 key: const Key('selftest-card'),

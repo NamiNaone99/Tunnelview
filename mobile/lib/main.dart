@@ -4,6 +4,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 
 import 'app/connectivity.dart';
+import 'app/quiet_errors.dart';
 import 'app_info.dart';
 import 'platform/tailnet.dart';
 import 'rtc/engine.dart';
@@ -11,6 +12,8 @@ import 'ui/home_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Release builds keep error text (which can hold addresses) out of logcat.
+  installQuietErrorHandlers();
   // Invariant: WebRTC is initialised exactly once, with the tunnel-only
   // network mask, before any widget exists that could touch it.
   await RtcEngine.initialize();
@@ -26,6 +29,11 @@ Future<void> main() async {
 }
 
 /// The app root.
+///
+/// No deep links (PLAN C13, security.md T7/T10): the app always starts at
+/// home, whatever initial route the platform reports, and routes the
+/// platform pushes later are ignored. MainActivity already drops the data of
+/// any Intent another app sends; this is the Dart-side backstop.
 class TunnelviewApp extends StatefulWidget {
   const TunnelviewApp({super.key, required this.controller, this.info});
 
@@ -41,6 +49,8 @@ class _TunnelviewAppState extends State<TunnelviewApp>
   @override
   void initState() {
     super.initState();
+    // Registered before MaterialApp's own observer, so a pushed route stops
+    // here.
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -59,6 +69,17 @@ class _TunnelviewAppState extends State<TunnelviewApp>
     }
   }
 
+  // A route pushed by the platform (an Intent's URI): handled by ignoring it.
+  @override
+  Future<bool> didPushRouteInformation(RouteInformation routeInformation) =>
+      Future.value(true);
+
+  Route<void> _homeRoute() => MaterialPageRoute<void>(
+    settings: const RouteSettings(name: Navigator.defaultRouteName),
+    builder: (_) =>
+        HomeScreen(controller: widget.controller, info: widget.info),
+  );
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -72,7 +93,9 @@ class _TunnelviewAppState extends State<TunnelviewApp>
           brightness: Brightness.dark,
         ),
       ),
-      home: HomeScreen(controller: widget.controller, info: widget.info),
+      onGenerateInitialRoutes: (_) => [_homeRoute()],
+      onGenerateRoute: (settings) =>
+          settings.name == Navigator.defaultRouteName ? _homeRoute() : null,
     );
   }
 }

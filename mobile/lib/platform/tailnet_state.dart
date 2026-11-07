@@ -205,8 +205,10 @@ class TailnetState {
   /// True iff the OS reports the process bound to [network].
   final bool bound;
 
-  /// True on the state where a new tailnet network replaced the previous one
-  /// within 3 s of its loss (Tailscale rebuilt its tunnel, DECISIONS M-S4).
+  /// True while the current tailnet network is OK and replaced the previous
+  /// one directly or within 3 s of its loss (Tailscale rebuilt its tunnel,
+  /// DECISIONS M-S4). Set by `TailnetMonitor`; it stays on every state of
+  /// that network until it is lost or replaced.
   final bool vpnReestablished;
 
   final TailnetSnapshot? snapshot;

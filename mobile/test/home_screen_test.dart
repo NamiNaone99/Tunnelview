@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tunnelview_mobile/app/connectivity.dart';
 import 'package:tunnelview_mobile/app_info.dart';
 import 'package:tunnelview_mobile/platform/tailnet.dart';
+import 'package:tunnelview_mobile/platform/ui_platform.dart';
 import 'package:tunnelview_mobile/ui/diagnostics_screen.dart';
 import 'package:tunnelview_mobile/ui/home_screen.dart';
 
@@ -190,38 +191,114 @@ void main() {
     expect(row('diag-candidates'), contains('100.101.12.7 41234 udp host'));
   });
 
-  testWidgets('Copy report puts a report without other devices on the '
-      'clipboard', (tester) async {
-    String? copied;
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-      SystemChannels.platform,
-      (call) async {
-        if (call.method == 'Clipboard.setData') {
-          copied = (call.arguments as Map)['text'] as String?;
-        }
-        return null;
-      },
-    );
-    addTearDown(
-      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        SystemChannels.platform,
-        null,
-      ),
-    );
+  testWidgets('the chosen network reads "vpn (over wifi)"', (tester) async {
     tallSurface(tester);
-    platform.current = snap([wifi(), tun(hostRoutes: true)]);
+    platform.current = snap([
+      wifi(),
+      tun(transports: const ['wifi', 'vpn']),
+    ]);
     await pumpHome(tester);
     await tester.pump();
     await tester.pump();
     await tester.tap(find.byKey(const Key('open-diagnostics')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('copy-report')));
+    final row = tester
+        .widget<SelectableText>(
+          find.descendant(
+            of: find.byKey(const Key('diag-network')),
+            matching: find.byType(SelectableText),
+          ),
+        )
+        .data;
+    expect(row, 'handle $tunHandle · tun0 · vpn (over wifi) · validated');
+  });
+
+  testWidgets('a detection fault is not a brief "Checking": card and '
+      'Diagnostics', (tester) async {
+    await pumpHome(tester);
+    // The platform and the Dart rules disagree: repeats on every snapshot.
+    controller.monitor.apply(
+      snap(
+        [wifi(), tun()],
+        at: 10,
+        reason: TailnetReason.none,
+        noTailnet: true,
+      ),
+    );
     await tester.pump();
-    expect(copied, isNotNull);
-    expect(copied, contains('Tunnelview diagnostics report'));
-    expect(copied, contains('100.101.12.7'));
-    expect(copied, isNot(contains('100.88.1.4')));
-    expect(copied, isNot(contains('192.168.1.1')));
-    expect(find.textContaining('Report copied'), findsOneWidget);
+    await tester.pump();
+    expect(pillText(tester), "Can't check Tailscale");
+    expect(find.byKey(const Key('tailscale-card')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('tailscale-card-diagnostics')));
+    await tester.pumpAndSettle();
+    expect(find.byType(DiagnosticsScreen), findsOneWidget);
+  });
+
+  group('Copy report', () {
+    late List<MethodCall> uiCalls;
+    late bool plainClipboard;
+    late bool nativeResult;
+
+    setUp(() {
+      uiCalls = [];
+      plainClipboard = false;
+      nativeResult = true;
+    });
+
+    Future<void> openAndCopy(WidgetTester tester) async {
+      final messenger = tester.binding.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(const MethodChannel(uiMethodChannel), (
+        call,
+      ) async {
+        uiCalls.add(call);
+        return nativeResult;
+      });
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (
+        call,
+      ) async {
+        if (call.method == 'Clipboard.setData') plainClipboard = true;
+        return null;
+      });
+      addTearDown(() {
+        messenger.setMockMethodCallHandler(
+          const MethodChannel(uiMethodChannel),
+          null,
+        );
+        messenger.setMockMethodCallHandler(SystemChannels.platform, null);
+      });
+      tallSurface(tester);
+      platform.current = snap([wifi(), tun(hostRoutes: true)]);
+      await pumpHome(tester);
+      await tester.pump();
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('open-diagnostics')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('copy-report')));
+      await tester.pump();
+    }
+
+    testWidgets('a sensitive clip without other devices', (tester) async {
+      await openAndCopy(tester);
+      expect(uiCalls.map((c) => c.method), ['copySensitive']);
+      final args = uiCalls.single.arguments as Map;
+      final copied = args['text'] as String;
+      expect(args['label'], 'Tunnelview report');
+      expect(copied, contains('Tunnelview diagnostics report'));
+      expect(copied, contains('100.101.12.7'));
+      expect(copied, isNot(contains('100.88.1.4')));
+      expect(copied, isNot(contains('192.168.1.1')));
+      // Never Flutter's plain clipboard: it cannot mark the clip sensitive.
+      expect(plainClipboard, isFalse);
+      expect(find.textContaining('Report copied'), findsOneWidget);
+    });
+
+    testWidgets('a failed native copy copies nothing and says so', (
+      tester,
+    ) async {
+      nativeResult = false;
+      await openAndCopy(tester);
+      expect(plainClipboard, isFalse);
+      expect(find.text("Couldn't copy the report."), findsOneWidget);
+    });
   });
 }

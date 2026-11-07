@@ -49,10 +49,11 @@ NetworkEntry tun({
   bool hostRoutes = false,
   bool exitNode = false,
   String interfaceName = 'tun0',
+  List<String> transports = const ['vpn'],
 }) => NetworkEntry(
   handle: handle,
   isVpn: true,
-  transports: const ['vpn'],
+  transports: transports,
   validated: true,
   interfaceName: interfaceName,
   addresses: [

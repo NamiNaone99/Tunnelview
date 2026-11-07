@@ -7,10 +7,21 @@ import '../rtc/self_test.dart';
 
 /// Title and message of an inline status card.
 class CardText {
-  const CardText(this.title, this.message);
+  const CardText(this.title, this.message, {this.pointsToDiagnostics = false});
   final String title;
   final String message;
+
+  /// The card offers a way to Diagnostics (a fault the user can only report).
+  final bool pointsToDiagnostics;
 }
+
+/// True when [s] is "checking" because of a fault, not a transition: the
+/// platform and the Dart rules disagree, or the platform call fails. Both
+/// repeat on every snapshot, so the state would never clear on its own.
+bool isDetectionFault(TailnetState s) =>
+    s.status == TailnetStatus.checking &&
+    (s.reason == TailnetStateReason.mismatch ||
+        s.reason == TailnetStateReason.platformError);
 
 abstract final class Strings {
   static const appTitle = 'Tunnelview';
@@ -28,6 +39,7 @@ abstract final class Strings {
   static const copyReport = 'Copy report';
   static const reportCopied =
       'Report copied. It contains no addresses of other devices.';
+  static const reportCopyFailed = "Couldn't copy the report.";
   static const runSelfTest = 'Run self-test again';
   static const selfTestBlockedTitle = 'Connections are blocked';
 
@@ -38,7 +50,9 @@ abstract final class Strings {
         final a = s.primaryAddress;
         return a == null ? 'Tailscale' : 'Tailscale · $a';
       case TailnetStatus.checking:
-        return 'Checking Tailscale…';
+        return isDetectionFault(s)
+            ? "Can't check Tailscale"
+            : 'Checking Tailscale…';
       case TailnetStatus.off:
         return 'Tailscale is off';
       case TailnetStatus.anotherVpn:
@@ -56,8 +70,16 @@ abstract final class Strings {
   static CardText? card(TailnetState s) {
     switch (s.status) {
       case TailnetStatus.ok:
-      case TailnetStatus.checking:
         return null;
+      case TailnetStatus.checking:
+        if (!isDetectionFault(s)) return null;
+        return const CardText(
+          "Can't check Tailscale",
+          "Tunnelview can't tell whether Tailscale is connected, so it won't "
+              'connect. Open Diagnostics and copy the report to show what '
+              'the phone sees.',
+          pointsToDiagnostics: true,
+        );
       case TailnetStatus.off:
         return const CardText(
           "Tailscale isn't connected",

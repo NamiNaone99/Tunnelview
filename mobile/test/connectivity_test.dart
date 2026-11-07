@@ -110,6 +110,61 @@ void main() {
     expect(controller.sessionRefusalCode, SessionRefusal.selfTestFailed);
   });
 
+  test('a failed self-test re-runs when the own addresses change', () async {
+    gatherer.outcome = leakyCandidates();
+    platform.current = snap([wifi(), tun()], at: 0);
+    await controller.start();
+    await settle();
+    expect(controller.selfTest!.verdict, SelfTestVerdict.foreignCandidate);
+    // Signed in again: new addresses on the same network.
+    gatherer.outcome = candidatesOn(newV4, newV6);
+    platform.emit(snap([wifi(), tun(v4: newV4, v6: newV6)], at: 400));
+    await settle();
+    expect(gatherer.calls, 2);
+    expect(controller.sessionRefusalCode, isNull);
+  });
+
+  test('a failed self-test re-runs once on a new Tailscale network', () async {
+    gatherer.outcome = noCandidates();
+    platform.current = snap([wifi(), tun()], at: 0);
+    await controller.start();
+    await settle();
+    expect(controller.selfTest!.verdict, SelfTestVerdict.noCandidates);
+    // Not again on the same network.
+    platform.emit(snap([wifi(), tun()], at: 100), kind: 'capabilities');
+    await settle();
+    expect(gatherer.calls, 1);
+    // Tailscale rebuilt its tunnel: same addresses, new network.
+    platform.emit(snap([wifi(), tun(handle: tun2Handle)], at: 200));
+    await settle();
+    expect(gatherer.calls, 2);
+    expect(controller.selfTest!.networkHandle, tun2Handle);
+    // Still failing: not again on that network either.
+    platform.emit(snap([wifi(), tun(handle: tun2Handle)], at: 300));
+    await settle();
+    expect(gatherer.calls, 2);
+    expect(controller.sessionRefusalCode, SessionRefusal.selfTestFailed);
+  });
+
+  test('an address change during a run starts another run', () async {
+    final gate = Completer<void>();
+    gatherer.gate = gate;
+    platform.current = snap([wifi(), tun()], at: 0);
+    await controller.start();
+    await settle();
+    expect(controller.selfTestRunning, isTrue);
+    platform.emit(snap([wifi(), tun(v4: newV4, v6: newV6)], at: 400));
+    await settle();
+    expect(gatherer.calls, 1);
+    gatherer.gate = null;
+    gatherer.outcome = candidatesOn(newV4, newV6);
+    gate.complete();
+    await settle();
+    expect(gatherer.calls, 2);
+    expect(controller.selfTest!.selfAddrs, contains(newV4));
+    expect(controller.sessionRefusalCode, isNull);
+  });
+
   test('excluded from Tailscale: no self-test, sessions refused', () async {
     platform.current = snap([
       wifi(),
@@ -179,6 +234,30 @@ void main() {
     });
   });
 }
+
+const newV4 = '100.99.1.1';
+const newV6 = 'fd7a:115c:a1e0::99';
+
+/// One host candidate on each of [v4] and [v6].
+GatherOutcome candidatesOn(String v4, String v6) => GatherOutcome(
+  candidates: [
+    GatheredCandidate.fromLine(
+      'candidate:1 1 udp 2122260223 $v4 41234 typ host generation 0',
+    )!,
+    GatheredCandidate.fromLine(
+      'candidate:2 1 udp 2122194687 $v6 41235 typ host generation 0',
+    )!,
+  ],
+  completed: true,
+  elapsed: const Duration(milliseconds: 100),
+);
+
+/// Gathering finished without any candidate.
+GatherOutcome noCandidates() => const GatherOutcome(
+  candidates: [],
+  completed: true,
+  elapsed: Duration(milliseconds: 100),
+);
 
 class _ThrowingGatherer implements LocalIceGatherer {
   @override

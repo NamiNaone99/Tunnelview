@@ -286,9 +286,51 @@ void main() {
       expect(monitor.state.status, TailnetStatus.ok);
       expect(monitor.state.vpnReestablished, isTrue);
       expect(monitor.changes.map((c) => c.kind), contains('reestablished'));
-      // The hint belongs to the transition only.
+      // Android follows onAvailable at once with capability and link-property
+      // callbacks: the hint stays on every state of the new network...
       monitor.apply(snap([wifi(), tun(handle: tun2Handle)], at: 4600));
+      monitor.apply(snap([wifi(), tun(handle: tun2Handle)], at: 4700));
+      expect(monitor.state.vpnReestablished, isTrue);
+      // ...until it is lost.
+      monitor.apply(snap([wifi()], at: 9000));
       expect(monitor.state.vpnReestablished, isFalse);
+      monitor.apply(snap([wifi(), tun(handle: tun2Handle)], at: 9100));
+      expect(monitor.state.status, TailnetStatus.ok);
+      expect(monitor.state.vpnReestablished, isFalse);
+    });
+
+    test('a replacement Tunnelview cannot use is not "re-established"', () {
+      // Excluding Tunnelview under split tunnelling: Android connects a new
+      // VPN network that does not apply to this app; binding to it is refused.
+      monitor.apply(snap([wifi(), tun()], at: 1000));
+      monitor.apply(
+        snap(
+          [wifi(), tun(handle: tun2Handle)],
+          at: 1200,
+          binding: const BindingInfo(attempted: tun2Handle, ok: false),
+        ),
+      );
+      expect(monitor.state.status, TailnetStatus.excluded);
+      expect(monitor.state.vpnReestablished, isFalse);
+      expect(monitor.changes.last.kind, 'replaced');
+    });
+
+    test('the hint waits until the new network is usable', () {
+      monitor.apply(snap([wifi(), tun()], at: 1000));
+      monitor.apply(snap([wifi()], at: 1100));
+      // Not bound yet: checking.
+      monitor.apply(
+        snap(
+          [wifi(), tun(handle: tun2Handle)],
+          at: 1200,
+          binding: const BindingInfo(),
+        ),
+      );
+      expect(monitor.state.status, TailnetStatus.checking);
+      expect(monitor.state.vpnReestablished, isFalse);
+      monitor.apply(snap([wifi(), tun(handle: tun2Handle)], at: 1300));
+      expect(monitor.state.status, TailnetStatus.ok);
+      expect(monitor.state.vpnReestablished, isTrue);
     });
 
     test('after more than 3 s it is a plain reconnect', () {

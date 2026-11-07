@@ -69,4 +69,26 @@ void main() {
     expect(r, contains('Status: Tailscale is off (off, none)'));
     expect(r, contains('Self-test: not run yet'));
   });
+
+  test('a VPN network reads "vpn (over ...)"', () {
+    // Android adds the underlying network's transports to a VPN network.
+    expect(describeTransports(['wifi', 'vpn']), 'vpn (over wifi)');
+    expect(describeTransports(['cellular', 'vpn']), 'vpn (over cellular)');
+    expect(describeTransports(['vpn']), 'vpn');
+    expect(describeTransports(['wifi']), 'wifi');
+    expect(describeTransports([]), 'no transport');
+    final r = report(deriveTailnetState(snap([wifi(), tun()])));
+    expect(r, contains('interface tun0, vpn'));
+  });
+
+  test('a detection fault is not shown as a brief check', () {
+    final mismatch = deriveTailnetState(
+      snap([wifi(), tun()], reason: TailnetReason.none, noTailnet: true),
+    );
+    expect(mismatch.reason, TailnetStateReason.mismatch);
+    expect(
+      report(mismatch),
+      contains("Status: Can't check Tailscale (checking, mismatch)"),
+    );
+  });
 }
