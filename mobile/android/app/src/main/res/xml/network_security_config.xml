@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A tripwire only: Tunnelview's own sockets (dart:io) are not governed by this file. It stops
+     any Java/Kotlin library from making cleartext HTTP requests. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

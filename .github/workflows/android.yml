@@ -1,0 +1,388 @@
+# Tunnelview Android viewer (mobile/): test, build an UNSIGNED APK, then sign it in a separate
+# job that holds the key but runs no third-party build code (no pub, Gradle or npm).
+#   - test:         format, analyze, unit tests, repo gates.
+#   - build:        universal release APK (R8, not debuggable, unsigned) + gates
+#                   (scripts/check-apk.js). No secrets, no environment, no caches.
+#   - sign-dev:     branch pushes in this repository: dev key (repository secrets),
+#                   io.github.naminaone99.tunnelview.dev, "Tunnelview Dev".
+#   - sign-release: tags v* only (via workflow_call from build.yml later), environment
+#                   "release" (owner approval): release key.
+#   - ios-compile:  `flutter build ios --release --no-codesign`, a compile check only.
+name: android
+
+on:
+  push:
+    branches:
+      - main
+      - mobile-0.3
+    paths:
+      - "mobile/**"
+      - "scripts/check-apk.js"
+      - "package.json"
+      - ".github/workflows/android.yml"
+  pull_request:
+    paths:
+      - "mobile/**"
+      - "scripts/check-apk.js"
+      - "package.json"
+      - ".github/workflows/android.yml"
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  FLUTTER_VERSION: "3.47.9"
+  # Preinstalled on ubuntu-latest; pinned by path so signing never downloads tools.
+  BUILD_TOOLS_VERSION: "36.0.0"
+
+jobs:
+  test:
+    name: Test (format, analyze, unit tests, gates)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: No signing material is tracked
+        run: |
+          if git ls-files | grep -Ei '\.(jks|p12|pfx|keystore|pem|key)$|(^|/)key\.properties$'; then
+            echo "::error::signing material is tracked in git (listed above)"; exit 1
+          fi
+          echo "ok: no keystores, keys or key.properties tracked"
+
+      - name: Only lib/rtc/engine.dart imports flutter_webrtc
+        run: |
+          bad="$(git ls-files 'mobile/*.dart' | xargs -r grep -l 'package:flutter_webrtc' | grep -vx 'mobile/lib/rtc/engine.dart' || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::only mobile/lib/rtc/engine.dart may import package:flutter_webrtc:"; echo "$bad"; exit 1
+          fi
+          if grep -nE "^\s*export\s+['\"]package:flutter_webrtc" mobile/lib/rtc/engine.dart; then
+            echo "::error::engine.dart must not re-export flutter_webrtc"; exit 1
+          fi
+          echo "ok"
+
+      - name: pubspec.lock allow-list
+        run: node scripts/check-apk.js lock mobile/pubspec.lock mobile/pubspec-allow.txt
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: pub get (lockfile enforced)
+        working-directory: mobile
+        run: flutter pub get --enforce-lockfile
+
+      - name: dart format
+        working-directory: mobile
+        run: |
+          if ! dart format --output=none --set-exit-if-changed lib test; then
+            dart format lib test >/dev/null
+            git diff
+            echo "::error::run dart format (diff above)"; exit 1
+          fi
+
+      - name: flutter analyze
+        working-directory: mobile
+        run: flutter analyze
+
+      - name: flutter test
+        working-directory: mobile
+        run: flutter test
+
+  build:
+    name: Build unsigned APK + gates
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      channel: ${{ steps.ver.outputs.channel }}
+      code: ${{ steps.ver.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      # versionName = package.json version. versionCode:
+      #   release (tags v*): MAJOR*10000 + MINOR*100 + PATCH, e.g. 0.3.0 -> 300.
+      #   dev (branches, PRs): (MAJOR*10000 + MINOR*100 + PATCH) * 100000 + run number,
+      #     e.g. 0.3.0, run 57 -> 30000057. It always increases: a version bump adds at least
+      #     100000, which outweighs any run number below 100000, and later runs of the same
+      #     version have larger run numbers. Dev builds use their own application ID (.dev),
+      #     so dev codes never compete with release codes. Valid up to version 2.10.0 and run
+      #     99999 (Android's limit is 2100000000); the step fails beyond that.
+      - name: Version, build number and channel
+        id: ver
+        run: |
+          VER="$(node -p "require('./package.json').version")"
+          if ! [[ "$VER" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "::error::package.json version '$VER' is not MAJOR.MINOR.PATCH"; exit 1
+          fi
+          MA=$((10#${BASH_REMATCH[1]})); MI=$((10#${BASH_REMATCH[2]})); PA=$((10#${BASH_REMATCH[3]}))
+          if (( MI > 99 || PA > 99 )); then echo "::error::MINOR and PATCH must be <= 99"; exit 1; fi
+          BASE=$(( MA*10000 + MI*100 + PA ))
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            CH=release
+            CODE=$BASE
+            if [ "${GITHUB_REF_NAME#v}" != "$VER" ]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match package.json version $VER"; exit 1
+            fi
+          else
+            CH=dev
+            if (( GITHUB_RUN_NUMBER >= 100000 )); then echo "::error::run number too large for the dev versionCode scheme"; exit 1; fi
+            CODE=$(( BASE*100000 + GITHUB_RUN_NUMBER ))
+          fi
+          if (( CODE < 1 || CODE > 2100000000 )); then echo "::error::versionCode $CODE out of range"; exit 1; fi
+          PKG=io.github.naminaone99.tunnelview
+          if [ "$CH" = dev ]; then PKG="$PKG.dev"; fi
+          {
+            echo "version=$VER"; echo "channel=$CH"; echo "code=$CODE"; echo "package=$PKG"
+          } >> "$GITHUB_OUTPUT"
+          echo "ORG_GRADLE_PROJECT_tunnelviewChannel=$CH" >> "$GITHUB_ENV"
+          echo "version $VER, versionCode $CODE, channel $CH, package $PKG"
+
+      - name: Gradle dependency verification is committed
+        run: |
+          f=mobile/android/gradle/verification-metadata.xml
+          [ -s "$f" ] || { echo "::error::$f is missing (run the mobile-bootstrap workflow)"; exit 1; }
+          grep -qx 'org.gradle.dependency.verification=strict' mobile/android/gradle.properties || {
+            echo "::error::gradle.properties must set org.gradle.dependency.verification=strict"; exit 1; }
+
+      - name: Build the universal release APK (unsigned)
+        working-directory: mobile
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+          CODE: ${{ steps.ver.outputs.code }}
+          CH: ${{ steps.ver.outputs.channel }}
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter build apk --release --build-name "$VER" --build-number "$CODE" \
+            --dart-define=TUNNELVIEW_CHANNEL="$CH" --dart-define=TUNNELVIEW_VERSION="$VER" \
+            --dart-define=TUNNELVIEW_BUILD="$CODE"
+
+      - name: Resolved releaseRuntimeClasspath vs allow-list
+        run: |
+          (cd mobile/android && ./gradlew -q :app:dependencies --configuration releaseRuntimeClasspath) \
+            > "$RUNNER_TEMP/runtime-classpath.txt"
+          node scripts/check-apk.js classpath "$RUNNER_TEMP/runtime-classpath.txt" \
+            mobile/android/runtime-classpath-allow.txt
+
+      - name: pubspec.lock allow-list
+        run: node scripts/check-apk.js lock mobile/pubspec.lock mobile/pubspec-allow.txt
+
+      - name: APK gates (manifest, entries, R8 mapping, alignment, unsigned)
+        run: |
+          node scripts/check-apk.js apk mobile/build/app/outputs/flutter-apk/app-release.apk \
+            --package "${{ steps.ver.outputs.package }}" \
+            --build-tools "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION" \
+            --mapping mobile/build/app/outputs/mapping/release/mapping.txt \
+            --unsigned
+
+      - name: Stage the unsigned APK
+        run: |
+          mkdir -p dist
+          cp mobile/build/app/outputs/flutter-apk/app-release.apk dist/app-release-unsigned.apk
+          cp mobile/build/app/outputs/mapping/release/mapping.txt dist/mapping.txt
+          cp "$RUNNER_TEMP/runtime-classpath.txt" dist/runtime-classpath.txt
+          (cd dist && sha256sum -- * > "$RUNNER_TEMP/SHA256SUMS" && mv "$RUNNER_TEMP/SHA256SUMS" SHA256SUMS && cat SHA256SUMS)
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android-unsigned
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  sign-dev:
+    name: Sign (dev key)
+    needs: build
+    if: github.event_name == 'push' && github.ref_type == 'branch' && github.repository == 'NamiNaone99/Tunnelview'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      VER: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/check-apk.js
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: android-unsigned
+          path: in
+
+      - name: The build job produced a dev build
+        run: |
+          [ "${{ needs.build.outputs.channel }}" = dev ] || { echo "::error::not a dev build"; exit 1; }
+          (cd in && sha256sum -c SHA256SUMS)
+
+      - name: Sign with the dev key (apksigner only)
+        env:
+          KS_B64: ${{ secrets.ANDROID_DEV_KEYSTORE_B64 }}
+          KS_PW: ${{ secrets.ANDROID_DEV_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KS_B64" ] || [ -z "$KS_PW" ]; then echo "::error::dev signing secrets are missing"; exit 1; fi
+          umask 077
+          KS="$RUNNER_TEMP/dev.p12"
+          trap 'rm -f "$KS"' EXIT
+          printf '%s' "$KS_B64" | base64 -d > "$KS"
+          mkdir -p out
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/apksigner" sign \
+            --ks "$KS" --ks-type PKCS12 --ks-key-alias tunnelview-dev \
+            --ks-pass env:KS_PW --key-pass env:KS_PW \
+            --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true \
+            --v4-signing-enabled false \
+            --out "out/Tunnelview-$VER-android-dev.apk" in/app-release-unsigned.apk
+
+      - name: Verify signer, manifest and alignment
+        run: |
+          node scripts/check-apk.js apk "out/Tunnelview-$VER-android-dev.apk" \
+            --package io.github.naminaone99.tunnelview.dev \
+            --build-tools "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION" \
+            --cert "${{ vars.ANDROID_DEV_CERT_SHA256 }}"
+          (cd out && sha256sum -- *.apk | tee SHA256SUMS)
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Tunnelview-${{ needs.build.outputs.version }}-android-dev
+          path: |
+            out/*.apk
+            out/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove the keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/dev.p12"
+
+  sign-release:
+    name: Sign (release key)
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'NamiNaone99/Tunnelview'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+    defaults:
+      run:
+        shell: bash
+    env:
+      VER: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/check-apk.js
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: android-unsigned
+          path: in
+
+      - name: The build job produced a release build
+        run: |
+          [ "${{ needs.build.outputs.channel }}" = release ] || { echo "::error::not a release build"; exit 1; }
+          (cd in && sha256sum -c SHA256SUMS)
+
+      - name: Sign with the release key (apksigner only)
+        env:
+          KS_B64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_B64 }}
+          KS_PW: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KS_B64" ] || [ -z "$KS_PW" ]; then echo "::error::release signing secrets are missing"; exit 1; fi
+          umask 077
+          KS="$RUNNER_TEMP/release.p12"
+          trap 'rm -f "$KS"' EXIT
+          printf '%s' "$KS_B64" | base64 -d > "$KS"
+          mkdir -p out
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/apksigner" sign \
+            --ks "$KS" --ks-type PKCS12 --ks-key-alias tunnelview \
+            --ks-pass env:KS_PW --key-pass env:KS_PW \
+            --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true \
+            --v4-signing-enabled false \
+            --out "out/Tunnelview-$VER-android.apk" in/app-release-unsigned.apk
+
+      - name: Verify signer, manifest and alignment
+        run: |
+          node scripts/check-apk.js apk "out/Tunnelview-$VER-android.apk" \
+            --package io.github.naminaone99.tunnelview \
+            --build-tools "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION" \
+            --cert "${{ vars.ANDROID_RELEASE_CERT_SHA256 }}"
+          (cd out && sha256sum -- *.apk | tee SHA256SUMS-android.txt)
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Tunnelview-android
+          path: |
+            out/*.apk
+            out/SHA256SUMS-android.txt
+          if-no-files-found: error
+
+      - name: Remove the keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.p12"
+
+  ios-compile:
+    name: iOS compile check (no signing)
+    needs: test
+    runs-on: macos-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: flutter build ios --release --no-codesign
+        working-directory: mobile
+        run: |
+          VER="$(node -p "require('../package.json').version")"
+          flutter pub get --enforce-lockfile
+          flutter build ios --release --no-codesign --build-name "$VER" --build-number 1 \
+            --dart-define=TUNNELVIEW_CHANNEL=dev --dart-define=TUNNELVIEW_VERSION="$VER"

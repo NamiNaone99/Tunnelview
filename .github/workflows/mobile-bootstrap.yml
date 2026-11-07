@@ -85,6 +85,8 @@ jobs:
           set -euo pipefail
           VER="$(node -p "require('./package.json').version")"
           cd mobile
+          # Regenerate from scratch (strict verification would otherwise reject new artifacts).
+          rm -f android/gradle/verification-metadata.xml
           flutter pub get --enforce-lockfile
           flutter build apk --config-only
           cd android
@@ -92,7 +94,6 @@ jobs:
           mv gradlew gradlew.real
           printf '%s\n' '#!/bin/sh' 'exec "$(dirname "$0")/gradlew.real" --write-verification-metadata sha256 "$@"' > gradlew
           chmod +x gradlew
-          rm -f gradle/verification-metadata.xml
           cd ..
           for ch in dev release; do
             ORG_GRADLE_PROJECT_tunnelviewChannel="$ch" flutter build apk --release \
@@ -102,6 +103,8 @@ jobs:
           (cd android && ORG_GRADLE_PROJECT_tunnelviewChannel=release ./gradlew -q :app:dependencies \
             --configuration releaseRuntimeClasspath) > "$RUNNER_TEMP/out/runtime-classpath.txt"
           cp android/gradle/verification-metadata.xml "$RUNNER_TEMP/out/"
+          node ../scripts/check-apk.js classpath "$RUNNER_TEMP/out/runtime-classpath.txt" /dev/null --print \
+            > "$RUNNER_TEMP/out/runtime-classpath-allow.txt"
           BT="$ANDROID_HOME/build-tools/36.0.0"
           "$BT/aapt2" dump xmltree --file AndroidManifest.xml build/app/outputs/flutter-apk/app-release.apk \
             > "$RUNNER_TEMP/out/release-manifest.txt"
