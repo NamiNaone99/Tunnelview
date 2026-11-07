@@ -329,6 +329,8 @@ function checkManifest(tree, expectedPackage) {
     return;
   }
   const a = app.attrs;
+  const wantLabel = expectedPackage.endsWith('.dev') ? 'Tunnelview Dev' : 'Tunnelview';
+  if (a['android:label'] !== wantLabel) fail(`application: label is ${a['android:label']}, expected ${wantLabel}`);
   if (boolAttr(a['android:allowBackup']) !== false) fail('application: allowBackup is not false');
   if (boolAttr(a['android:fullBackupContent']) === true) fail('application: fullBackupContent is true');
   if (boolAttr(a['android:debuggable']) === true) fail('application: debuggable');
