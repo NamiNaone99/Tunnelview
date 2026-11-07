@@ -1,0 +1,44 @@
+# Tunnelview mobile viewer: Flutter 3.47.9 / Dart 3.13.7 (pinned in CI).
+# Every dependency is pinned to an exact version and pubspec.lock is committed;
+# CI runs `flutter pub get --enforce-lockfile` and checks the lock against
+# pubspec-allow.txt.
+#
+# Deliberately NOT used: mobile_scanner / ML Kit, connectivity_plus,
+# web_socket_channel, http, any analytics, crash, Firebase or Play-services SDK,
+# google_fonts, wakelock (needs WAKE_LOCK), package_info_plus.
+name: tunnelview_mobile
+description: "Tunnelview viewer for phones. Connects only inside your Tailscale tailnet."
+publish_to: none
+
+# CI overrides this with --build-name (package.json version) and --build-number.
+version: 0.2.0+200
+
+environment:
+  sdk: ">=3.13.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # libwebrtc m150: networkIgnoreMask, full getStats maps, binary data channels.
+  # Only lib/rtc/engine.dart may import it (CI gate).
+  flutter_webrtc: 1.6.3
+  # scrypt (pure Dart; run inside Isolate.run).
+  hashlib: 2.4.2
+  # HMAC-SHA256, SHA-256.
+  crypto: 3.0.8
+  # Ed25519 verify (pure-Dart DartEd25519) for hello.ident.
+  cryptography: 2.9.0
+  # Offline QR decode (zxing-cpp over FFI). No ML Kit.
+  flutter_zxing: 3.1.0
+  # Pairing records (Android Keystore-backed ciphers).
+  flutter_secure_storage: 11.2.0
+  # Biometric / device-credential prompt before auto-accepted connections.
+  local_auth: 3.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: 6.0.0
+
+flutter:
+  uses-material-design: true

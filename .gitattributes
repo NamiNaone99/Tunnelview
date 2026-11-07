@@ -7,3 +7,8 @@
 *.ico binary
 *.icns binary
 *.gz binary
+*.jar binary
+*.aar binary
+*.webp binary
+*.so binary
+mobile/android/vendor-maven/** binary

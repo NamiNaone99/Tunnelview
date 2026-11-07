@@ -1,0 +1,117 @@
+# MANUAL REGENERATION TOOL for the Flutter project in mobile/. It never builds a release,
+# never runs on tags, holds no secrets and only uploads an artifact for a human to review and
+# commit. There is no Flutter or Android SDK on the maintainer's PC, so this is how generated
+# files are produced:
+#   - task "create": `flutter create` skeleton + our mobile/pubspec.yaml + pubspec.lock
+#     (only when mobile/pubspec.lock does not exist yet);
+#   - task "verification-metadata": mobile/android/gradle/verification-metadata.xml
+#     (Gradle dependency verification, sha256) for the exact `flutter build apk --release`
+#     commands android.yml runs, plus the resolved releaseRuntimeClasspath and the release APK
+#     manifest dump used to review the allow-lists.
+# Trigger: push to mobile-0.3 touching this file, or workflow_dispatch (once on main).
+name: mobile-bootstrap
+
+on:
+  push:
+    branches:
+      - mobile-0.3
+    paths:
+      - .github/workflows/mobile-bootstrap.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-bootstrap-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: "3.47.9"
+          channel: stable
+
+      - name: Toolchain facts
+        run: |
+          flutter --version
+          java -version 2>&1
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/build-tools" "$ANDROID_HOME/ndk" "$ANDROID_HOME/platforms" || true
+          ls "$ANDROID_HOME/cmake" || true
+
+      - name: Pick the task
+        id: task
+        run: |
+          if [ -f mobile/pubspec.lock ]; then t=verification-metadata; else t=create; fi
+          echo "task=$t" >> "$GITHUB_OUTPUT"
+          echo "task: $t"
+          mkdir -p "$RUNNER_TEMP/out"
+
+      - name: flutter create + our pubspec + pub get
+        if: steps.task.outputs.task == 'create'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          flutter create --platforms=android,ios --org io.github.naminaone99 \
+            --project-name tunnelview_mobile -a kotlin -i swift tv
+          cp "$GITHUB_WORKSPACE/mobile/pubspec.yaml" tv/pubspec.yaml
+          cd tv
+          flutter pub get
+          find . \( -path ./build -o -path ./.dart_tool -o -path ./ios/Pods -o -path ./android/.gradle \) -prune -o -type f -print | sort
+          tar --exclude=./build --exclude=./.dart_tool --exclude='./.flutter-plugins*' \
+            --exclude=./android/.gradle --exclude=./android/local.properties --exclude=./ios/Pods \
+            --exclude=./.idea --exclude='*.iml' -czf "$RUNNER_TEMP/out/mobile-skeleton.tgz" .
+
+      - name: Gradle verification metadata (sha256) for the CI build commands
+        if: steps.task.outputs.task == 'verification-metadata'
+        run: |
+          set -euo pipefail
+          VER="$(node -p "require('./package.json').version")"
+          cd mobile
+          flutter pub get --enforce-lockfile
+          flutter build apk --config-only
+          cd android
+          # Make every Gradle invocation by the Flutter tool also write the metadata.
+          mv gradlew gradlew.real
+          printf '%s\n' '#!/bin/sh' 'exec "$(dirname "$0")/gradlew.real" --write-verification-metadata sha256 "$@"' > gradlew
+          chmod +x gradlew
+          rm -f gradle/verification-metadata.xml
+          cd ..
+          for ch in dev release; do
+            ORG_GRADLE_PROJECT_tunnelviewChannel="$ch" flutter build apk --release \
+              --build-name "$VER" --build-number 1 \
+              --dart-define=TUNNELVIEW_CHANNEL="$ch" --dart-define=TUNNELVIEW_VERSION="$VER"
+          done
+          (cd android && ORG_GRADLE_PROJECT_tunnelviewChannel=release ./gradlew -q :app:dependencies \
+            --configuration releaseRuntimeClasspath) > "$RUNNER_TEMP/out/runtime-classpath.txt"
+          cp android/gradle/verification-metadata.xml "$RUNNER_TEMP/out/"
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          "$BT/aapt2" dump xmltree --file AndroidManifest.xml build/app/outputs/flutter-apk/app-release.apk \
+            > "$RUNNER_TEMP/out/release-manifest.txt"
+          cp build/app/outputs/mapping/release/mapping.txt "$RUNNER_TEMP/out/" || true
+          "$BT/zipalign" -c -P 16 -v 4 build/app/outputs/flutter-apk/app-release.apk | tail -5 || true
+          ls -la "$RUNNER_TEMP/out"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mobile-bootstrap-${{ steps.task.outputs.task }}
+          path: ${{ runner.temp }}/out/*
+          if-no-files-found: error
+          retention-days: 7
