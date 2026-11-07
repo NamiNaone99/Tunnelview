@@ -1,0 +1,36 @@
+{
+  "name": "tunnelview",
+  "productName": "Tunnelview",
+  "version": "0.2.0",
+  "description": "AnyDesk-style remote desktop that only works inside your Tailscale tailnet (Windows & macOS)",
+  "homepage": "https://github.com/NamiNaone99/Tunnelview#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NamiNaone99/Tunnelview.git"
+  },
+  "bugs": {
+    "url": "https://github.com/NamiNaone99/Tunnelview/issues"
+  },
+  "main": "src/main/index.js",
+  "author": "Phanuphong Saphanon",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "test": "node --test \"test/**/*.test.js\"",
+    "check": "node scripts/check.js",
+    "icons": "node scripts/make-icons.js",
+    "dist": "npm run icons && electron-builder",
+    "dist:win": "npm run icons && electron-builder --win",
+    "dist:mac": "npm run icons && electron-builder --mac"
+  },
+  "dependencies": {
+    "koffi": "^3.3.6",
+    "ws": "^8.22.1"
+  },
+  "devDependencies": {
+    "electron": "45.2.2",
+    "electron-builder": "^26.18.0"
+  }
+}

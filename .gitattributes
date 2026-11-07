@@ -1,0 +1,9 @@
+# Store text with LF and check it out with LF everywhere, so scripts/mac-install.sh and the
+# macOS/Linux CI jobs work even when the repo is cloned on Windows (core.autocrlf=true).
+* text=auto eol=lf
+
+# Binary assets
+*.png binary
+*.ico binary
+*.icns binary
+*.gz binary

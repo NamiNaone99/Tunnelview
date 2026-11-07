@@ -1,0 +1,28 @@
+{
+  "Node": {
+    "ID": 1000000000000001,
+    "StableID": "nSELF000001CNTRL",
+    "Name": "desk-win.example-tailnet.ts.net.",
+    "User": 1001,
+    "Key": "nodekey:0000000000000000000000000000000000000000000000000000000000000001",
+    "KeyExpiry": "2027-01-01T00:00:00Z",
+    "DiscoKey": "discokey:0000000000000000000000000000000000000000000000000000000000000001",
+    "Addresses": ["100.101.102.103/32", "fd7a:115c:a1e0::aaaa:bbbb/128"],
+    "AllowedIPs": ["100.101.102.103/32", "fd7a:115c:a1e0::aaaa:bbbb/128"],
+    "Hostinfo": {
+      "Hostname": "DESK-WIN",
+      "Services": [{ "Proto": "peerapi-dns-proxy", "Port": 1 }]
+    },
+    "Created": "2025-01-01T00:00:00Z",
+    "MachineAuthorized": true,
+    "ComputedName": "desk-win",
+    "ComputedNameWithHost": "desk-win (desk-win)"
+  },
+  "UserProfile": {
+    "ID": 1001,
+    "LoginName": "alice@example.com",
+    "DisplayName": "Alice Example",
+    "ProfilePicURL": ""
+  },
+  "CapMap": null
+}

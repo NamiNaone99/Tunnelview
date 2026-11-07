@@ -1,0 +1,32 @@
+{
+  "Node": {
+    "ID": 1000000000000005,
+    "StableID": "nMACMINI01CNTRL",
+    "Name": "bobs-mac-mini.example-tailnet.ts.net.",
+    "User": 1002,
+    "Key": "nodekey:0000000000000000000000000000000000000000000000000000000000000005",
+    "KeyExpiry": "2027-01-01T00:00:00Z",
+    "DiscoKey": "discokey:0000000000000000000000000000000000000000000000000000000000000005",
+    "Addresses": ["100.90.5.6/32", "fd7a:115c:a1e0::5:6/128"],
+    "AllowedIPs": ["100.90.5.6/32", "fd7a:115c:a1e0::5:6/128", "192.168.50.0/24"],
+    "Endpoints": ["192.0.2.55:41641", "10.0.0.5:41641"],
+    "HomeDERP": 3,
+    "Hostinfo": {
+      "OS": "macOS",
+      "Hostname": "Bobs-Mac-mini",
+      "Services": [{ "Proto": "peerapi4", "Port": 54626 }]
+    },
+    "Created": "2026-05-23T06:58:27Z",
+    "Cap": 142,
+    "Online": true,
+    "ComputedName": "bobs-mac-mini",
+    "ComputedNameWithHost": "bobs-mac-mini"
+  },
+  "UserProfile": {
+    "ID": 1002,
+    "LoginName": "bob@example.com",
+    "DisplayName": "Bob Example",
+    "ProfilePicURL": ""
+  },
+  "CapMap": null
+}

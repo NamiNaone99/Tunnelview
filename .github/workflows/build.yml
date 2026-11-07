@@ -1,0 +1,182 @@
+# Builds Tunnelview for Windows (x64 + arm64 NSIS installers) and macOS (arm64 + x64 dmg/zip).
+# Tag pushes (v*) also publish a GitHub release with every artifact attached.
+name: build
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Builds are unsigned / ad-hoc signed (see electron-builder.yml): never search for certificates.
+  CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+jobs:
+  windows:
+    name: Windows (x64 + arm64)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Release tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          want="$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_NAME#v}" != "$want" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $want"; exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      # npm only installs koffi's native package for the runner's own arch (win32-x64). The arm64
+      # installer needs @koromix/koffi-win32-arm64 as well, pinned to the exact koffi version.
+      - name: Add koffi binary for Windows arm64
+        run: |
+          KOFFI_VERSION="$(node -p "require('koffi/package.json').version")"
+          npm install --no-save --force "@koromix/koffi-win32-arm64@${KOFFI_VERSION}"
+
+      # Equivalent to `npm test`; the glob form is used because Node 22 treats a bare directory
+      # argument (`node --test test/`) as a module path and fails.
+      - name: Unit tests
+        run: node --test "test/**/*.test.js"
+
+      - name: Syntax check
+        run: node scripts/check.js
+
+      - name: Build installers
+        run: npm run dist:win -- --publish never
+
+      - name: Verify koffi is bundled for each arch
+        run: |
+          check() {
+            if ! ls "$1"/app.asar.unpacked/node_modules/@koromix/"$2"/*/koffi.node >/dev/null 2>&1; then
+              echo "::error::$2 native binary missing from $1"; exit 1
+            fi
+            echo "ok: $2 in $1"
+          }
+          check dist/win-unpacked/resources koffi-win32-x64
+          check dist/win-arm64-unpacked/resources koffi-win32-arm64
+
+      # electronFuses from electron-builder.yml really flipped (no ELECTRON_RUN_AS_NODE, NODE_OPTIONS
+      # or --inspect) and the embedded ASAR integrity hash matches app.asar. Reads files only.
+      - name: Verify Electron fuses and ASAR integrity
+        run: node scripts/verify-fuses.js dist/win-unpacked/Tunnelview.exe dist/win-arm64-unpacked/Tunnelview.exe
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Tunnelview-windows
+          path: dist/*.exe
+          if-no-files-found: error
+
+  macos:
+    name: macOS (arm64 + x64)
+    # macos-latest is an Apple Silicon (arm64) runner.
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Release tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          want="$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_NAME#v}" != "$want" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $want"; exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The runner is arm64, so npm skips @koromix/koffi-darwin-x64 (cpu mismatch). --force installs
+      # it anyway so the Intel build also carries its koffi binary.
+      - name: Add koffi binary for macOS x64
+        run: |
+          KOFFI_VERSION="$(node -p "require('koffi/package.json').version")"
+          npm install --no-save --force "@koromix/koffi-darwin-x64@${KOFFI_VERSION}"
+
+      - name: Unit tests
+        run: node --test "test/**/*.test.js"
+
+      - name: Syntax check
+        run: node scripts/check.js
+
+      - name: Build dmg + zip
+        run: npm run dist:mac -- --arm64 --x64 --publish never
+
+      - name: Verify koffi is bundled for each arch
+        run: |
+          check() {
+            if ! ls "$1"/app.asar.unpacked/node_modules/@koromix/"$2"/*/koffi.node >/dev/null 2>&1; then
+              echo "::error::$2 native binary missing from $1"; exit 1
+            fi
+            echo "ok: $2 in $1"
+          }
+          check dist/mac-arm64/Tunnelview.app/Contents/Resources koffi-darwin-arm64
+          check dist/mac/Tunnelview.app/Contents/Resources koffi-darwin-x64
+          # Ad-hoc signature must verify, or Apple Silicon refuses to launch the app.
+          codesign --verify --deep --strict --verbose=2 dist/mac-arm64/Tunnelview.app
+          codesign --verify --deep --strict --verbose=2 dist/mac/Tunnelview.app
+
+      # Fuses are flipped before signing, so this also confirms the signed binaries carry them.
+      - name: Verify Electron fuses and ASAR integrity
+        run: node scripts/verify-fuses.js dist/mac-arm64/Tunnelview.app dist/mac/Tunnelview.app
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Tunnelview-macos
+          path: |
+            dist/*.dmg
+            dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -la artifacts
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" artifacts/* --clobber
+          else
+            gh release create "$TAG" artifacts/* --title "Tunnelview $TAG" --generate-notes
+          fi

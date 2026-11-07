@@ -1,0 +1,26 @@
+{
+  "Node": {
+    "ID": 1000000000000006,
+    "StableID": "nCIRUNNER1CNTRL",
+    "Name": "ci-runner.example-tailnet.ts.net.",
+    "User": 2147455555,
+    "Tags": ["tag:ci", "tag:server"],
+    "Key": "nodekey:0000000000000000000000000000000000000000000000000000000000000006",
+    "Addresses": ["100.70.7.8/32", "fd7a:115c:a1e0::7:8/128"],
+    "AllowedIPs": ["100.70.7.8/32", "fd7a:115c:a1e0::7:8/128"],
+    "Hostinfo": {
+      "OS": "linux",
+      "Hostname": "ci-runner"
+    },
+    "Online": true,
+    "ComputedName": "ci-runner",
+    "ComputedNameWithHost": "ci-runner"
+  },
+  "UserProfile": {
+    "ID": 2147455555,
+    "LoginName": "tagged-devices",
+    "DisplayName": "Tagged Devices",
+    "ProfilePicURL": ""
+  },
+  "CapMap": null
+}

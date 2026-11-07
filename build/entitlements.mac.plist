@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for Tunnelview — used for the app AND (via entitlementsInherit) for
+  Electron's helper apps. See electron-builder.yml (mac.entitlements / mac.entitlementsInherit).
+
+  The app is intentionally NOT sandboxed (no com.apple.security.app-sandbox): it posts synthetic
+  input with CGEventPost (Accessibility), captures the screen, runs the Tailscale CLI and listens
+  on the tailnet addresses — none of which work inside the App Sandbox.
+
+  - allow-jit: V8's JIT needs MAP_JIT memory under the hardened runtime (arm64 crashes without it).
+  - allow-unsigned-executable-memory: older V8/WebAssembly code paths still allocate RWX memory
+    without MAP_JIT; Electron's own guidance keeps it for compatibility.
+  - disable-library-validation: lets the process load koffi's prebuilt koffi.node (signed by a
+    different team, or only ad-hoc) and lets an ad-hoc signed build load Electron's frameworks.
+
+  Deliberately NOT included:
+  - com.apple.security.device.audio-input: only gates MICROPHONE access. System-audio capture
+    (loopback via ScreenCaptureKit / Core Audio taps) is covered by the Screen & System Audio
+    Recording permission and the NSAudioCaptureUsageDescription Info.plist string, not by this
+    entitlement — and Tunnelview never opens a microphone.
+  - com.apple.security.device.camera: no camera use.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

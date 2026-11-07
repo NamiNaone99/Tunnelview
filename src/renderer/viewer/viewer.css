@@ -1,0 +1,383 @@
+/*
+ * Tunnelview viewer window. Built on theme.css tokens/components.
+ * The only literal colours are the stage black (letterbox around the remote picture, like any
+ * video player — it must stay black in light theme too) and the cursor glyph inside the data-URI
+ * SVG (white dot with a black ring, visible on any remote content; CSS variables cannot reach
+ * into a data URI).
+ */
+:root {
+  --viewer-stage: #000;
+  --tb-radius: 14px;
+  --drawer-w: min(360px, 100vw);
+}
+
+body.viewer { background: var(--viewer-stage); }
+
+/* ---------------- stage + video ---------------- */
+.stage {
+  position: fixed; inset: 0;
+  display: flex;
+  overflow: hidden;
+  background: var(--viewer-stage);
+  outline: none;
+  touch-action: none; /* touch/pen drags become pointer events, not page scrolling */
+  overscroll-behavior: none;
+}
+.stage.mode-original { overflow: auto; }
+.video {
+  display: block;
+  width: 100%; height: 100%;
+  object-fit: contain;
+  background: var(--viewer-stage);
+  -webkit-user-drag: none;
+}
+/* 1:1 — width/height set inline to videoWidth/devicePixelRatio; margin:auto centres it while
+   still letting the scroll container reach every edge when it overflows. */
+.stage.mode-original .video { flex: none; margin: auto; object-fit: fill; }
+
+/* The remote cursor is part of the video; a tiny local dot avoids the "double cursor" while
+   still showing exactly where a click will land. */
+.stage.input-on {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Ccircle cx='5' cy='5' r='2.6' fill='%23fff' stroke='%23000' stroke-width='1.2'/%3E%3C/svg%3E") 5 5, crosshair;
+}
+body:not([data-phase="streaming"]) .stage { cursor: default; }
+
+/* Hidden IME sink: focusable, invisible, parked under the pointer by input.js. */
+.ime-sink {
+  position: fixed; left: 0; top: 0; z-index: 1;
+  width: 1px; height: 1px; margin: 0; padding: 0; border: 0;
+  opacity: 0; resize: none; overflow: hidden; pointer-events: none;
+  color: transparent; background: transparent; caret-color: transparent;
+  font-size: 16px; white-space: pre;
+}
+
+/* ---------------- state overlay ---------------- */
+.overlay {
+  position: fixed; inset: 0; z-index: 50;
+  display: grid; place-items: center;
+  padding: 16px;
+  background:
+    radial-gradient(900px 520px at 50% -12%, var(--accent-soft), transparent 70%),
+    var(--bg);
+  transition: opacity 0.22s var(--ease), background-color 0.22s var(--ease);
+}
+.overlay.translucent {
+  background: color-mix(in srgb, var(--viewer-stage) 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+.overlay.leaving { opacity: 0; pointer-events: none; }
+.overlay > .ov-card { grid-area: 1 / 1; } /* old + new card stack during the cross-fade */
+
+.ov-card {
+  width: min(460px, 100%);
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 28px 28px 22px;
+  text-align: center;
+  box-shadow: var(--shadow);
+  transition: opacity 0.22s var(--ease), transform 0.22s var(--ease);
+}
+.ov-card.entering { opacity: 0; transform: translateY(8px) scale(0.98); }
+.ov-card.leaving { opacity: 0; transform: translateY(-6px) scale(0.98); pointer-events: none; }
+.ov-title { font-size: 18px; line-height: 1.3; overflow-wrap: anywhere; }
+.ov-sub { max-width: 390px; overflow-wrap: anywhere; }
+.ov-detail { max-width: 390px; overflow-wrap: anywhere; }
+.ov-spinner { margin-bottom: 4px; }
+.ov-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  padding: 4px 10px; border-radius: 999px;
+  background: var(--bg-sunken); border: 1px solid var(--border);
+  color: var(--text-dim); font-size: 12px;
+}
+.ov-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-host { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; color: var(--text-faint); font-size: 12px; }
+.ov-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin-top: 6px; }
+.ov-form { width: 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.ov-form .ov-actions { margin-top: 2px; }
+.ov-form .ov-actions .btn { height: 40px; padding: 0 20px; font-size: 14px; border-radius: var(--radius); }
+.ov-error { min-height: 18px; color: var(--danger); }
+.ov-notice { max-width: 390px; text-align: left; overflow-wrap: anywhere; }
+.ov-notice > svg { flex: none; margin-top: 1px; color: var(--warn); }
+.ov-avatar { width: 52px; height: 52px; border-radius: 16px; font-size: 18px; }
+.ov-avatar svg { width: 24px; height: 24px; }
+.ov-avatar-wrap { position: relative; display: grid; place-items: center; }
+.ov-pulse {
+  position: absolute; inset: -6px; border-radius: 20px;
+  border: 2px solid var(--accent); opacity: 0;
+  animation: ov-pulse 1.8s var(--ease) infinite;
+}
+@keyframes ov-pulse { 0% { opacity: 0.6; transform: scale(0.9); } 100% { opacity: 0; transform: scale(1.25); } }
+.ov-closed.tone-danger .ov-avatar-tone { background: var(--danger-soft); color: var(--danger); }
+.ov-closed.tone-warn .ov-avatar-tone { background: var(--warn-soft); color: var(--warn); }
+.ov-closed.tone-info .ov-avatar-tone { background: var(--accent-soft); color: var(--accent); }
+.spinner.ov-btn-spinner {
+  width: 14px; height: 14px; border-width: 2px;
+  border-color: color-mix(in srgb, var(--accent-text) 35%, transparent);
+  border-top-color: var(--accent-text);
+}
+.shake { animation: shake 0.35s; }
+@keyframes shake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
+
+/* ---------------- toolbar ---------------- */
+/* [tools… (may overflow into "⋯")] [⋯] [fullscreen · pin · Disconnect (always visible)].
+   toolbar.js measures the natural width (.tb-measuring) against max-width and hides tools
+   (.tb-overflowed) until it fits — there is no hidden scrolling. */
+.tb-wrap {
+  position: fixed; top: 8px; left: 50%; z-index: 40;
+  width: max-content; /* not the 50vw a left:50% box would shrink-to-fit into */
+  max-width: calc(100vw - 16px);
+  transform: translateX(-50%);
+  transition: transform 0.25s var(--ease), opacity 0.2s var(--ease), left 0.25s var(--ease);
+}
+/* An open drawer takes the right edge: keep the toolbar (and Disconnect) and toasts beside it. */
+body.drawer-open .tb-wrap,
+body.drawer-open .tb-handle,
+body.drawer-open .banners { left: calc((100vw - var(--drawer-w)) / 2); }
+body.drawer-open .tb-wrap { max-width: max(0px, calc(100vw - var(--drawer-w) - 16px)); }
+body.drawer-open .banners { max-width: max(0px, calc(100vw - var(--drawer-w) - 32px)); }
+body.drawer-open .toast-host { right: calc(var(--drawer-w) + 16px); }
+.tb-wrap.tb-measuring { max-width: none !important; }
+.tb-wrap.hidden { transform: translate(-50%, calc(-100% - 16px)); opacity: 0; pointer-events: none; }
+.toolbar {
+  display: flex; align-items: center; gap: 2px;
+  padding: 4px;
+  border-radius: var(--tb-radius);
+  background: color-mix(in srgb, var(--bg-elev) 88%, transparent);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px) saturate(140%);
+}
+/* Clips only while toolbar.js re-measures; the padding/negative margin keep focus rings visible. */
+.tb-main {
+  display: flex; align-items: center; gap: 2px;
+  flex: 0 1 auto; min-width: 0;
+  overflow: hidden;
+  padding: 3px; margin: -3px;
+}
+.tb-trail { display: flex; align-items: center; gap: 2px; flex: none; }
+.tb-overflowed { display: none !important; }
+.tb-btn { position: relative; flex: none; width: 32px; height: 32px; border-radius: 9px; }
+.tb-btn.active { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.tb-btn.open { background: var(--surface-hover); color: var(--text); }
+.tb-badge {
+  position: absolute; top: 1px; right: 1px;
+  min-width: 15px; height: 15px; padding: 0 4px;
+  border-radius: 8px;
+  background: var(--danger); color: var(--accent-text);
+  font-size: 10px; font-weight: 700; line-height: 15px; text-align: center;
+  box-shadow: 0 0 0 2px var(--bg-elev);
+  pointer-events: none;
+}
+.tb-sep { flex: none; width: 1px; height: 20px; margin: 0 4px; background: var(--border); }
+.tb-host {
+  display: flex; align-items: center; gap: 7px;
+  min-width: 0; max-width: 220px;
+  padding: 0 8px 0 10px;
+  font-size: 13px; font-weight: 600; color: var(--text);
+  cursor: default;
+}
+.tb-os { display: inline-flex; color: var(--text-dim); }
+.tb-disconnect { flex: none; height: 32px; margin-left: 4px; border-radius: 9px; }
+.tb-handle {
+  position: fixed; top: 0; left: 50%; z-index: 39;
+  width: 64px; height: 6px; padding: 0;
+  transform: translateX(-50%);
+  border: 0; border-radius: 0 0 6px 6px;
+  background: color-mix(in srgb, var(--text) 32%, transparent);
+  opacity: 0.6; cursor: pointer;
+  transition: opacity 0.2s, height 0.2s;
+}
+.tb-handle:hover { opacity: 1; height: 9px; }
+body:not([data-phase="streaming"]) .tb-handle { display: none; }
+
+@media (max-width: 880px) {
+  .tb-host-name, .tb-disc-label { display: none; }
+  .tb-host { padding: 0 6px; }
+  .tb-disconnect { width: 32px; padding: 0; }
+}
+@media (max-width: 660px) { .tb-sep { display: none; } }
+
+/* toolbar menus */
+.tb-pop {
+  position: fixed; z-index: 45;
+  min-width: 240px; max-width: min(340px, calc(100vw - 16px));
+  overflow-y: auto;
+  animation: pop-in 0.14s var(--ease);
+}
+.tb-pop.leaving { opacity: 0; transform: translateY(-4px); transition: opacity 0.12s, transform 0.12s; pointer-events: none; }
+@keyframes pop-in { from { opacity: 0; transform: translateY(-4px); } }
+.pop-title { padding: 8px 10px 4px; }
+.pop-section { padding: 2px 8px 6px; }
+.pop-section .segmented { display: flex; width: 100%; }
+.pop-section .segmented button { flex: 1; }
+.segmented button:disabled { opacity: 0.45; cursor: default; }
+.pop-note { padding: 2px 10px 6px; }
+.menu-item:disabled { opacity: 0.45; cursor: default; background: transparent; }
+.menu-item.current { color: var(--accent); }
+.menu-item > svg { flex: none; }
+
+/* ---------------- drawers (chat / transfers) ---------------- */
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 42;
+  width: var(--drawer-w);
+  display: flex; flex-direction: column;
+  background: var(--bg-elev);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  transform: translateX(105%);
+  transition: transform 0.25s var(--ease);
+}
+.drawer.open { transform: none; }
+/* Focused only programmatically (switching drawers keeps the keyboard local): no ring around the panel. */
+.drawer:focus { outline: none; }
+.drawer-head { display: flex; align-items: center; gap: 8px; padding: 12px 10px 12px 14px; border-bottom: 1px solid var(--border); }
+.drawer-head > svg { flex: none; color: var(--text-dim); }
+.drawer-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.drawer-foot { padding: 10px; border-top: 1px solid var(--border); }
+
+.chat-list { display: flex; flex-direction: column; gap: 10px; min-height: 100%; padding: 14px; }
+.chat-list > .empty { margin: auto 0; }
+.chat-msg { display: flex; flex-direction: column; gap: 3px; max-width: 86%; align-self: flex-start; }
+.chat-msg.me { align-self: flex-end; align-items: flex-end; }
+.chat-msg.system { align-self: center; max-width: 100%; }
+.chat-bubble {
+  padding: 8px 11px;
+  border-radius: 12px 12px 12px 4px;
+  background: var(--surface); border: 1px solid var(--border);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.chat-msg.me .chat-bubble { background: var(--accent); border-color: var(--accent); color: var(--accent-text); border-radius: 12px 12px 4px 12px; }
+.chat-msg.system .chat-bubble { background: transparent; border: 0; padding: 2px; color: var(--text-faint); font-size: 12px; text-align: center; }
+.chat-compose { display: flex; align-items: flex-end; gap: 8px; }
+.textarea.chat-input { min-height: 36px; max-height: 120px; resize: none; }
+
+.xfer-list { display: flex; flex-direction: column; }
+.xfer-list > .empty { padding-top: 48px; }
+.xfer-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.xfer-icon { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); }
+.xfer-row[data-state="done"] .xfer-icon { background: var(--ok-soft); color: var(--ok); }
+.xfer-row[data-state="error"] .xfer-icon,
+.xfer-row[data-state="rejected"] .xfer-icon { background: var(--danger-soft); color: var(--danger); }
+.xfer-row[data-state="cancelled"] .xfer-icon { background: var(--surface-hover); color: var(--text-faint); }
+.xfer-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.xfer-name { font-weight: 600; }
+.xfer-row[data-state="done"] .progress > i { background: var(--ok); }
+.xfer-row[data-state="error"] .progress > i,
+.xfer-row[data-state="rejected"] .progress > i { background: var(--danger); }
+.xfer-row[data-state="cancelled"] .progress > i { background: var(--text-faint); }
+.xfer-actions { flex: none; display: flex; gap: 2px; }
+.xfer-hint { flex: 1; min-width: 0; }
+
+/* Incoming file waiting for the user's OK (top of the Transfers drawer). */
+.xfer-consents:empty { display: none; }
+.xfer-consent {
+  display: flex; flex-direction: column; gap: 8px;
+  margin: 12px 12px 4px; padding: 12px;
+  border: 1px solid var(--accent); border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+.xfer-consent-head { display: flex; align-items: flex-start; gap: 10px; }
+.xfer-consent-text { margin: 0; overflow-wrap: anywhere; }
+.xfer-consent-name { font-weight: 600; }
+.xfer-consent-all { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-dim); }
+.xfer-consent-all input { margin: 0; accent-color: var(--accent); }
+.xfer-consent-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ---------------- HUD: stats, chips, banner ---------------- */
+.hud { position: fixed; left: 12px; bottom: 12px; z-index: 30; pointer-events: none; }
+.stats {
+  min-width: 210px; max-width: min(460px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-elev) 82%, transparent);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(10px);
+  font-family: var(--font-mono); font-size: 11.5px;
+}
+.stats-title { margin-bottom: 6px; font-family: var(--font); }
+.stats-grid { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; margin: 0; }
+.stats-grid dt { color: var(--text-faint); }
+.stats-grid dd { margin: 0; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+.stats-grid dd.stats-wide { overflow-wrap: anywhere; }
+
+.mode-chip {
+  position: fixed; top: 10px; left: 10px; z-index: 31;
+  display: inline-flex; align-items: center; gap: 6px;
+  max-width: 200px; height: 26px; padding: 0 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elev) 85%, transparent);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-dim); font-size: 12px; font-weight: 600;
+  pointer-events: none;
+  transition: top 0.25s var(--ease);
+}
+.mode-chip > svg { flex: none; }
+.mode-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The toolbar would cover the chip (narrow window / open drawer): put it under the toolbar,
+   and the centred banners under the chip. Set by toolbar.js. */
+body.chip-below .mode-chip { top: 56px; }
+body.chip-below .banners { top: 92px; }
+
+/* Stacked status banners under the toolbar (connection unstable, input blocked on the host). */
+.banners {
+  position: fixed; top: 56px; left: 50%; z-index: 35;
+  transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  width: max-content;
+  max-width: min(560px, calc(100vw - 32px));
+  pointer-events: none;
+  transition: top 0.25s var(--ease), left 0.25s var(--ease);
+}
+.banners > .banner {
+  align-items: center;
+  max-width: 100%;
+  font-size: 12.5px; font-weight: 600;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+.notice-banner > svg { flex: none; color: var(--warn); }
+.notice-banner > span { overflow-wrap: anywhere; }
+.conn-banner .spinner { width: 14px; height: 14px; border-top-color: var(--warn); }
+
+/* ---------------- drag & drop ---------------- */
+.drop-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(3px);
+  pointer-events: none; /* drag events keep targeting the page; we listen on window */
+  animation: fade-in 0.15s var(--ease);
+}
+.drop-overlay::before {
+  content: ""; position: absolute; inset: 14px;
+  border: 2px dashed var(--accent); border-radius: var(--radius-lg);
+}
+.drop-overlay.denied::before { border-color: var(--danger); }
+.drop-card { display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 420px; padding: 24px; text-align: center; color: var(--accent); }
+.drop-overlay.denied .drop-card { color: var(--danger); }
+.drop-card .ov-title { color: var(--text); }
+
+/* ---------------- dialog ---------------- */
+.dlg-backdrop {
+  position: fixed; inset: 0; z-index: 70;
+  display: grid; place-items: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  backdrop-filter: blur(3px);
+  animation: fade-in 0.15s var(--ease);
+}
+.dlg { width: min(560px, 100%); display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow); }
+.textarea.dlg-text { min-height: 140px; max-height: 50vh; font-size: 12.5px; }
+
+/* ---------------- screenshot flash ---------------- */
+.shot-flash { position: fixed; inset: 0; z-index: 80; background: var(--text); pointer-events: none; animation: shot-flash 0.35s ease-out forwards; }
+@keyframes shot-flash { from { opacity: 0.35; } to { opacity: 0; } }
+
+@keyframes fade-in { from { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  /* A slowly turning spinner is still the clearest "working" signal. */
+  .spinner { animation-duration: 1.6s !important; animation-iteration-count: infinite !important; }
+}

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tunnelview</title>
+  <link rel="stylesheet" href="../shared/theme.css">
+  <link rel="stylesheet" href="./viewer.css">
+  <script src="../../shared/protocol.js"></script>
+  <script type="module" src="./viewer.js"></script>
+</head>
+<body class="viewer" data-phase="connecting">
+  <!-- Remote screen. Pointer/wheel events are captured on the stage (input.js). -->
+  <main id="stage" class="stage" aria-label="Remote screen">
+    <video id="video" class="video" autoplay playsinline muted disablepictureinpicture disableremoteplayback></video>
+  </main>
+  <!-- Remote audio lives in its own element so muting never touches the picture. -->
+  <audio id="audio" autoplay></audio>
+  <!-- Keyboard focus target while controlling: lets the OS input method (IME) compose text. -->
+  <textarea id="ime-sink" class="ime-sink" tabindex="-1" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Keyboard input for the remote computer"></textarea>
+
+  <div id="mode-chip" class="mode-chip" role="status" hidden></div>
+  <div id="banners" class="banners">
+    <div id="banner" class="banner banner-warn conn-banner" role="status" hidden></div>
+  </div>
+  <div id="hud" class="hud"></div>
+  <div id="toolbar-host"></div>
+  <div id="drawers"></div>
+  <div id="drop-host"></div>
+  <div id="overlay" class="overlay">
+    <section class="ov-card card ov-boot">
+      <div class="spinner spinner-lg ov-spinner" role="progressbar" aria-label="Starting"></div>
+      <h2 class="ov-title">Starting Tunnelview…</h2>
+    </section>
+  </div>
+</body>
+</html>

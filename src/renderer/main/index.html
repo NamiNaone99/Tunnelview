@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tunnelview</title>
+  <link rel="stylesheet" href="../shared/theme.css">
+  <link rel="stylesheet" href="./app.css">
+  <script src="../../shared/protocol.js"></script>
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <header class="app-header" id="app-header">
+    <div class="brand" id="brand" aria-label="Tunnelview"></div>
+    <div class="spacer"></div>
+    <div class="ts-pill is-idle" id="ts-pill" role="status" aria-live="polite"></div>
+    <button class="btn btn-ghost btn-icon" id="btn-settings" type="button" aria-label="Settings" title="Settings"></button>
+  </header>
+
+  <div class="app-body" id="app-body">
+    <aside class="desk" id="desk" aria-label="This Desk"></aside>
+
+    <main class="remote" id="remote">
+      <div class="ts-banner-slot" id="ts-banner" hidden></div>
+      <section class="connect card" id="connect" aria-labelledby="connect-title"></section>
+      <section class="recent" id="recent" aria-label="Recent sessions" hidden></section>
+      <section class="devices" id="devices" aria-labelledby="devices-title"></section>
+    </main>
+  </div>
+</body>
+</html>
