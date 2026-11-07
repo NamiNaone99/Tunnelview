@@ -43,17 +43,24 @@ subprojects {
 }
 
 // Plugins with native code (flutter_zxing, jni) build with the plugin project's NDK and CMake.
-// Left alone, those are AGP's defaults (NDK 28.2, CMake 3.22.1), which the CI runner does not
-// have, so every build would download them. Use the preinstalled ones, like the app does.
+// Left alone, those are AGP's or Flutter's defaults (NDK 28.2, CMake 3.22.1), which the CI
+// runner does not have, so every build would download them. Use the preinstalled ones, like
+// the app does. finalizeDsl runs after the plugin's own build script (jni sets ndkVersion).
 subprojects {
     plugins.withId("com.android.library") {
-        extensions.getByName("android").withGroovyBuilder {
-            "setNdkVersion"("27.3.13750724")
-            "externalNativeBuild" {
-                "cmake" {
-                    "setVersion"("3.31.5")
-                }
-            }
+        extensions.getByName("androidComponents").withGroovyBuilder {
+            "finalizeDsl"(
+                Action<Any> {
+                    withGroovyBuilder {
+                        "setNdkVersion"("27.3.13750724")
+                        "externalNativeBuild" {
+                            "cmake" {
+                                "setVersion"("3.31.5")
+                            }
+                        }
+                    }
+                },
+            )
         }
     }
 }
