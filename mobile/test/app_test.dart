@@ -70,31 +70,39 @@ void main() {
   });
 
   group('quiet error handlers', () {
-    late FlutterExceptionHandler? savedFlutter;
+    late FlutterExceptionHandler? savedOnError;
+    late FlutterExceptionHandler savedPresent;
     late bool Function(Object, StackTrace)? savedPlatform;
     late DebugPrintCallback savedPrint;
     late List<String?> printed;
+    late List<FlutterErrorDetails> presented;
 
     setUp(() {
-      savedFlutter = FlutterError.onError;
+      savedOnError = FlutterError.onError;
+      savedPresent = FlutterError.presentError;
       savedPlatform = PlatformDispatcher.instance.onError;
       savedPrint = debugPrint;
       printed = [];
+      presented = [];
       debugPrint = (String? message, {int? wrapWidth}) => printed.add(message);
+      // Flutter's default presenter prints the error text to the log.
+      FlutterError.presentError = presented.add;
     });
 
     tearDown(() {
       debugPrint = savedPrint;
-      FlutterError.onError = savedFlutter;
+      FlutterError.presentError = savedPresent;
+      FlutterError.onError = savedOnError;
       PlatformDispatcher.instance.onError = savedPlatform;
     });
 
     // The text of a socket error names the peer.
     final error = StateError('connect failed, address = 100.101.12.7');
 
-    test('release: nothing is printed and async errors are handled', () {
+    test('release: nothing is presented or printed; async errors handled', () {
       installQuietErrorHandlers(release: true);
       FlutterError.onError!(FlutterErrorDetails(exception: error));
+      expect(presented, isEmpty);
       expect(printed, isEmpty);
       expect(
         PlatformDispatcher.instance.onError!(error, StackTrace.empty),
@@ -105,7 +113,7 @@ void main() {
     test('development: Flutter reports errors as usual', () {
       installQuietErrorHandlers(release: false);
       FlutterError.onError!(FlutterErrorDetails(exception: error));
-      expect(printed, isNotEmpty);
+      expect(presented, hasLength(1));
       expect(
         PlatformDispatcher.instance.onError!(error, StackTrace.empty),
         isFalse,

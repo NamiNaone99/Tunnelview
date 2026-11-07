@@ -253,9 +253,7 @@ void main() {
         uiCalls.add(call);
         return nativeResult;
       });
-      messenger.setMockMethodCallHandler(SystemChannels.platform, (
-        call,
-      ) async {
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
         if (call.method == 'Clipboard.setData') plainClipboard = true;
         return null;
       });
