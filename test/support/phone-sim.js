@@ -14,13 +14,18 @@
  * Refusal reasons:
  *   pair:    link-<CODE> (pairing.parseLink), expired, declined (the user said no after seeing the
  *            fingerprint), unreachable, http-<status>, protocol (hello not as specified),
- *            host-update-needed (no hello.ident), not-paired-host (ident not signed by the link's key
- *            for the link's host on this connection), failed (pair-result ok:false, or a result that
- *            does not match what was signed)
- *   connect: unreachable, http-<status>, protocol, host-update-needed, identity-mismatch (the host
- *            sees this phone as another node: a relay, or the phone's Tailscale identity changed),
- *            host-key-mismatch (a hello came, but none was signed by the pinned key for the pinned
- *            host on this connection)
+ *            host-update-needed (no hello.ident from a host older than 0.3), host-identity-unavailable
+ *            (no hello.ident from a 0.3+ host: its key cannot be used right now, Settings › Security
+ *            › Retry there), not-paired-host (ident not signed by the link's key for the link's host
+ *            on this connection), failed (pair-result ok:false, or a result that does not match what
+ *            was signed)
+ *   connect: unreachable, http-<status>, protocol, host-update-needed, host-identity-unavailable,
+ *            identity-mismatch (the host sees this phone as another node: a relay, or the phone's
+ *            Tailscale identity changed), host-key-mismatch (a hello came, but none was signed by
+ *            the pinned key for the pinned host on this connection)
+ * hello.version tells the two "no ident" cases apart (identCapable): every host from 0.3.0 on can
+ * sign, so a missing ident there means its key is unavailable, not that it needs an update. The
+ * hint is unauthenticated; it only chooses the wording, and nothing is sent either way.
  * A refusal sends nothing: no `request`, no `pair`, no hostname, no proof.
  */
 const crypto = require('crypto');
@@ -51,6 +56,21 @@ function validHello(h) {
   if (!auth.decodeB64(a.nonce, 16, 64)) return false;
   if (a.passwordSet && (typeof a.salt !== 'string' || a.salt.length > 128 || !isObj(a.kdf) || !auth.validateKdf(a.kdf))) return false;
   return true;
+}
+
+/**
+ * The hello comes from a Tunnelview that has an identity key (0.3.0 or later: hello.version's
+ * major > 0 or minor >= 3). Only for wording a missing ident; never a reason to trust anything.
+ */
+function identCapable(hello) {
+  const m = isObj(hello) && typeof hello.version === 'string' ? /^(\d+)\.(\d+)/.exec(hello.version) : null;
+  if (!m) return false;
+  return Number(m[1]) > 0 || Number(m[2]) >= 3;
+}
+
+/** Why a hello without ident is refused: an old host, or a current one whose key is unavailable. */
+function noIdentReason(hello) {
+  return identCapable(hello) ? 'host-identity-unavailable' : 'host-update-needed';
 }
 
 /** One WebSocket with a frame queue. Every frame the phone sends goes through send(). */
@@ -189,7 +209,7 @@ class PhoneSim {
       const v = pairing.verifyIdent(keyPub, hello, { cnonce, hostId: d.id });
       if (!v.ok) {
         conn.close();
-        return { ok: false, reason: v.reason === 'no-ident' ? 'host-update-needed' : 'not-paired-host' };
+        return { ok: false, reason: v.reason === 'no-ident' ? noIdentReason(hello) : 'not-paired-host' };
       }
       const proof = pairing.pairProof(token, hello.auth.nonce, cnonce, d.id, v.viewerId);
       conn.send({ t: PROTOCOL.MSG.PAIR, proof, device: { ...this.device } });
@@ -234,7 +254,7 @@ class PhoneSim {
       const v = pairing.verifyIdent(keyPub, hello, { cnonce, hostId: record.hostId, viewerId: record.selfId });
       if (v.ok) return { ok: true, conn, hello, cnonce, binding: { hostId: record.hostId, viewerId: record.selfId } };
       conn.close();
-      if (v.reason === 'no-ident') return { ok: false, reason: 'host-update-needed' };
+      if (v.reason === 'no-ident') return { ok: false, reason: noIdentReason(hello) };
       if (v.reason === 'viewer-mismatch') return { ok: false, reason: 'identity-mismatch' };
       // malformed, bad-signature, cnonce-mismatch, host-mismatch: not the pinned computer here.
     }
@@ -246,4 +266,4 @@ class PhoneSim {
   }
 }
 
-module.exports = { PhoneSim, PhoneConnection, newClientNonce, validHello };
+module.exports = { PhoneSim, PhoneConnection, newClientNonce, validHello, identCapable };

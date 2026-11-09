@@ -25,16 +25,19 @@ export const NOT_SUPPORTED_TEXT = 'This copy of Tunnelview cannot update itself.
 // Answers that leave UpdateState as it was, so the status line will not show them: toasted instead.
 const REFUSALS = new Set([
   'BUSY', 'NOT_READY', 'NOT_AVAILABLE', 'NOT_SUPPORTED', 'BAD_REQUEST', 'SETTINGS_LOCKED', 'UNKNOWN',
-  'INCOMING_SESSION', 'INCOMING_REQUEST', 'OUTGOING_SESSION', 'SESSION_ACTIVE',
+  'INCOMING_SESSION', 'INCOMING_REQUEST', 'OUTGOING_SESSION', 'SESSION_ACTIVE', 'IN_USE_BY_OTHER_USER',
+  'NOT_DOWNLOADING',
 ]);
 // Failures after which the downloaded file is worth showing (install it by hand, or try later).
 const REVEAL_AFTER = new Set([
   'UAC_DECLINED', 'LAUNCH_FAILED', 'TRANSLOCATED', 'READ_ONLY_LOCATION', 'NOT_WRITABLE', 'NOT_OWNER',
-  'INSTALL_INCOMPLETE', 'MAC_REPLACE_FAILED',
+  'SHARED_LOCATION', 'INSTALL_INCOMPLETE', 'MAC_REPLACE_FAILED', 'MAC_APP_IN_USE',
 ]);
 // Reported by main at the start after an install that did not take.
-const NEXT_START_FAILURES = new Set(['INSTALL_INCOMPLETE', 'MAC_REPLACE_FAILED']);
+const NEXT_START_FAILURES = new Set(['INSTALL_INCOMPLETE', 'MAC_REPLACE_FAILED', 'MAC_APP_IN_USE']);
 const WORKING = new Set(['checking', 'downloading', 'installing']);
+/** This Mac refused the downloaded version (it needs a newer macOS): installing it again cannot work. */
+const osTooOld = (u) => u.status === 'error' && !!u.error && u.error.code === 'OS_TOO_OLD';
 
 /* ------------------------------------------------------------------ wording + buttons (pure) */
 
@@ -50,16 +53,19 @@ export function describeUpdate(u) {
   if (!u) return out;
   const v = u.latest ? u.latest.version : '';
   const mac = u.platform === 'macos';
+  const blocked = u.supported && u.installBlocked ? u.installBlocked.message : '';
   const set = (tone, text, detail = '', announce = text) => Object.assign(out, { tone, text, detail, announce });
   switch (u.status) {
     case 'checking':
       return set('busy', 'Checking for updates…');
     case 'up-to-date':
       return set('ok', 'Up to date', u.currentVersion ? `Tunnelview ${u.currentVersion} is the newest version.` : '');
-    case 'available':
+    case 'available': {
+      const size = u.latest.size ? `Download size: ${formatBytes(u.latest.size)}.` : '';
       return set('accent', `Update ${v} available`,
-        !u.supported ? NOT_SUPPORTED_TEXT : u.latest.size ? `Download size: ${formatBytes(u.latest.size)}.` : '',
+        !u.supported ? NOT_SUPPORTED_TEXT : blocked ? `${size ? `${size} ` : ''}${blocked}` : size,
         `Update ${v} available.`);
+    }
     case 'downloading': {
       const p = u.progress || { received: 0, total: 0, percent: 0 };
       set('busy', `Downloading ${p.percent}%`,
@@ -69,6 +75,11 @@ export function describeUpdate(u) {
       return out;
     }
     case 'ready':
+      if (blocked) {
+        // Verified, but this copy cannot replace itself where it runs: install it by hand, or move
+        // the app (the message says how) and install from there.
+        return set('ok', 'Downloaded', `Tunnelview ${v} is downloaded and verified. ${blocked}`, `Update ${v} is downloaded.`);
+      }
       return set('ok', 'Ready to install', u.supported ? `Tunnelview ${v} is downloaded and verified.` : NOT_SUPPORTED_TEXT,
         `Update ${v} is ready to install.`);
     case 'installing':
@@ -93,32 +104,41 @@ export function describeUpdate(u) {
  * Which buttons Settings › Updates shows and whether they work right now.
  *   check / primary: {enabled, busy}; busy buttons stay focusable (aria-disabled) so the keyboard
  *   focus survives a running check, download or install.
- *   primary.action: 'download' | 'install' | 'releases' (this copy cannot update itself)
+ *   primary.action: 'download' | 'install' | 'reveal' (downloaded, but this copy cannot replace
+ *   itself where it runs: UpdateState.installBlocked) | 'releases' (this copy cannot update itself)
  *   hint: why Install has to wait ('' when it doesn't); reveal: offer "Show in folder";
- *   releases: offer the GitHub releases page as a secondary button.
+ *   cancel: offer Cancel (a download runs); releases: offer the GitHub releases page as a
+ *   secondary button.
  */
 export function updatePlan(u, ops = {}) {
-  const plan = { check: { enabled: false, busy: false }, primary: null, hint: '', reveal: false, releases: true };
+  const plan = { check: { enabled: false, busy: false }, primary: null, hint: '', reveal: false, cancel: false, releases: true };
   if (!u) return plan;
   const working = WORKING.has(u.status);
   const pending = !!(ops.check || ops.download || ops.install);
   const checkBusy = u.status === 'checking' || !!ops.check;
+  const blockedHere = u.supported && !!u.installBlocked;
   plan.check = { enabled: !working && !pending, busy: checkBusy };
-  if (u.latest) {
+  if (u.latest && !osTooOld(u)) {
     const v = u.latest.version;
     if (!u.supported) {
       plan.primary = { action: 'releases', label: `Get ${v} from GitHub`, enabled: true, busy: false };
     } else if (u.status === 'installing' || ops.install) {
       plan.primary = { action: 'install', label: u.status === 'installing' ? 'Installing…' : 'Restart and install', enabled: false, busy: true };
+    } else if (u.downloaded && blockedHere) {
+      plan.primary = { action: 'reveal', label: revealLabel(u.platform), enabled: !working && !pending, busy: false };
     } else if (u.downloaded) {
       plan.primary = { action: 'install', label: 'Restart and install', enabled: !working && !pending && !u.blocked, busy: false };
     } else {
       const busy = u.status === 'downloading' || !!ops.download;
       plan.primary = { action: 'download', label: busy ? 'Downloading…' : 'Download and install', enabled: !working && !pending, busy };
+      // Where it runs, this copy cannot replace itself: the download is all it can do.
+      if (blockedHere && !busy) plan.primary.label = 'Download';
     }
-    if (u.blocked && u.supported && u.status !== 'installing') plan.hint = BLOCKED_TEXT[u.blocked] || BLOCKED_TEXT.SESSION_ACTIVE;
+    if (u.blocked && u.supported && !blockedHere && u.status !== 'installing') plan.hint = BLOCKED_TEXT[u.blocked] || BLOCKED_TEXT.SESSION_ACTIVE;
   }
-  plan.reveal = !working && u.status === 'error' && !!u.error && (u.downloaded || REVEAL_AFTER.has(u.error.code));
+  plan.reveal = !working && u.status === 'error' && !!u.error && !osTooOld(u) && (u.downloaded || REVEAL_AFTER.has(u.error.code));
+  if (plan.primary && plan.primary.action === 'reveal') plan.reveal = false; // already the primary button
+  plan.cancel = u.status === 'downloading';
   plan.releases = !(plan.primary && plan.primary.action === 'releases');
   return plan;
 }
@@ -170,16 +190,29 @@ export async function downloadAndInstall() {
   }
   await refreshUpdateState();
   if (!res.ok) {
-    if (shouldToast(res)) toast(res.message, { kind: 'warn', timeout: 6000 });
+    // CANCELLED: the user's own Cancel, nothing to explain.
+    if (res.code !== 'CANCELLED' && shouldToast(res)) toast(res.message, { kind: 'warn', timeout: 6000 });
     return false;
   }
   const u = store.update;
   if (!u || !u.latest || !u.downloaded) return false;
+  if (u.installBlocked) {
+    toast(`Tunnelview ${u.latest.version} is downloaded. ${u.installBlocked.message}`, { timeout: 9000 });
+    return false;
+  }
   if (u.blocked) {
     toast(`Tunnelview ${u.latest.version} is downloaded. ${BLOCKED_TEXT[u.blocked] || BLOCKED_TEXT.SESSION_ACTIVE}`, { timeout: 7000 });
     return false;
   }
   return installWithConfirm();
+}
+
+/** Cancel on a running download (update:cancel); downloadAndInstall() then ends quietly. */
+export async function cancelDownload() {
+  const res = await updateAction('cancelUpdate');
+  if (!res.ok && res.code !== 'NOT_DOWNLOADING') toast(res.message, { kind: 'warn', timeout: 6000 });
+  await refreshUpdateState();
+  return res.ok;
 }
 
 /**
@@ -190,6 +223,10 @@ export async function downloadAndInstall() {
 export async function installWithConfirm() {
   const u = store.update;
   if (!u || !u.latest || !u.downloaded || store.updateOps.install) return false;
+  if (u.installBlocked) {
+    toast(u.installBlocked.message, { kind: 'warn', timeout: 9000 });
+    return false;
+  }
   if (u.blocked) {
     toast(BLOCKED_TEXT[u.blocked] || BLOCKED_TEXT.SESSION_ACTIVE, { kind: 'warn', timeout: 6000 });
     return false;
@@ -297,11 +334,13 @@ export function pickUpdateBanner(u, state, gone = dismissed) {
   if (u.status === 'error' && u.error && NEXT_START_FAILURES.has(u.error.code) && gone.failure !== u.error.code) {
     return { kind: 'failed', key: u.error.code, tone: 'warn', icon: 'alert', title: 'The update did not complete', sub: u.error.message, action: 'Details' };
   }
-  if (u.latest && BANNER_STATUSES.has(u.status) && gone.version !== u.latest.version) {
+  if (u.latest && BANNER_STATUSES.has(u.status) && !osTooOld(u) && gone.version !== u.latest.version) {
     const v = u.latest.version;
     const have = u.currentVersion ? `You have ${u.currentVersion}.` : '';
     const base = { kind: 'available', key: v, tone: 'accent', icon: 'download', action: 'View update' };
-    if (u.status === 'downloading') return { ...base, title: `Downloading Tunnelview ${v}…`, sub: 'It installs only after you confirm.' };
+    const blockedHere = u.supported && u.installBlocked;
+    if (u.status === 'downloading') return { ...base, title: `Downloading Tunnelview ${v}…`, sub: blockedHere ? u.installBlocked.message : 'It installs only after you confirm.' };
+    if (u.downloaded && blockedHere) return { ...base, title: `Tunnelview ${v} is downloaded`, sub: u.installBlocked.message };
     if (u.downloaded) return { ...base, title: `Tunnelview ${v} is ready to install`, sub: have };
     return { ...base, title: `Tunnelview ${v} is available`, sub: have };
   }

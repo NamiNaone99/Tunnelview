@@ -132,7 +132,9 @@ function identBytes(nonce, cnonce, hostId, viewerId) {
  * A viewer's check of a signed hello. `expect` holds what the viewer knows independently ({cnonce,
  * hostId, viewerId}; each compared only when present). The order of the checks decides the
  * reason, and a phone acts on it (mobile PLAN §6.6):
- *   'no-ident'         hello.ident absent or null: the host predates identities
+ *   'no-ident'         hello.ident absent or null: the host predates identities (0.2.x), or it is
+ *                      0.3+ and its key is unavailable right now (/info features [], hello.version
+ *                      0.3.0 or later); a phone words the two differently, sends nothing either way
  *   'malformed'        ident or hello.auth.nonce is not as specified (unknown ident fields are ignored)
  *   'bad-signature'    the signature does not verify with pubRaw over identBytes(...)
  *   'cnonce-mismatch'  signed for another connection (replayed)

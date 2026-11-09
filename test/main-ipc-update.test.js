@@ -66,6 +66,7 @@ class FakeUpdater extends EventEmitter {
   async download() { this.calls.push('download'); return this.next; }
   async install() { this.calls.push('install'); return this.next; }
   reveal() { this.calls.push('reveal'); return this.next; }
+  cancelDownload() { this.calls.push('cancel'); return this.next; }
 }
 const updater = new FakeUpdater();
 
@@ -100,7 +101,7 @@ ipc.register(ctx);
 
 const mainWin = addEntry('main');
 const invoke = (ch, win, ...args) => handlers.get(ch)({ sender: { id: win.webContents.id } }, ...args);
-const CHANNELS = ['update:get-state', 'update:check', 'update:download', 'update:install', 'update:set-auto', 'update:reveal', 'update:open-releases'];
+const CHANNELS = ['update:get-state', 'update:check', 'update:download', 'update:install', 'update:cancel', 'update:set-auto', 'update:reveal', 'update:open-releases'];
 
 /* ------------------------------------------------------------------ tests */
 
@@ -133,6 +134,7 @@ test('update:get-state: a rebuilt plain object; notes stay multi-line plain text
     error: { code: 'NETWORK', message: 'Could not reach GitHub.\u0000', stack: 'secret' },
     blocked: 'OUTGOING_SESSION',
     justUpdated: null,
+    installBlocked: { code: 'TRANSLOCATED', message: 'Move it.‮', path: '/private/var/folders/x' },
     file: 'C:\\Users\\me\\AppData\\Roaming\\Tunnelview\\updates\\0.4.0\\x.exe',
   };
   const s = await invoke('update:get-state', mainWin);
@@ -150,6 +152,7 @@ test('update:get-state: a rebuilt plain object; notes stay multi-line plain text
     error: { code: 'NETWORK', message: 'Could not reach GitHub.' },
     blocked: 'OUTGOING_SESSION',
     justUpdated: null,
+    installBlocked: { code: 'TRANSLOCATED', message: 'Move it.' },
   });
   // Garbage in → safe defaults out.
   updater.state = { status: 'pwned', latest: { version: '../../x' }, error: { code: 'lower case' }, blocked: 'NOPE', platform: 'linux', justUpdated: { to: 'x' } };
@@ -160,6 +163,9 @@ test('update:get-state: a rebuilt plain object; notes stay multi-line plain text
   assert.equal(g.blocked, null);
   assert.equal(g.platform, 'other');
   assert.equal(g.justUpdated, null);
+  assert.equal(g.installBlocked, null);
+  updater.state = { status: 'ready', installBlocked: { code: 'lower', message: 'x' } };
+  assert.equal((await invoke('update:get-state', mainWin)).installBlocked, null);
   // Downloading / installing keep their extra fields.
   updater.state = { status: 'downloading', progress: { received: 10, total: 20, percent: 50.7 } };
   assert.deepEqual((await invoke('update:get-state', mainWin)).progress, { received: 10, total: 20, percent: 50 });
@@ -183,9 +189,9 @@ test('update:check runs a check (also during a session) and returns the new stat
   }
 });
 
-test('update:download / install / reveal: results are {ok} or {ok, code, message} only', async () => {
+test('update:download / install / cancel / reveal: results are {ok} or {ok, code, message} only', async () => {
   updater.calls.length = 0;
-  for (const ch of ['update:download', 'update:install', 'update:reveal']) {
+  for (const ch of ['update:download', 'update:install', 'update:cancel', 'update:reveal']) {
     updater.next = { ok: true, path: 'C:\\secret' };
     assert.deepEqual(await invoke(ch, mainWin), { ok: true }, ch);
     updater.next = { ok: false, code: 'UAC_DECLINED', message: 'Update cancelled: administrator permission was not given.', stack: 'x' };
@@ -193,7 +199,7 @@ test('update:download / install / reveal: results are {ok} or {ok, code, message
     updater.next = { ok: false, code: '<script>', message: 42 };
     assert.deepEqual(await invoke(ch, mainWin), { ok: false, code: 'UNKNOWN', message: 'The update failed.' }, ch);
   }
-  assert.deepEqual(updater.calls.filter((c) => c !== 'getState'), ['download', 'download', 'download', 'install', 'install', 'install', 'reveal', 'reveal', 'reveal']);
+  assert.deepEqual(updater.calls.filter((c) => c !== 'getState'), ['download', 'download', 'download', 'install', 'install', 'install', 'cancel', 'cancel', 'cancel', 'reveal', 'reveal', 'reveal']);
 });
 
 test('update:set-auto: booleans only; locked while an incoming session is active', async () => {
@@ -236,7 +242,7 @@ test('without an updater every action answers NOT_SUPPORTED', async () => {
   try {
     assert.equal((await invoke('update:get-state', mainWin)).status, 'idle');
     assert.equal((await invoke('update:check', mainWin)).status, 'idle');
-    for (const ch of ['update:download', 'update:install', 'update:reveal']) {
+    for (const ch of ['update:download', 'update:install', 'update:cancel', 'update:reveal']) {
       const r = await invoke(ch, mainWin);
       assert.equal(r.ok, false);
       assert.equal(r.code, 'NOT_SUPPORTED');

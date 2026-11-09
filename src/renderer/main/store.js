@@ -196,6 +196,7 @@ function normTunnelview(a) {
     passwordSet: !!a.passwordSet,
     acceptMode: str(a.acceptMode, 32),
     busy: !!a.busy,
+    updating: !!a.busy && a.updating === true, // busy because it installs a Tunnelview update
     port: Number.isInteger(a.port) && a.port > 0 && a.port <= 65535 ? a.port : null, // where it answered
   };
 }
@@ -355,12 +356,14 @@ export function normUpdateState(raw) {
   const p = status === 'downloading' && isObj(raw.progress) ? raw.progress : null;
   const e = isObj(raw.error) && typeof raw.error.code === 'string' && ERROR_CODE_RE.test(raw.error.code) ? raw.error : null;
   const j = isObj(raw.justUpdated) && typeof raw.justUpdated.to === 'string' && UPDATE_VERSION_RE.test(raw.justUpdated.to) ? raw.justUpdated : null;
+  const b = isObj(raw.installBlocked) && typeof raw.installBlocked.code === 'string' && ERROR_CODE_RE.test(raw.installBlocked.code) ? raw.installBlocked : null;
   return {
     status,
     phase: status === 'installing' && UPDATE_PHASES.has(raw.phase) ? raw.phase : null,
     currentVersion: str(raw.currentVersion, 64),
     platform: raw.platform === 'windows' || raw.platform === 'macos' ? raw.platform : 'other',
     supported: raw.supported === true,
+    installBlocked: b ? { code: b.code, message: str(b.message, 500) || 'This copy of Tunnelview cannot replace itself where it is.' } : null,
     autoCheck: raw.autoCheck === true,
     lastCheckAt: nonNeg(raw.lastCheckAt) || null,
     latest: l ? {

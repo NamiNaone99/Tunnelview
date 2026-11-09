@@ -22,6 +22,7 @@
  *   PeerInfo = { id, stableId, hostname, dnsName, shortName, os, ips:string[], online:bool, lastSeen:string|null,
  *                user:{login,displayName}, tags:string[], favorite:bool,
  *                tunnelview: null | { version, os, passwordSet:bool, acceptMode:string, busy:bool,
+ *                                  updating:bool,   // busy because it installs a Tunnelview update
  *                                  port:number },   // the signaling port Tunnelview answered on
  *                probe: null | 'ok' | 'not-allowed' | 'refused' | 'timeout' | 'incompatible' | 'error' }
  *                  // null = not probed; ok = Tunnelview answered (tunnelview set); not-allowed =
@@ -62,6 +63,10 @@
  *     supported: bool,         // this build can install by itself (packaged; Windows x64/arm64
  *                              // installed by its installer, with elevate.exe, updates on a local
  *                              // disk; or macOS); otherwise point to the releases page
+ *     installBlocked: null | { code:string, message:string },   // macOS: where this copy runs
+ *                              // from it cannot replace itself (TRANSLOCATED, READ_ONLY_LOCATION,
+ *                              // NOT_WRITABLE, NOT_OWNER, SHARED_LOCATION): offer the download
+ *                              // only, then show it in Finder, with the message
  *     autoCheck: bool,         // settings.autoUpdateCheck
  *     lastCheckAt: number|null,// ms since the epoch of the last completed check
  *     latest: null | { version:'X.Y.Z', date:string (ISO), notes:string, size:number },
@@ -191,6 +196,11 @@ contextBridge.exposeInMainWorld('tunnelview', {
    * arrives through onUpdateState meanwhile. @returns {Promise<UpdateResult>}
    */
   downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  /**
+   * Stop a running download (its downloadUpdate() then answers {ok:false, code:'CANCELLED'} and
+   * the state goes back to 'available'). @returns {Promise<UpdateResult>}
+   */
+  cancelUpdate: () => ipcRenderer.invoke('update:cancel'),
   /**
    * Install the downloaded update (only ever from the user's click). Refused with the reason
    * (code = UpdateState.blocked) during an incoming session, a pending incoming request or an

@@ -664,6 +664,35 @@ test('build.yml: the manifest is uploaded, and release needs update-manifest and
   }
 });
 
+test('build.yml: the macos job checks each update zip the way updater.js installs it, before the upload (MACFLOW-3)', () => {
+  const u = require('../src/main/updater');
+  const m = require('../src/main/update-manifest');
+  const job = JOBS.macos;
+  const at = job.indexOf('- name: Verify the update zips the way the updater installs them');
+  assert.ok(at >= 0, 'no zip check in the macos job');
+  assert.ok(at > job.indexOf('- name: Build dmg + zip'), 'after the build');
+  assert.ok(at < job.indexOf('actions/upload-artifact'), 'before the upload (update-manifest and release need this job)');
+  const step = withoutComments(job.slice(at, job.indexOf('\n\n', at)));
+  // The same names sign-update.js hashes, for both Mac platform keys.
+  assert.equal(m.assetName('darwin-arm64', '9.9.9'), 'Tunnelview-9.9.9-mac-arm64.zip');
+  assert.equal(m.assetName('darwin-x64', '9.9.9'), 'Tunnelview-9.9.9-mac-x64.zip');
+  assert.ok(step.includes('zip="dist/Tunnelview-${want}-mac-${a}.zip"'));
+  assert.ok(step.includes('for pair in arm64:arm64 x64:x86_64; do'));
+  for (const w of [
+    'ditto -x -k --noqtn "$zip" "$tmp"',
+    '[ "$(ls -A "$tmp")" = "Tunnelview.app" ]',
+    `plutil -extract CFBundleIdentifier raw -o - "$plist")" = "${u.APP_ID}" ]`,
+    'plutil -extract CFBundleShortVersionString raw -o - "$plist")" = "$want" ]',
+    'plutil -extract CFBundleExecutable raw -o - "$plist")" = "Tunnelview" ]',
+    'lipo -archs "$app/Contents/MacOS/Tunnelview"',
+    'codesign --verify --deep --strict --verbose=2 "$app"',
+  ]) assert.ok(step.includes(w), `zip check lacks: ${w}`);
+  // The updater runs the same tools with the same arguments.
+  const src = read('src/main/updater.js');
+  assert.ok(src.includes("['-x', '-k', '--noqtn', d.file, xdir]"));
+  assert.ok(src.includes("['--verify', '--deep', '--strict', '--verbose=2', app]"));
+});
+
 test('build.yml: parsed with js-yaml, update-manifest and release have the same shape', (t) => {
   let yaml;
   try { yaml = require('js-yaml'); } catch { return t.skip('js-yaml not installed'); }
@@ -896,6 +925,67 @@ test('docs: README Updating replaces "does not update itself" and describes the 
   const colon = /^((?:[0-9A-F]{2}:){31}[0-9A-F]{2})$/m.exec(section);
   assert.ok(colon, 'no colon-separated SHA-256 certificate fingerprint');
   assert.ok(section.includes(`\`${colon[1].replace(/:/g, '').toLowerCase()}\``), 'the apksigner spelling differs');
+});
+
+test('docs: README states what the updater and the phone pairing really do (DOCS-1 to DOCS-8, DOCS-11)', () => {
+  const u = require('../src/main/updater');
+  const readme = readText('README.md');
+  const sectionOf = (heading) => {
+    const start = readme.indexOf(`\n${heading}\n`);
+    assert.ok(start >= 0, `no ${heading}`);
+    const rest = readme.slice(start + 1);
+    const level = heading.split(' ')[0];
+    const end = rest.slice(heading.length).search(new RegExp(`\\n#{2,${level.length}} `));
+    return flat(end < 0 ? rest : rest.slice(0, end + heading.length));
+  };
+  const updating = sectionOf('## Updating');
+  const trouble = sectionOf('## Troubleshooting');
+  const ports = sectionOf('## Ports and firewalls');
+  const row = (lead) => {
+    const line = readme.split('\n').find((l) => l.startsWith(`| ${lead}`));
+    assert.ok(line, `no Troubleshooting row ${lead}`);
+    return line;
+  };
+  // DOCS-1: pairing a phone, the ID, Reset identity, the locked list, the project layout.
+  const pair = sectionOf('### Pair a phone');
+  for (const w of ['**Pair a phone**', '2 minutes', 'Pair only if both match', 'Three wrong attempts', 'does **not** let anyone in', '**Reset identity…**']) {
+    assert.ok(pair.includes(w), `Pair a phone lacks: ${w}`);
+  }
+  assert.ok(flat(readme).includes('**Reset identity…** and **Pair a phone** are refused too'), 'locked list');
+  const layout = sectionOf('## Project layout');
+  for (const f of ['identity.js', 'pairing.js', 'qr.js', 'make-mobile-fixtures.js']) assert.ok(layout.includes(f), `Project layout lacks ${f}`);
+  // DOCS-2: every host the check and the download reach, on TCP 443.
+  for (const host of u.ALLOWED_HOSTS) {
+    assert.ok(updating.includes(`\`${host}\``), `Updating lacks ${host}`);
+    assert.ok(row('Checking for updates fails').includes(`\`${host}\``), `Troubleshooting lacks ${host}`);
+    assert.ok(ports.includes(`\`${host}\``), `Ports and firewalls lacks ${host}`);
+  }
+  assert.ok(updating.includes('TCP 443') && ports.includes('TCP 443'));
+  // DOCS-3: GitHub sees the public IP, not only the user agent.
+  assert.doesNotMatch(flat(readme), /only identifying detail/);
+  assert.ok(updating.includes('shows GitHub your public IP address'));
+  // DOCS-4: on by default, first check about a minute after start, the opt-out before the first start.
+  assert.ok(updating.includes('**on by default**') && updating.includes('about a minute after Tunnelview starts'));
+  assert.ok(updating.includes('`"autoUpdateCheck": false`'));
+  assert.equal(u.FIRST_CHECK_DELAY_MS, 60 * 1000);
+  // DOCS-5: a session refuses the install; nothing installs by itself later.
+  assert.doesNotMatch(flat(readme), /Installing waits while/);
+  assert.ok(updating.includes('You cannot install while someone is connected') && updating.includes('it does not install by itself'));
+  // DOCS-6: busy vs updating.
+  assert.match(row('*… is updating*'), /administrator \(UAC\) prompt/);
+  assert.ok(read('src/renderer/viewer/reasons.js').includes("case 'host-updating':"));
+  // DOCS-7: the step that brings Restart and install back after App Management.
+  assert.ok(row('Mac: *macOS did not let Tunnelview replace itself*').includes('click **Check now**'));
+  assert.ok(updating.includes('then click **Check now** in Settings › Updates'));
+  // DOCS-8: a standard Mac account uses ~/Applications.
+  assert.ok(updating.includes('On a standard account, use the Applications folder in your home folder (`~/Applications`)'));
+  // DOCS-11: where the identity files are, restore + Retry before Reset identity.
+  const id = row('Settings › Security: *This computer can\'t prove its identity');
+  for (const w of ['`%LOCALAPPDATA%\\Tunnelview`', '`~/Library/Application Support/Tunnelview`', '`identity.json.bak`', '**Retry**', 'Do not restart Tunnelview while both files are missing']) {
+    assert.ok(id.includes(w), `identity row lacks: ${w}`);
+  }
+  assert.match(read('src/main/index.js'), /return path\.join\(base, 'Tunnelview'\);/, 'index.js keeps the identity in LOCALAPPDATA\\Tunnelview');
+  assert.ok(trouble.length > 0);
 });
 
 test('docs: README and ARCHITECTURE name the update buttons the Updates page shows (DECISIONS U6)', () => {

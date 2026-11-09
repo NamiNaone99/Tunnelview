@@ -246,7 +246,8 @@ export function mountDevices(root) {
     let badge;
     if (unsupported) badge = h('span', { class: 'small faint dc-na' }, 'Tunnelview host not available');
     else if (!p.online) badge = h('span', { class: 'badge' }, 'Offline');
-    else if (p.tunnelview && p.tunnelview.busy) badge = h('span', { class: 'badge badge-warn', title: 'Someone is already connected to this device' }, 'Busy');
+    else if (p.tunnelview && p.tunnelview.updating) badge = h('span', { class: 'badge badge-warn', title: 'This device is installing a Tunnelview update' }, 'Updating');
+    else if (p.tunnelview && p.tunnelview.busy) badge = h('span', { class: 'badge badge-warn', title: 'Someone is connected to this device, or a request is waiting there' }, 'Busy');
     else if (p.tunnelview && p.tunnelview.passwordSet) badge = h('span', { class: 'badge badge-ok', title: 'Tunnelview is running · unattended password set' }, icon('lock', { size: 11 }), 'Password set');
     else if (p.tunnelview) badge = h('span', { class: 'badge badge-ok', title: p.tunnelview.version ? `Tunnelview ${p.tunnelview.version}` : 'Tunnelview is running' }, 'Ready');
     else if (!pr.probed) badge = pr.probing ? h('span', { class: 'badge skel-badge' }, 'Checking…') : h('span', { class: 'badge' }, 'Unknown');

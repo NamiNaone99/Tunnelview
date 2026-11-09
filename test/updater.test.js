@@ -9,6 +9,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+const { PassThrough, Writable } = require('stream');
 const U = require('../src/main/updater');
 const F = require('./support/update-fixtures');
 
@@ -387,8 +388,114 @@ test('dispose aborts a running download and leaves no .partial', async () => {
   t.u.dispose();
   const r = await p;
   assert.equal(r.ok, false);
+  assert.equal(r.code, 'BUSY', 'a quit, not a disk or network failure');
   await F.settle();
   assert.deepEqual(fs.readdirSync(path.join(t.updates, '0.4.0')), []);
+});
+
+/* ------------------------------------------------------------------ SEC-5: what ends a download */
+
+const CDN = `https://objects.githubusercontent.com/github-production-release-asset/2/${WIN_NAME}?sig=y`;
+// 200 KiB: big enough that the stall watchdog asks for STALL_MIN_BYTES per window.
+const BIG = F.makeRelease('0.4.0', { 'win32-x64': Buffer.alloc(200 * 1024, 7) });
+const BIG_MANIFEST = F.signedManifest(KEY, BIG);
+
+test('download: a connection reset in the middle of the body is NETWORK, not DISK_ERROR; a full disk still is', async () => {
+  const body = new PassThrough();
+  const t = make({ github: { over: { [CDN]: { status: 200, stream: body } } } });
+  await t.u.check();
+  const p = t.u.download();
+  await F.settle();
+  body.write(REL.assets[WIN_NAME].subarray(0, 50));
+  await F.settle();
+  body.destroy(Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }));
+  const r = await p;
+  assert.deepEqual(r, { ok: false, code: 'NETWORK', message: U.MESSAGES.NETWORK });
+  assert.equal(t.u.getState().status, 'error');
+  assert.deepEqual(fs.readdirSync(path.join(t.updates, '0.4.0')), [], 'no .partial left');
+
+  // The connection closed before the end of the body (no error of its own): the network's too.
+  const cut = new PassThrough();
+  const c = make({ github: { over: { [CDN]: { status: 200, stream: cut } } } });
+  await c.u.check();
+  const pc = c.u.download();
+  await F.settle();
+  cut.write(REL.assets[WIN_NAME].subarray(0, 50));
+  await F.settle();
+  cut.destroy();
+  assert.equal((await pc).code, 'NETWORK');
+
+  // The file itself cannot be written: that one is the disk's (also once the whole body was read).
+  const full = Object.assign(Object.create(fs), {
+    createWriteStream: () => new Writable({ write(_c, _e, cb) { cb(Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' })); } }),
+  });
+  const d = make({ deps: { fs: full } });
+  await d.u.check();
+  const r2 = await d.u.download();
+  assert.deepEqual(r2, { ok: false, code: 'DISK_ERROR', message: U.MESSAGES.DISK_ERROR });
+});
+
+test('download: a stalled download (less than 64 KiB a minute) ends with TIMEOUT; a steady one goes on', async () => {
+  const clock = F.fakeClock();
+  const body = new PassThrough();
+  const t = make({ github: { release: BIG, manifest: BIG_MANIFEST, over: { [CDN]: { status: 200, stream: body } } }, deps: { now: clock.now, timers: clock.timers } });
+  await t.u.check();
+  const p = t.u.download();
+  await F.settle();
+  assert.deepEqual(clock.pending(), [U.STALL_WINDOW_MS], 'the watchdog runs from the first request on');
+  body.write(Buffer.alloc(U.STALL_MIN_BYTES, 7)); // a good first minute
+  await F.settle();
+  await clock.advance(U.STALL_WINDOW_MS);
+  assert.equal(t.u.getState().status, 'downloading', 'enough bytes: goes on');
+  assert.deepEqual(clock.pending(), [U.STALL_WINDOW_MS]);
+  body.write(Buffer.alloc(1024, 7)); // then a trickle
+  await F.settle();
+  await clock.advance(U.STALL_WINDOW_MS);
+  const r = await p;
+  assert.deepEqual(r, { ok: false, code: 'TIMEOUT', message: U.MESSAGES.TIMEOUT });
+  assert.equal(t.u.getState().status, 'error');
+  assert.equal(t.u.getState().latest.version, '0.4.0', 'still offered: Download again');
+  assert.deepEqual(fs.readdirSync(path.join(t.updates, '0.4.0')), [], 'no .partial left');
+  assert.deepEqual(clock.pending(), [], 'the watchdog is gone with the download');
+  assert.equal(U.STALL_WINDOW_MS, 60 * 1000);
+  assert.equal(U.STALL_MIN_BYTES, 64 * 1024);
+
+  // The last bytes of a file may be fewer than 64 KiB: the rest of the file is enough then.
+  const tail = new PassThrough();
+  const small = make({ github: { over: { [CDN]: { status: 200, stream: tail } } }, deps: { now: clock.now, timers: clock.timers } });
+  await small.u.check();
+  const q = small.u.download();
+  await F.settle();
+  tail.end(REL.assets[WIN_NAME]);
+  assert.deepEqual(await q, { ok: true });
+});
+
+test('cancelDownload: the user\'s Cancel ends a download quietly (back to "available"); nothing to cancel otherwise', async () => {
+  let first = true;
+  const t = make({
+    github: { over: { [CDN]: () => { if (first) { first = false; return { status: 200, hang: true }; } return { status: 200, body: REL.assets[WIN_NAME] }; } } },
+  });
+  assert.deepEqual(t.u.cancelDownload(), { ok: false, code: 'NOT_DOWNLOADING', message: U.MESSAGES.NOT_DOWNLOADING });
+  await t.u.check();
+  t.states.length = 0;
+  const p = t.u.download();
+  await F.settle();
+  assert.equal(t.u.getState().status, 'downloading');
+  assert.deepEqual(t.u.cancelDownload(), { ok: true });
+  const r = await p;
+  assert.deepEqual(r, { ok: false, code: 'CANCELLED', message: 'Download cancelled.' });
+  const s = t.u.getState();
+  assert.equal(s.status, 'available', 'not an error');
+  assert.equal(s.error, null);
+  assert.equal(s.progress, null);
+  assert.equal(s.downloaded, false);
+  assert.ok(!t.states.some((x) => x.status === 'error'));
+  assert.deepEqual(fs.readdirSync(path.join(t.updates, '0.4.0')), [], 'no .partial left');
+  assert.deepEqual(t.u.cancelDownload().code, 'NOT_DOWNLOADING');
+  // Download again: works.
+  assert.deepEqual(await t.u.download(), { ok: true });
+  assert.equal(t.u.getState().status, 'ready');
+  assert.equal(t.u.cancelDownload().code, 'NOT_DOWNLOADING', 'a finished download cannot be cancelled');
 });
 
 /* ================================================================== schedule (U3) */
@@ -593,20 +700,72 @@ test('check: the same version re-signed with other bytes (a rebuilt release) dro
 
 test('schedule: while a download runs the automatic check waits', async () => {
   const clock = F.fakeClock();
+  const body = new PassThrough();
   const t = make({
-    github: { over: { [`https://objects.githubusercontent.com/github-production-release-asset/2/${WIN_NAME}?sig=y`]: { status: 200, hang: true } } },
+    github: { release: BIG, manifest: BIG_MANIFEST, over: { [CDN]: { status: 200, stream: body } } },
     deps: { now: clock.now, timers: clock.timers },
   });
   await t.u.check();
+  // The daily check falls due during the download (at the first-check delay, 60 s after start).
+  t.settings.data.lastUpdateCheckAt = clock.now() - DAY + 30 * 1000;
   t.u.start();
   const dl = t.u.download();
   await F.settle();
+  body.write(Buffer.alloc(U.STALL_MIN_BYTES, 7)); // a steady download: the stall watchdog lets it go on
+  await F.settle();
   const n = t.transport.requests.length;
-  await clock.advance(DAY);
+  await clock.advance(60 * 1000);
   assert.equal(t.transport.requests.length, n, 'no check during the download');
-  assert.deepEqual(clock.pending(), [30 * 60 * 1000]);
+  assert.equal(t.u.getState().status, 'downloading');
+  assert.deepEqual(clock.pending(), [U.STALL_WINDOW_MS, 30 * 60 * 1000], 'the watchdog, and the check 30 min later');
   t.u.dispose();
-  await dl;
+  assert.equal((await dl).code, 'BUSY');
+  assert.deepEqual(clock.pending(), []);
+});
+
+test('schedule: after a restart with a verified download waiting, the first check runs 60 s after start and finds it (WINFLOW-2)', async () => {
+  const first = make();
+  await first.u.check();
+  assert.deepEqual(await first.u.download(), { ok: true });
+  const clock = F.fakeClock();
+  // Checked 2 h ago: without the waiting download this start would wait 22 h (U3).
+  const again = make({ userData: first.userData, settings: F.fakeSettings({ lastUpdateCheckAt: clock.now() - 2 * HOUR }), deps: { now: clock.now, timers: clock.timers } });
+  again.u.init();
+  again.u.start();
+  assert.deepEqual(clock.pending(), [60000]);
+  await clock.advance(60000);
+  for (let i = 0; i < 50 && again.u.getState().status !== 'ready'; i++) await F.settle();
+  const s = again.u.getState();
+  assert.equal(s.status, 'ready', 'Restart and install is back');
+  assert.equal(s.downloaded, true);
+  assert.ok(!again.transport.requests.some((r) => r.url.includes(WIN_NAME)), 'not downloaded again');
+  assert.deepEqual(clock.pending(), [DAY], 'then the daily rhythm again');
+  again.u.dispose();
+
+  // No waiting download (or only a .partial): the rest of the day, as before.
+  for (const leave of [null, `${WIN_NAME}.partial`]) {
+    const userData = F.tmpDir();
+    if (leave) {
+      fs.mkdirSync(path.join(userData, 'updates', '0.4.0'), { recursive: true });
+      fs.writeFileSync(path.join(userData, 'updates', '0.4.0', leave), 'half');
+    }
+    const c = F.fakeClock();
+    const plain = make({ userData, settings: F.fakeSettings({ lastUpdateCheckAt: c.now() - 2 * HOUR }), deps: { now: c.now, timers: c.timers } });
+    plain.u.init();
+    plain.u.start();
+    assert.deepEqual(c.pending(), [22 * HOUR], String(leave));
+    plain.u.dispose();
+  }
+  // A download of the version that already runs does not count either.
+  const userData = F.tmpDir();
+  fs.mkdirSync(path.join(userData, 'updates', '0.3.0'), { recursive: true });
+  fs.writeFileSync(path.join(userData, 'updates', '0.3.0', 'Tunnelview-Setup-0.3.0-x64.exe'), 'x');
+  const c = F.fakeClock();
+  const same = make({ userData, settings: F.fakeSettings({ lastUpdateCheckAt: c.now() - 2 * HOUR }), deps: { now: c.now, timers: c.timers } });
+  same.u.init();
+  same.u.start();
+  assert.deepEqual(c.pending(), [22 * HOUR]);
+  same.u.dispose();
 });
 
 /* ================================================================== session gate */

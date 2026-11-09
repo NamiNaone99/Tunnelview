@@ -119,7 +119,9 @@ and this document disagree, fix the code (or update this document deliberately).
       after start, and none within 24 h of the last one. A check that failed because of the network
       or GitHub (no answer, 429, 5xx) is retried after 2 h, then 4, 8 and 16 h, then once a day;
       any other failure counts as that day's check. It also runs whenever the user clicks
-      *Check now* or *Download*.
+      *Check now* or *Download*. One exception to the 24 h rule: when a verified download is
+      waiting to be installed at start, the first check comes 60 s after start anyway (one extra
+      check per restart, only then), so *Restart and install* comes back without the user's click.
     - **What it sends.** Nothing about the user, this computer or the tailnet: no cookies, no
       credentials, no query string. The only headers are
       `User-Agent: Tunnelview-Updater/<version>` and `Accept: application/octet-stream`. GitHub
@@ -165,7 +167,8 @@ src/main/
   settings.js               JSON settings store (userData/settings.json)
   tailscale.js              CLI discovery, status, whois, IP validation, watcher
   auth.js                   scrypt password hashing, challenge/response
-  identity.js               this computer's Ed25519 identity key (userData/identity.json; main only)
+  identity.js               this computer's Ed25519 identity key (identity.json in %LOCALAPPDATA%\Tunnelview
+                            on Windows, userData on macOS; main only)
   pairing.js                pure functions: hello.ident bytes, pair proofs, pairing links, fingerprints
   qr.js                     QR symbol of a pairing link → {size, bits} for the main window
   vendor/qrcodegen.js       Project Nayuki QR Code generator v1.8.0 (MIT), hand-ported to CommonJS (types removed)
@@ -247,8 +250,10 @@ A machine may run several outgoing viewer sessions.
 - HTTP `GET /tunnelview/v1/info` on the same port (same IP + whois checks and the same `allowFrom`
   policy, refused with 403, because it reveals whether a host is unattended or busy; no Origin
   required since it carries nothing secret) → `200 application/json`:
-  `{ app:'Tunnelview', protocol:2, version, hostname, os:'windows'|'macos', passwordSet, acceptMode, busy, features? }`.
+  `{ app:'Tunnelview', protocol:2, version, hostname, os:'windows'|'macos', passwordSet, acceptMode, busy, updating, features? }`.
   `busy` is true while a session is active, a prompt is pending, or the host installs an update.
+  `updating` (0.3+) is true only in that last case (always with `busy`), so the device grid shows
+  "Updating" instead of "Busy". Older hosts omit it; readers treat anything but `true` as false.
   `features` (`PROTOCOL.INFO_FEATURES`) is `['ident-v1', 'pair-v1']` while this computer's identity key
   is usable and `[]` while it is unavailable; a host without an identity module omits it.
   Everything else → 404.
@@ -289,7 +294,7 @@ Messages:
 | `pending` | H→V | — (waiting for host user) |
 | `auth-failed` | H→V | `remaining:int` (attempts left on this connection) |
 | `accepted` | H→V | `sessionId, permissions:{control,clipboard,files,audio}, via:'password'|'prompt'|'trusted'|'same-user'|'self'` |
-| `denied` | H→V | `reason: 'rejected'|'timeout'|'busy'|'not-allowed'|'bad-password'|'password-required'|'locked'|'protocol'|'disabled'|'auth-timeout'|'suspended'|'try-later'`, plus `retryAfterSec:int 1..3600` with `try-later` only; then close 4000 |
+| `denied` | H→V | `reason: 'rejected'|'timeout'|'busy'|'not-allowed'|'bad-password'|'password-required'|'locked'|'protocol'|'disabled'|'auth-timeout'|'suspended'|'try-later'`, plus `retryAfterSec:int 1..3600` with `try-later` only and `updating:true` with `busy` only (the host is installing an update); then close 4000 |
 | `sdp` | both | `description:{type:'offer'|'answer', sdp}` |
 | `ice` | both | `candidate:{candidate, sdpMid, sdpMLineIndex, usernameFragment}` or `null` (end) |
 | `permissions` | H→V | `permissions:{control,clipboard,files,audio}` (host user changed them) |
@@ -311,6 +316,11 @@ Messages:
   - `suspended`: password sign-in is paused host-wide (Limits below).
   - `try-later`: the prompt back-off or the prompt rate limit is running for this device;
     `retryAfterSec` (1..3600) says when a new request can show a prompt.
+  - `busy`: a session is active or a request is waiting there, or the host installs an update
+    (on Windows that includes the UAC prompt, which may stay open for long). In the update case
+    the frame also carries `updating:true` (request, auth and accept gates alike), and a 0.3+
+    viewer closes with `host-updating` ("… is updating") instead of `denied:busy`. The reason
+    stays `busy` on the wire: older viewers and the phone app keep working and ignore the field.
 - `bye` from the viewer: the host reports the viewer's reason as the session-end reason when it
   is `non-tailnet-path`, `media-timeout`, `media-failed` or `network`. Any other reason becomes
   `viewer-ended`.
@@ -530,7 +540,8 @@ shapes that other modules depend on are listed here as well.
 | `security:retry-identity` | `retryIdentity()` | loads `identity.json` again → identity info; cancels a live offer when the key changed. Never makes a new key once a key file existed in this run (both files gone → `error:'MISSING'`; Reset identity… makes one) |
 | `update:get-state` | `getUpdateState()` | → `UpdateState` (below) |
 | `update:check` | `checkForUpdates()` | checks GitHub now and resolves with the `UpdateState` after the check. Always allowed: during sessions and with `autoUpdateCheck` off |
-| `update:download` | `downloadUpdate()` | → `UpdateResult` once the file is verified or the download failed; progress arrives through `update:state` |
+| `update:download` | `downloadUpdate()` | → `UpdateResult` once the file is verified or the download failed; progress arrives through `update:state`. The user's Cancel ends it with `CANCELLED` and the state back at `available` (no error) |
+| `update:cancel` | `cancelUpdate()` | the user's **Cancel download** → `UpdateResult`: `{ok:true}` (the running `update:download` then answers `CANCELLED`, the partial file is deleted) \| `NOT_DOWNLOADING` when no download runs |
 | `update:install` | `installUpdate()` | → `UpdateResult`; only from the user's click. Refused with the `blocked` code during an incoming session, a pending incoming request or an outgoing session. While it runs (`updater.isInstalling()`, the UAC prompt included) no session starts in either direction (§7 `updater.js`, *Sessions while installing*). Windows resolves after the UAC answer (`{ok:true}` = Tunnelview quits now; `UAC_DECLINED`); macOS resolves `{ok:true}` once the swap helper runs, then quits and reopens updated |
 | `update:set-auto` | `setAutoUpdateCheck(enabled)` | → `UpdateResult`: `BAD_REQUEST` 'Invalid value.' for a non-boolean; `SETTINGS_LOCKED` 'Disconnect the remote session to change security settings.' while an incoming session is active and the value would change |
 | `update:reveal` | `revealUpdate()` | shows the downloaded file in Explorer / Finder → `UpdateResult`; `NOT_READY` when there is none |
@@ -541,12 +552,13 @@ shapes that other modules depend on are listed here as well.
   Firewall rule that blocks Tunnelview.
 - `PeerInfo.probe: null|'ok'|'not-allowed'|'refused'|'timeout'|'incompatible'|'error'` is the result of the
   last `/tunnelview/v1/info` probe (`null` = not probed). `PeerInfo.tunnelview.port` is the port the
-  device answered on. `connect` uses it when the user typed no port.
+  device answered on. `connect` uses it when the user typed no port. `PeerInfo.tunnelview.updating`
+  is true only with `busy` when `/info` said `updating:true` (the grid's "Updating" badge, §4).
 - `recent` entries may carry `port` (§8).
 - **`update:*`** (§7 `updater.js`) answer only the main window. Any other sender (viewer, panel,
   prompt, an unregistered frame) gets the invoke rejected with `Error('Forbidden')`. Without an
-  updater, download / install / reveal return `{ok:false, code:'NOT_SUPPORTED', message}` and
-  get-state / check return `status:'idle'`.
+  updater, download / install / cancel / reveal return `{ok:false, code:'NOT_SUPPORTED', message}`
+  and get-state / check return `status:'idle'`.
 - `UpdateState` always has every key and is rebuilt field by field (`ipc.sanitizeUpdateState`):
   ```
   { status: 'idle'|'checking'|'up-to-date'|'available'|'downloading'|'ready'|'installing'|'error',
@@ -555,7 +567,12 @@ shapes that other modules depend on are listed here as well.
     supported: bool,          // can install by itself: packaged, and Windows x64/arm64 installed
                               //   by the NSIS installer (resources\elevate.exe and
                               //   "Uninstall Tunnelview.exe" next to the exe) with its updates
-                              //   folder on a local disk, or macOS
+                              //   folder on a local disk, or macOS run from a Tunnelview.app
+    installBlocked: null|{code, message},                            // macOS: where this copy runs,
+                              //   it cannot replace itself (TRANSLOCATED, READ_ONLY_LOCATION,
+                              //   NOT_WRITABLE, SHARED_LOCATION, NOT_OWNER: install() would refuse
+                              //   the same way). The download stays offered ("Download", then
+                              //   "Show in Finder" as the main button) to install by hand
     autoCheck: bool,          // settings.autoUpdateCheck
     lastCheckAt: number|null, // ms epoch of the last completed check
     latest: null|{version:'X.Y.Z', date:'YYYY-MM-DDTHH:MM:SS.sssZ', notes, size},
@@ -571,10 +588,12 @@ shapes that other modules depend on are listed here as well.
   `latest` and `downloaded`, so Download or Install can still be offered.
 - `UpdateResult` = `{ok:true}` | `{ok:false, code, message}` (`ipc.sanitizeUpdateResult`; an
   unknown failure becomes `UNKNOWN` 'The update failed.'). Refusals (`BUSY`, `NOT_READY`,
-  `NOT_AVAILABLE`, `NOT_SUPPORTED` and the session codes) leave the state as it is, also when
-  they come up only during an install (a session that started while the installer was verified,
-  Tunnelview quitting): the state goes back to `ready`. Failures set
-  `status:'error'`. The codes and their English messages are in §7 `updater.js`.
+  `NOT_AVAILABLE`, `NOT_SUPPORTED`, `NOT_DOWNLOADING`, `IN_USE_BY_OTHER_USER` and the session
+  codes) leave the state as it is, also when they come up only during an install (a session that
+  started while the installer was verified, Tunnelview quitting, Tunnelview open in another macOS
+  account): the state goes back to `ready`. `CANCELLED` (the user's Cancel) puts it back to
+  `available` with no error. Failures set `status:'error'`. The codes and their English messages
+  are in §7 `updater.js`.
 
 **Session panel** (`preload/panel.js` → `window.tunnelviewPanel`)
 
@@ -749,7 +768,8 @@ Admission policy (order, reasons and numbers in §4):
 
 ### `identity.js`
 ```js
-const identity = createIdentity({ file: path.join(userData, 'identity.json') });
+const identity = createIdentity({ file: identityFileFor() });  // index.js: %LOCALAPPDATA%\Tunnelview\identity.json
+                                 //   on Windows (never the roaming profile), userData/identity.json on macOS
 identity.load()                  // → {ok, error}; never throws. Load order: identity.json → identity.json.bak →
                                  //   (neither file exists, and none did earlier in this run) generate + write
                                  //   both → else unavailable
@@ -766,8 +786,16 @@ Only Reset identity… makes a new key once a key file has existed: a damaged or
 leaves the key unavailable (phones hear "can't prove its identity", not "pair again") until Retry
 or Reset identity…. No key file is ever deleted or written over: a damaged or differing
 `identity.json`, `.bak` or `.old` that has to make room is renamed to `<name>.corrupt-<ms>`
-(unusable) or `<name>.prev-<ms>` (another valid key) first. These files stay in userData until
-the user removes them. The private key never leaves this module.
+(unusable) or `<name>.prev-<ms>` (another valid key) first. These files stay in the identity
+folder until the user removes them. The private key never leaves this module.
+
+The identity folder is per computer on purpose. A roaming profile (`%APPDATA%`, the Windows
+`userData`) is synced to every computer the user signs in to: they would all share one key, and a
+Reset identity… on one would silently replace the others' key at the next sync. So Windows keeps
+it in `%LOCALAPPDATA%\Tunnelview` (also for unpackaged development runs; `%LOCALAPPDATA%` that is
+not an absolute path falls back to `<home>\AppData\Local`). Settings › Security names the folder
+in the "can't prove its identity" banner, so the user can restore `identity.json` or
+`identity.json.bak` and click Retry.
 
 ### `pairing.js` / `qr.js`
 `pairing.js` holds pure functions shared by host-server and the phone's test vectors
@@ -789,10 +817,13 @@ Viewer phases: `connecting` → `hello` (host info known) → `auth-required` (p
 unless `hello.auth.autoAccept` or `hello.auth.passwordLocked`, or after `auth-failed`, with
 `remaining`) / `waiting` (pending prompt) → `accepted` (`{sessionId, permissions, host}`) →
 `closed` (`{reason, message, proofSent}`). Errors use phase `closed` with reasons
-`unreachable|not-tailnet|not-tailnet-route|not-tunnelview|timeout|protocol|rate-limited|denied:<reason>|host-ended|network|updating`
+`unreachable|not-tailnet|not-tailnet-route|not-tunnelview|timeout|protocol|rate-limited|denied:<reason>|host-updating|host-ended|network|updating`
 (and `local` when the viewer closed it itself):
 - `updating`: set by ipc.js, not the session: a reconnect while this computer installs an
   update (`updater.isInstalling()`) does not dial;
+- `host-updating`: the remote host denied `busy` with `updating:true` (§4): it installs a
+  Tunnelview update, so the viewer says "… is updating" (on Windows someone there may have to
+  answer the administrator prompt) instead of "another session is active";
 - `not-tailnet`: the target is not a device in the current `tailscale status` (below);
 - `not-tailnet-route`: the target is a tailnet device, but the socket's local address is not one
   of our own Tailscale IPs (below);
@@ -959,7 +990,8 @@ internet (Windows Mark-of-the-Web, macOS quarantine).
 ```js
 const { createUpdater } = require('./updater');
 const updater = createUpdater(deps);  // every OS dependency is injectable: transport, fs, spawn, execFile,
-                                      //   timers, now, settings, sessionBlocker, quit, showItemInFolder, keys, …
+                                      //   timers, now, settings, sessionBlocker, quit, showItemInFolder, keys,
+                                      //   systemVersion (macOS version string, or a function giving it), …
 updater.init()            // → {justUpdated}: reads updates/pending.json left by an install, removes leftovers
 updater.start()           // automatic checks (packaged builds, autoUpdateCheck on)
 updater.reschedule()      // back from sleep / screen unlock: works the next check out from the wall clock again
@@ -968,6 +1000,7 @@ updater.dispose()         // timers off; a running check / download is aborted
 updater.getState()        // → UpdateState (§6)
 updater.check()           // → Promise<UpdateState>; never throws, a failure ends in status 'error'
 updater.download()        // → Promise<UpdateResult> once the file is verified (or the download failed)
+updater.cancelDownload()  // → UpdateResult: the user's Cancel; the running download() answers CANCELLED
 updater.install()         // → Promise<UpdateResult>; {ok:true} once the installer / helper runs, then the app quits
 updater.reveal()          // → UpdateResult: show the downloaded file in Explorer / Finder
 updater.settingsChanged(keys)   // autoUpdateCheck toggled → reschedule
@@ -975,7 +1008,7 @@ updater.sessionsChanged()       // re-evaluate `blocked`; emits 'state' when it 
 updater.justUpdated       // {from, to} | null
 // events: 'state' (UpdateState) on every change
 // also exported: MANIFEST_URL, RELEASES_URL, ALLOWED_HOSTS, MESSAGES, messageFor, MAC_SWAP_SCRIPT,
-//   allowedUrl, assetUrl, platformKeyFor
+//   allowedUrl, assetUrl, platformKeyFor, osAtLeast, STALL_WINDOW_MS, STALL_MIN_BYTES
 ```
 
 **Network** (§1.10). The updater uses Node `https` with `agent:false`: no keep-alive, no shared
@@ -998,6 +1031,13 @@ proxy makes it fail with `TLS`.
   request with `BAD_REDIRECT`.
 - **Responses:**
   - 30 s socket idle timeout on both requests (`TIMEOUT`);
+  - a download must also move: at least 64 KiB (or the rest of the file) in every 60 s window
+    (`STALL_MIN_BYTES`, `STALL_WINDOW_MS`, counted from the first request), else it stops with
+    `TIMEOUT`. A trickle that keeps the socket alive cannot hold the download (and the install
+    gate with it) for hours;
+  - a download error is `DISK_ERROR` only when it starts at the file being written; a reset or
+    a connection closed before the end of the body is `NETWORK`, a stall `TIMEOUT`, the user's
+    Cancel `CANCELLED` (back to `available`, no error), a quit a `BUSY` refusal;
   - a `Content-Encoding` other than `identity` → `BAD_RESPONSE`;
   - any status other than 200 or a redirect → `HTTP_STATUS`.
 - **Headers:** exactly `User-Agent: Tunnelview-Updater/<version>` and
@@ -1072,16 +1112,24 @@ The file is deleted in each case.
 - the timers count awake time only on macOS, so `index.js` calls `reschedule()` on
   `powerMonitor` `resume` and `unlock-screen`. It works the due time out from the wall clock
   again: 60 s when the check is overdue, else the rest of the day;
+- one exception to the 24 h wait: when `init()` finds a complete download of a newer version
+  (`<version>/<name>` for this platform), the first check after that start comes 60 s after
+  start, finds the file again by its hash and offers **Restart and install**. Only that one
+  check: whatever it finds, the next one follows the daily rhythm again;
 - an automatic check that falls during a download or an install moves by 30 min;
-- while the next-start error of a failed install (`INSTALL_INCOMPLETE`, `MAC_REPLACE_FAILED`) is
-  shown, an automatic check keeps it as long as that version is still the latest (offline too).
+- while the next-start error of a failed install (`INSTALL_INCOMPLETE`, `MAC_REPLACE_FAILED`,
+  `MAC_APP_IN_USE`) is shown, an automatic check keeps it as long as that version is still the
+  latest (offline too);
+- after this Mac refused a version as `OS_TOO_OLD`, every check in that run keeps that error for
+  that version instead of offering *Restart and install* again.
 
 *Check now* is always allowed.
 
-**Storage** (`updatesDir`: `%LOCALAPPDATA%\Tunnelview\updates\` on Windows, `userData/updates/`
-on macOS; §8). On Windows `userData` is the roaming `%APPDATA%`, which a domain can redirect to a
-network share; the elevated installer must run from a local disk, so `index.js` passes the local
-folder (`<home>\AppData\Local` when `LOCALAPPDATA` is not an absolute path).
+**Storage** (`updatesDir`: `%LOCALAPPDATA%\Tunnelview\updates\` for the installed Windows app,
+`userData/updates/` on macOS and in unpackaged development runs, which never install; §8). On
+Windows `userData` is the roaming `%APPDATA%`, which a domain can redirect to a network share; the
+elevated installer must run from a local disk, so `index.js` passes the local folder
+(`<home>\AppData\Local` when `LOCALAPPDATA` is not an absolute path).
 - `<version>/<name>.partial` is renamed to `<name>` once verified (mode 0600). Only the newest
   version folder is kept. A check that finds the same version with another name, size or SHA-256
   (a rebuilt release) deletes the earlier download and offers the new one.
@@ -1092,9 +1140,12 @@ folder (`<home>\AppData\Local` when `LOCALAPPDATA` is not an absolute path).
 - `install-result` holds the macOS helper's outcome: `ok`, `timeout`, `busy`, `precondition`,
   `move-old-failed`, `move-new-failed`, `rollback-failed` or `bad-args`.
 - Next to the macOS app: `<app parent>/.Tunnelview-update-XXXXXX/Tunnelview.app` (the staged
-  bundle) and `<app parent>/.Tunnelview-old-<12 hex>.app` (the old bundle during the swap).
+  bundle) and `<app parent>/.Tunnelview-old-<12 hex>.app` (the old bundle, kept by the helper until
+  the new version's first successful start removes it).
 - At start, `init()` removes `install-*` folders, `.partial` files, extraction folders and version
-  folders that are not newer than the running version. On macOS it also removes
+  folders that are not newer than the running version. One `install-*` folder is spared: the one
+  holding a staged installer that could not be moved back (another program held it); *Show in
+  folder* shows it there. On macOS it also removes
   `.Tunnelview-update-XXXXXX` folders next to the app that belong to this user and are not
   symlinks (a crash between staging and spawn). While an install from the previous run is still
   at work (*Next start*), it keeps that install's files.
@@ -1115,7 +1166,8 @@ install starts and again right before the installer or helper is spawned. *Check
 starts until it ends (`isInstalling()`; on Windows this includes the UAC prompt, which can stay
 open for long), no new session starts, because approving the prompt quits Tunnelview at once:
 - HostServer's `busy` option denies every admission (password, trusted device, same user, prompt,
-  and a prompt accepted meanwhile) with `busy`, and `/tunnelview/v1/info` reports `busy:true`;
+  and a prompt accepted meanwhile) with `busy` plus `updating:true`, and `/tunnelview/v1/info`
+  reports `busy:true, updating:true`, so other computers say "… is updating" (§4), not "busy";
 - `index.js` `onRequest` refuses a request without showing a prompt;
 - ipc refuses `session:connect` with `UPDATING`, and a viewer reconnect closes with reason
   `updating` (§6).
@@ -1132,6 +1184,9 @@ instead of that copy. It is also false when the updates folder is a UNC path (`\
 2. It is opened with an exclusive lock (`UV_FS_O_EXLOCK`; `EBUSY` from an antivirus scan is retried
    for about 10 s, then `LOCKED`, and the download is kept for another try), and its size and
    SHA-256 are checked against the manifest again (`TAMPERED` otherwise, and the file is deleted).
+   When the file cannot be moved back after a refusal or failure (still held by that program), it
+   stays in its `install-XXXXXX\` folder and remains the download: the next `install()` moves it
+   from there and checks it again, and `reveal` shows it there.
 3. With no `await` in between, the updater checks the session gate again, writes `pending.json`,
    closes the file and spawns
    `<resources>\elevate.exe <LocalAppData>\Tunnelview\updates\install-XXXXXX\Tunnelview-Setup-<v>-<arch>.exe /S --updated --force-run`:
@@ -1156,21 +1211,38 @@ The installer's own exit code cannot be seen. The next start compares versions i
    - its `CFBundleIdentifier` is `io.github.naminaone99.tunnelview`, else `NOT_TUNNELVIEW`.
 2. **The folder next to the app:** a probe folder `<parent>/.Tunnelview-update-XXXXXX` is created
    and removed at once, which proves that this user can write the folder. `EROFS` gives
-   `READ_ONLY_LOCATION`, any other error `NOT_WRITABLE`. The bundle must belong to this user, else
-   `NOT_OWNER`. For `TRANSLOCATED`, `READ_ONLY_LOCATION`, `NOT_WRITABLE` and `NOT_OWNER` the zip is
-   shown in Finder, so that it can be installed by hand. The real staging folder is made only in
-   step 6, so a failure before it leaves nothing next to the app.
+   `READ_ONLY_LOCATION`, any other error `NOT_WRITABLE`. A folder other accounts can write
+   (world-writable, such as `/Users/Shared`; an unreadable mode counts too) is `SHARED_LOCATION`:
+   once the helper has moved the bundle aside, another account could put its own `Tunnelview.app`
+   at that path, even with the sticky bit. Only the folder's owner can change its mode, so this
+   cannot be raced. The bundle must belong to this user, else `NOT_OWNER`. For `TRANSLOCATED`,
+   `READ_ONLY_LOCATION`, `NOT_WRITABLE`, `SHARED_LOCATION` and `NOT_OWNER` the zip is shown in
+   Finder, so that it can be installed by hand. The same location checks run without any tool for
+   `UpdateState.installBlocked` (§6), so the window says so before the click. The real staging
+   folder is made only in step 6, so a failure before it leaves nothing next to the app.
 3. The zip is hashed against the manifest again, else `TAMPERED`.
 4. `ditto -x -k --noqtn <zip> updates/<v>/x-XXXXXX` extracts it (`EXTRACT_FAILED`; the zip is
    kept, since this is usually a full disk). The result must be exactly one real directory,
    `Tunnelview.app` (`BAD_BUNDLE`).
-5. **Bundle checks**, after which a failure deletes the zip:
+5. **Bundle checks.** A failure keeps the zip: it matched its signed hash in step 3, so
+   downloading the same bytes again cannot help. These codes share one message, "did not pass the
+   macOS checks … Get the new version from the GitHub releases page":
    - `plutil` reads `CFBundleIdentifier` (`BAD_BUNDLE`), `CFBundleShortVersionString`, which must be
      the manifest version (`WRONG_VERSION`), and `CFBundleExecutable` = `Tunnelview`
      (`BAD_BUNDLE`);
+   - `LSMinimumSystemVersion`, when the bundle has one, must not be newer than this Mac's macOS
+     (`systemVersion`, `osAtLeast`; an unreadable version refuses), else `OS_TOO_OLD`: a bundle
+     macOS refuses to open must never replace one that works. The refused version is remembered
+     for this run, so checks keep saying so instead of offering it again;
    - the executable's Mach-O header must contain this platform's CPU type (`WRONG_ARCH`);
    - `codesign --verify --deep --strict --verbose=2` must pass (`CODESIGN_FAILED`);
-   - the quarantine attribute is removed and must then be absent (`QUARANTINED`).
+   - the quarantine attribute is removed and must then be absent (`QUARANTINED`);
+   - a `plutil` or `codesign` stopped by its time limit (a slow disk) proves nothing about the
+     bundle: `VERIFY_TIMEOUT` (try again);
+   - no process of **another** user account runs from inside the bundle (`/bin/ps -axo uid=,comm=`,
+     fast user switching), else the refusal `IN_USE_BY_OTHER_USER`: this copy does not quit for a
+     swap the helper would only refuse (`busy`). A `ps` that fails proves nothing; the helper's own
+     check stays the backstop.
 6. The staging folder `<parent>/.Tunnelview-update-XXXXXX` is created and the bundle moves into
    it, on the same volume as the app, so the swap is two renames. Across volumes (`EXDEV`) it is
    copied with `ditto` and checked with `codesign` again; a failure of either is `NOT_WRITABLE`.
@@ -1189,13 +1261,16 @@ The installer's own exit code cannot be seen. The next start compares versions i
      nothing is a symlink.
    - It moves the old bundle to `.Tunnelview-old-<12 hex>.app` and the new one into place. If that
      fails, it moves the old one back.
-   - It deletes the old bundle and runs `tccutil reset` for ScreenCapture, Accessibility and
-     SystemPolicyDownloadsFolder. Each build has a new ad-hoc code identity, as with
-     `scripts/mac-install.sh`.
+   - It keeps the old bundle (the new version deletes it on its first successful start, *Next
+     start*), so a new bundle that never launches leaves a working copy next to it. It runs
+     `tccutil reset` for ScreenCapture, Accessibility and SystemPolicyDownloadsFolder. Each build
+     has a new ad-hoc code identity, as with `scripts/mac-install.sh`.
    - It writes `ok` and opens the app.
    - After a failed precondition or move, it writes the failure word and opens the app at its path
      again (the old bundle, moved back if needed). After `timeout` or `bad-args` it only writes the
      word.
+   - It opens the app only when this account owns the bundle at that path (`reopen`:
+     `/usr/bin/stat -f %u` = `/usr/bin/id -u`), never a bundle another account put there.
 
 **Next start** (`init()`). The updater reads `pending.json` and `install-result`, then deletes
 both.
@@ -1204,14 +1279,19 @@ both.
   start decides. On Windows that is a `pending.json` younger than 15 min whose staged installer
   is still locked by the running installer; on macOS a `pending.json` younger than 150 s with no
   `install-result` yet (the helper waits up to 120 s for Tunnelview to quit).
-- **Running version ≥ `to`:** `justUpdated = {from, to}`. On macOS (`justUpdated` with
-  `platform:'macos'`) the main window shows the re-grant banner, and `index.js` registers the
-  login item again (below).
-- **Otherwise:** `status:'error'` with `INSTALL_INCOMPLETE`, or `MAC_REPLACE_FAILED` when the
-  helper wrote `precondition`, `move-old-failed` or `move-new-failed`. The download is kept (on
-  Windows the staged installer is moved back) for another try or `reveal`.
+- **Running version ≥ `to`:** `justUpdated = {from, to}`, where `to` is the version that runs
+  (its X.Y.Z), not the marker's target: a newer version installed by hand before this start is
+  reported as itself. On macOS (`justUpdated` with `platform:'macos'`) the main window shows the
+  re-grant banner, and `index.js` registers the login item again (below).
+- **Otherwise:** `status:'error'` with `INSTALL_INCOMPLETE`; `MAC_REPLACE_FAILED` when the
+  helper wrote `precondition`, `move-old-failed` or `move-new-failed` (its message says to allow
+  App Management, then click *Check now* and install again: the error state has no install
+  button until a check finds the kept download); `MAC_APP_IN_USE` when it wrote `busy` (Tunnelview
+  was still open, possibly in another account). The download is kept (on Windows the staged
+  installer is moved back; one that cannot be moved stays in its `install-*` folder) for another
+  try or `reveal`.
 - **macOS leftovers** are removed at the paths recorded in `pending.json`: the staging folder
-  always, the old bundle only after a success. A hard crash between staging and spawn can leave a
+  always, the old bundle (kept by the helper) only after a success. A hard crash between staging and spawn can leave a
   hidden `.Tunnelview-update-XXXXXX` folder next to the app; the sweep in *Storage* removes it at
   the next start.
 
@@ -1219,11 +1299,11 @@ both.
 
 | Group | Codes |
 |---|---|
-| checking / downloading | `NETWORK`, `TIMEOUT`, `TLS`, `HTTP_STATUS`, `NO_MANIFEST`, `BAD_REDIRECT`, `BAD_RESPONSE`, `MANIFEST_TOO_LARGE`, `MANIFEST_MALFORMED`, `MANIFEST_UNKNOWN_KEY`, `MANIFEST_BAD_SIGNATURE`, `MANIFEST_INVALID`, `SIZE_MISMATCH`, `HASH_MISMATCH`, `DISK_ERROR` |
-| refusals (state unchanged) | `INCOMING_SESSION`, `INCOMING_REQUEST`, `OUTGOING_SESSION`, `SESSION_ACTIVE`, `NOT_SUPPORTED`, `NOT_AVAILABLE`, `NOT_READY`, `BUSY` |
+| checking / downloading | `NETWORK`, `TIMEOUT`, `TLS`, `HTTP_STATUS`, `NO_MANIFEST`, `BAD_REDIRECT`, `BAD_RESPONSE`, `MANIFEST_TOO_LARGE`, `MANIFEST_MALFORMED`, `MANIFEST_UNKNOWN_KEY`, `MANIFEST_BAD_SIGNATURE`, `MANIFEST_INVALID`, `SIZE_MISMATCH`, `HASH_MISMATCH`, `DISK_ERROR`, `CANCELLED` (the user's Cancel: state back to `available`) |
+| refusals (state unchanged) | `INCOMING_SESSION`, `INCOMING_REQUEST`, `OUTGOING_SESSION`, `SESSION_ACTIVE`, `NOT_SUPPORTED`, `NOT_AVAILABLE`, `NOT_READY`, `BUSY`, `NOT_DOWNLOADING`, `IN_USE_BY_OTHER_USER` |
 | Windows install | `UAC_DECLINED`, `LAUNCH_FAILED`, `TAMPERED`, `LOCKED` |
-| macOS install | `TRANSLOCATED`, `READ_ONLY_LOCATION`, `NOT_WRITABLE`, `NOT_OWNER`, `NOT_TUNNELVIEW`, `EXTRACT_FAILED`, `BAD_BUNDLE`, `WRONG_VERSION`, `WRONG_ARCH`, `CODESIGN_FAILED`, `QUARANTINED`, `SPAWN_FAILED` |
-| next start | `INSTALL_INCOMPLETE`, `MAC_REPLACE_FAILED` |
+| macOS install | `TRANSLOCATED`, `READ_ONLY_LOCATION`, `NOT_WRITABLE`, `NOT_OWNER`, `SHARED_LOCATION`, `NOT_TUNNELVIEW`, `EXTRACT_FAILED`, `BAD_BUNDLE`, `WRONG_VERSION`, `WRONG_ARCH`, `CODESIGN_FAILED`, `QUARANTINED`, `VERIFY_TIMEOUT`, `OS_TOO_OLD`, `SPAWN_FAILED` |
+| next start | `INSTALL_INCOMPLETE`, `MAC_REPLACE_FAILED`, `MAC_APP_IN_USE` |
 
 The IPC layer adds `BAD_REQUEST`, `SETTINGS_LOCKED` and `UNKNOWN` (§6).
 
@@ -1291,8 +1371,9 @@ installed that release stay exposed.
   `%LOCALAPPDATA%\Tunnelview`. The tests use fakes.
 
 ### `index.js` (lifecycle and wiring)
-- After `app` is ready and before HostServer is built, main loads `userData/identity.json`
-  (`identity.js`) and passes it to HostServer and ipc. Only the state and the fingerprint are
+- After `app` is ready and before HostServer is built, main loads `identity.json`
+  (`identityFileFor()`: `%LOCALAPPDATA%\Tunnelview` on Windows, `userData` on macOS; `identity.js`)
+  and passes it to HostServer and ipc. Only the state and the fingerprint are
   logged, never key bytes. HostServer's `'pairing'` events go to the main window as
   `pairing:status` (`ipc.sanitizePairingEvent`); an incoming session start withdraws a live
   pairing offer, and so does the main window's page going without the dialog's own cancel
@@ -1338,8 +1419,11 @@ installed that release stay exposed.
     `start()` runs after the login item.
   - **State.** Its `'state'` events go to the main window as `update:state`
     (`ipc.sanitizeUpdateState`). Every coalesced state push calls `updater.sessionsChanged()`.
-  - **Where it stores.** `updatesDir`: `%LOCALAPPDATA%\Tunnelview\updates` on Windows (not the
-    roaming `userData`), `userData/updates` on macOS.
+  - **Where it stores.** `updatesDir`: `%LOCALAPPDATA%\Tunnelview\updates` for the packaged
+    Windows app (not the roaming `userData`), `userData/updates` on macOS and in unpackaged
+    development runs (`updatesDirFor()`).
+  - **macOS version.** `systemVersion` is `process.getSystemVersion()` on macOS (`''` elsewhere),
+    for the `LSMinimumSystemVersion` check (`OS_TOO_OLD`).
   - **Session gate.** `updateBlocker()` returns `INCOMING_SESSION` while a host session is active,
     `INCOMING_REQUEST` while a prompt is pending, and `OUTGOING_SESSION` while any viewer window is
     not `closed`. The other direction, `updateInstalling()` (`updater.isInstalling()`), is
@@ -1401,8 +1485,10 @@ installed that release stay exposed.
 keys dropped, wrong types → keep old), persists, emits `'change'`. The renderer never sees
 `password` — only `passwordSet: bool`.
 
-This computer's identity key is **not** a setting: it lives in `userData/identity.json` (plus
-`identity.json.bak`, and `identity.json.old` after a reset), written atomically with mode 0600 by
+This computer's identity key is **not** a setting: it lives in `identity.json` (plus
+`identity.json.bak`, and `identity.json.old` after a reset) in `%LOCALAPPDATA%\Tunnelview` on
+Windows (per computer, never the roaming `userData`; §7 `identity.js`) and in `userData` on
+macOS, written atomically with mode 0600 by
 `identity.js` and read only by main. A damaged or replaced key file is kept beside them as
 `identity.json[.bak|.old].corrupt-<ms>` or `.prev-<ms>` (§7 `identity.js`). A `.prev-<ms>` file
 is a working private key, and a `.corrupt-<ms>` one may hold most of one. Tunnelview never deletes
@@ -1410,7 +1496,7 @@ them; removing them only gives up the chance to restore one of those keys by han
 renderer: the main window gets only the fingerprint and, while a pairing dialog is open, the link
 (public key + that offer's token).
 
-**`userData/updates/`** (on Windows `%LOCALAPPDATA%\Tunnelview\updates\`, outside `userData`;
+**`userData/updates/`** (for the installed Windows app `%LOCALAPPDATA%\Tunnelview\updates\`, outside `userData`;
 uninstalling Tunnelview may leave it, as it leaves `userData`) belongs to the updater (§7 `updater.js`, *Storage*).
 It holds the following, and nothing in it is a setting or is read by a renderer:
 - `<version>/<name>.partial` and then `<name>`: the verified download of the newest release only;

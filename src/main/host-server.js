@@ -921,6 +921,8 @@ class HostServer extends EventEmitter {
       passwordSet: !!s.password,
       acceptMode: s.acceptMode,
       busy: !!(this._session || this._pending || this._updating()),
+      // Why busy, when it is an update being installed (old viewers ignore it and show "busy").
+      updating: this._updating(),
       enabled: s.hostEnabled, // extra (not in the contract): lets the UI say "incoming disabled"
     };
     // Signed hellos and pairing work only while the key can be used. A phone reads [] as "this
@@ -1275,7 +1277,7 @@ class HostServer extends EventEmitter {
     // blocks only requests that need a prompt themselves (_startPrompt); password, trusted and
     // same-user admissions withdraw it (_accept), so unanswered prompts from strangers cannot keep
     // trusted devices and correct passwords out. An update being installed makes it busy too.
-    if (this._session || this._updating()) return this._deny(conn, DENY.BUSY);
+    if (this._session || this._updating()) return this._deny(conn, DENY.BUSY, this._busyExtra());
     if (!this._policyAllows(conn.ident, s)) return this._deny(conn, DENY.NOT_ALLOWED);
     // Locks gate only password verification: while password sign-in is blocked for this peer its
     // proof is ignored (not verified, not counted) and admission continues without it.
@@ -1363,7 +1365,7 @@ class HostServer extends EventEmitter {
     }
     // Only an active session (or an update being installed) is 'busy': a correct proof withdraws
     // another viewer's pending prompt (_accept), as on the request path.
-    if (this._session || this._updating()) return this._deny(conn, DENY.BUSY);
+    if (this._session || this._updating()) return this._deny(conn, DENY.BUSY, this._busyExtra());
     const s = this._settings();
     if (s.password && this.auth.verifyProof(s.password, conn.nonce, msg.proof, this._binding(conn))) {
       this._resetLimiter(conn);
@@ -1421,7 +1423,7 @@ class HostServer extends EventEmitter {
         const why = isPlainObject(answer) && (answer.reason === DENY.BUSY || answer.reason === DENY.TIMEOUT) ? answer.reason : DENY.REJECTED;
         if (why === DENY.TIMEOUT) this._recordDenial(conn, 'timeout');
         else if (why !== DENY.BUSY) this._recordDenial(conn, 'dismissed');
-        this._deny(conn, why);
+        this._deny(conn, why, why === DENY.BUSY ? this._busyExtra() : undefined);
         return true;
       }
       const cur = this._settings();
@@ -1453,7 +1455,7 @@ class HostServer extends EventEmitter {
     conn.timer = null;
     if (this._session && this._session !== conn) return this._deny(conn, DENY.BUSY);
     // Every admission path ends here: a prompt accepted while an update started installing too.
-    if (this._updating()) return this._deny(conn, DENY.BUSY);
+    if (this._updating()) return this._deny(conn, DENY.BUSY, { updating: true });
     this._withdrawPending(conn);
     const wasPrompt = conn.state === 'pending';
     if (this._pending === conn) this._pending = null;
@@ -1493,6 +1495,11 @@ class HostServer extends EventEmitter {
     try { return this._busy() === true; } catch { return false; }
   }
 
+  /** The `denied` extra for a 'busy': it marks an update being installed (not another session). */
+  _busyExtra() {
+    return this._updating() ? { updating: true } : undefined;
+  }
+
   /**
    * An admission without a prompt (password, trusted, same-user) takes precedence over another
    * viewer's unanswered prompt: that viewer is denied 'busy' and main gets 'request-cancelled'
@@ -1516,7 +1523,11 @@ class HostServer extends EventEmitter {
     }
   }
 
-  /** Send `denied` (+ an optional validated retryAfterSec), then close 4000. */
+  /**
+   * Send `denied` (+ an optional validated retryAfterSec; + updating:true next to 'busy' while
+   * this computer installs an update), then close 4000. `updating` is an extra field: a v0.2.0
+   * viewer ignores it and still reports plain 'busy', a newer one says the computer is updating.
+   */
   _deny(conn, reason, extra) {
     if (conn.closed || conn.state === 'closing') return undefined;
     const r = DENY_REASONS.has(reason) ? reason : DENY.PROTOCOL;
@@ -1524,6 +1535,7 @@ class HostServer extends EventEmitter {
     const msg = { t: MSG.DENIED, reason: r };
     const wait = extra && extra.retryAfterSec;
     if (Number.isInteger(wait) && wait >= 1 && wait <= RETRY_AFTER_MAX_SEC) msg.retryAfterSec = wait;
+    if (r === DENY.BUSY && extra && extra.updating === true) msg.updating = true;
     this._send(conn, msg);
     conn.state = 'closing';
     this._closeConn(conn, 4000, r);

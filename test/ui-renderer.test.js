@@ -221,6 +221,11 @@ test('store.normPeer keeps probe (enum) and tunnelview.port', async () => {
   assert.equal(normPeer({ ...base, tunnelview: { version: '1', port: 47811 } }).tunnelview.port, 47811);
   assert.equal(normPeer({ ...base, tunnelview: { version: '1', port: 70000 } }).tunnelview.port, null);
   assert.equal(normPeer({ ...base, tunnelview: { version: '1', port: '47800' } }).tunnelview.port, null);
+  // COMPAT-2 / DOCS-6: "busy because it installs an update" only with busy, only for a strict true.
+  assert.equal(normPeer({ ...base, tunnelview: { version: '1', busy: true, updating: true } }).tunnelview.updating, true);
+  assert.equal(normPeer({ ...base, tunnelview: { version: '1', busy: true, updating: 'yes' } }).tunnelview.updating, false);
+  assert.equal(normPeer({ ...base, tunnelview: { version: '1', busy: false, updating: true } }).tunnelview.updating, false);
+  assert.equal(normPeer({ ...base, tunnelview: { version: '1', busy: true } }).tunnelview.updating, false);
 });
 
 test('store.errMsg strips Electron\'s invoke wrapper so main\'s message reads cleanly', async () => {
@@ -1365,6 +1370,14 @@ test('settings: this computer\'s ID, the unavailable banner with Retry, Reset id
   assert.equal(banner.hidden, false);
   assert.match(banner.textContent, /This computer can't prove its identity to phones right now/);
   assert.match(banner.textContent, /The identity file is damaged\./);
+  // DOCS-11: the banner names the files and their folder, so the user knows what to check.
+  assert.ok(banner.textContent.includes('The files are identity.json and identity.json.bak in ~/Library/Application Support/Tunnelview.'), banner.textContent);
+  setState({ ...clone(MAC_STATE), platform: 'windows' });
+  assert.ok(banner.textContent.includes('identity.json and identity.json.bak in %LOCALAPPDATA%\\Tunnelview.'), banner.textContent);
+  identity = { available: false, fingerprint: null, wasReset: false, error: 'MISSING' };
+  await refreshIdentity();
+  assert.match(banner.textContent, /Put one back and Retry before you restart Tunnelview, or reset the identity\./);
+  setState(clone(MAC_STATE));
   assert.ok(byText(banner, 'Reset identity…'));
   identity = { available: true, fingerprint: FP, wasReset: false };
   calls.length = 0;
@@ -1414,7 +1427,7 @@ function updateState(patch = {}) {
     ...patch,
   };
 }
-const UPDATE_API_KEYS = ['getUpdateState', 'checkForUpdates', 'downloadUpdate', 'installUpdate', 'setAutoUpdateCheck', 'revealUpdate', 'openReleasesPage', 'onUpdateState'];
+const UPDATE_API_KEYS = ['getUpdateState', 'checkForUpdates', 'downloadUpdate', 'installUpdate', 'cancelUpdate', 'setAutoUpdateCheck', 'revealUpdate', 'openReleasesPage', 'onUpdateState'];
 
 /**
  * Preload update:* calls, recorded. push(s) is main's side: it becomes what getUpdateState answers
@@ -1428,6 +1441,7 @@ async function installUpdateApi(over = {}) {
     checkForUpdates: async () => { calls.push(['checkForUpdates']); return clone(st); },
     downloadUpdate: async () => { calls.push(['downloadUpdate']); return { ok: true }; },
     installUpdate: async () => { calls.push(['installUpdate']); return { ok: true }; },
+    cancelUpdate: async () => { calls.push(['cancelUpdate']); return { ok: false, code: 'NOT_DOWNLOADING', message: 'No download is running.' }; },
     setAutoUpdateCheck: async (v) => { calls.push(['setAutoUpdateCheck', v]); st = { ...st, autoCheck: v }; return { ok: true }; },
     revealUpdate: async () => { calls.push(['revealUpdate']); return { ok: true }; },
     openReleasesPage: async () => { calls.push(['openReleasesPage']); return { ok: true }; },
@@ -1448,9 +1462,16 @@ test('store.normUpdateState: every key, enums and versions checked, notes stay m
   const { normUpdateState, cleanNotes, normUpdateResult } = await load('main/store.js');
   assert.equal(normUpdateState(null), null);
   assert.equal(normUpdateState('idle'), null);
-  const keys = ['status', 'phase', 'currentVersion', 'platform', 'supported', 'autoCheck', 'lastCheckAt', 'latest', 'downloaded', 'progress', 'error', 'blocked', 'justUpdated'];
+  const keys = ['status', 'phase', 'currentVersion', 'platform', 'supported', 'autoCheck', 'lastCheckAt', 'latest', 'downloaded', 'progress', 'error', 'blocked', 'justUpdated', 'installBlocked'];
   assert.deepEqual(Object.keys(normUpdateState({})).sort(), [...keys].sort());
   assert.equal(normUpdateState({ status: 'bogus' }).status, 'idle');
+  // installBlocked (MACFLOW-4): a well-formed code keeps its text; anything else is dropped.
+  assert.equal(normUpdateState({}).installBlocked, null);
+  assert.deepEqual(normUpdateState({ installBlocked: { code: 'TRANSLOCATED', message: 'Move it.‮', extra: 1 } }).installBlocked,
+    { code: 'TRANSLOCATED', message: 'Move it.' });
+  assert.equal(normUpdateState({ installBlocked: { code: '<b>', message: 'x' } }).installBlocked, null);
+  assert.equal(normUpdateState({ installBlocked: 'TRANSLOCATED' }).installBlocked, null);
+  assert.match(normUpdateState({ installBlocked: { code: 'NOT_OWNER' } }).installBlocked.message, /cannot replace itself/);
 
   const s = normUpdateState(updateState({
     status: 'downloading',
@@ -1542,6 +1563,33 @@ test('updates: the status line and the buttons follow UpdateState', async () => 
   assert.deepEqual(plan({ status: 'downloading', latest: LATEST }).check, { enabled: false, busy: false });
   assert.deepEqual(plan({ status: 'ready', latest: LATEST, downloaded: true }, { install: true }).primary,
     { action: 'install', label: 'Restart and install', enabled: false, busy: true });
+
+  // SEC-5: Cancel is offered only while a download runs.
+  assert.equal(plan({ status: 'downloading', latest: LATEST }).cancel, true);
+  for (const s of [{ status: 'available', latest: LATEST }, { status: 'ready', latest: LATEST, downloaded: true }, { status: 'checking' }]) {
+    assert.equal(plan(s).cancel, false, s.status);
+  }
+  assert.equal(updatePlan(null).cancel, false);
+
+  // MACFLOW-4: this copy cannot replace itself where it runs. The download still works (labelled
+  // "Download"), the status line says why, and once downloaded the primary button shows the file.
+  const where = { code: 'TRANSLOCATED', message: 'macOS runs this copy from a temporary place. Move it.' };
+  const mac = { platform: 'macos', installBlocked: where };
+  const avail = plan({ ...mac, status: 'available', latest: LATEST });
+  assert.deepEqual(avail.primary, { action: 'download', label: 'Download', enabled: true, busy: false });
+  assert.equal(describeUpdate(u({ ...mac, status: 'available', latest: LATEST })).detail, `Download size: 100 MB. ${where.message}`);
+  assert.equal(plan({ ...mac, status: 'downloading', latest: LATEST }).primary.label, 'Downloading…');
+  const got = plan({ ...mac, status: 'ready', latest: LATEST, downloaded: true, blocked: 'INCOMING_SESSION' });
+  assert.deepEqual(got.primary, { action: 'reveal', label: 'Show in Finder', enabled: true, busy: false });
+  assert.equal(got.reveal, false, 'not twice');
+  assert.equal(got.hint, '', 'no "install after the session" hint when it cannot be installed here at all');
+  const gotText = describeUpdate(u({ ...mac, status: 'ready', latest: LATEST, downloaded: true }));
+  assert.deepEqual([gotText.text, gotText.detail], ['Downloaded', `Tunnelview 0.3.0 is downloaded and verified. ${where.message}`]);
+  assert.equal(plan({ ...mac, supported: false, status: 'available', latest: LATEST }).primary.action, 'releases', 'not supported wins');
+
+  // MACFLOW-1: this Mac is too old for the downloaded version: nothing to install or show.
+  const old = plan({ platform: 'macos', status: 'error', latest: LATEST, downloaded: true, error: { code: 'OS_TOO_OLD', message: 'x' } });
+  assert.deepEqual([old.primary, old.reveal, old.releases], [null, false, true]);
 });
 
 test('settings › Updates: version, status, notes as text only, the daily check (locked in a session), Check now', async () => {
@@ -1561,7 +1609,7 @@ test('settings › Updates: version, status, notes as text only, the daily check
     assert.ok(byText(sheet.querySelector('.sheet-nav'), 'Updates'), 'nav chip');
     assert.equal(document.activeElement, sec.querySelector('#set-updates-title'), 'the banner’s "View update" lands in the section');
     assert.equal(sec.querySelector('#set-updates-title').getAttribute('tabindex'), '-1');
-    assert.match(sheet.textContent, /Remote sessions stay inside your tailnet; only update checks go to GitHub/);
+    assert.match(sheet.textContent, /Remote sessions stay inside your tailnet; only updates come from GitHub/);
     assert.match(sheet.querySelector('#set-about').textContent, /The only connection outside your tailnet goes to GitHub, for updates/);
 
     assert.match(sec.textContent, /Tunnelview 0\.2\.0/);
@@ -1853,6 +1901,82 @@ test('settings › Updates: a button that becomes unusable while it has the keyb
   }
 });
 
+test('settings › Updates: Cancel download stops it quietly; a copy that cannot replace itself here shows the file; a too-old Mac is offered nothing', async () => {
+  const { setState, setSettings } = await load('main/store.js');
+  const { createSettingsView } = await load('main/settings-view.js');
+  await sleep(200);
+  let finish;
+  const fake = await installUpdateApi({
+    downloadUpdate: async () => {
+      calls.push(['downloadUpdate']);
+      fake.push(updateState({ status: 'downloading', latest: LATEST, progress: { received: 0, total: 104857600, percent: 0 } }));
+      return new Promise((r) => { finish = r; });
+    },
+    cancelUpdate: async () => {
+      calls.push(['cancelUpdate']);
+      // main: the running download ends with CANCELLED and the state goes back to "available".
+      fake.push(updateState({ status: 'available', latest: LATEST }));
+      finish({ ok: false, code: 'CANCELLED', message: 'Download cancelled.' });
+      return { ok: true };
+    },
+  });
+  setState(clone(MAC_STATE));
+  setSettings({});
+  fake.push(updateState({ status: 'available', latest: LATEST }));
+  const view = createSettingsView();
+  try {
+    view.open('updates');
+    const sec = updateSection(document.body.querySelectorAll('.sheet-layer').pop());
+    const btn = primaryButton(sec);
+    const cancel = byText(sec, 'Cancel download');
+    assert.ok(cancel);
+    assert.equal(cancel.hidden, true, 'nothing to cancel yet');
+    btn.click();
+    await sleep(5);
+    assert.equal(statusText(sec), 'Downloading 0%');
+    assert.equal(cancel.hidden, false);
+    calls.length = 0;
+    cancel.click();
+    await sleep(10);
+    assert.deepEqual(calls.filter((c) => c[0] === 'cancelUpdate'), [['cancelUpdate']]);
+    assert.equal(statusText(sec), 'Update 0.3.0 available');
+    assert.equal(cancel.hidden, true);
+    assert.equal(btn.textContent, 'Download and install', 'can be started again');
+    assert.ok(!toasts().includes('Download cancelled.'), 'the user’s own Cancel is not reported back');
+    assert.equal(topModal() && topModal().querySelector('.modal-update'), null, 'no install confirmation');
+    // A Cancel that comes too late (the download ended meanwhile) says nothing either.
+    api.cancelUpdate = async () => { calls.push(['cancelUpdate']); return { ok: false, code: 'NOT_DOWNLOADING', message: 'No download is running.' }; };
+    fake.push(updateState({ status: 'downloading', latest: LATEST }));
+    cancel.click();
+    await sleep(10);
+    assert.ok(!toasts().includes('No download is running.'));
+
+    // MACFLOW-4: verified, but this copy cannot replace itself where it runs.
+    const where = { code: 'READ_ONLY_LOCATION', message: 'Tunnelview is running from a read-only place. Move it.' };
+    fake.push(updateState({ platform: 'macos', status: 'ready', latest: LATEST, downloaded: true, installBlocked: where }));
+    assert.equal(statusText(sec), 'Downloaded');
+    assert.match(sec.textContent, /Tunnelview 0\.3\.0 is downloaded and verified\. Tunnelview is running from a read-only place\. Move it\./);
+    assert.equal(btn.textContent, 'Show in Finder');
+    assert.equal(buttons(sec).filter((b) => !b.hidden && b.textContent.trim() === 'Show in Finder').length, 1, 'shown once');
+    calls.length = 0;
+    btn.click();
+    await sleep(5);
+    assert.deepEqual(calls, [['revealUpdate']], 'shows the file, no install');
+
+    // MACFLOW-1: the downloaded version needs a newer macOS.
+    const tooOld = 'Tunnelview 0.3.0 needs macOS 13.0 or later. This Mac runs macOS 12.7.';
+    fake.push(updateState({ platform: 'macos', status: 'error', latest: LATEST, downloaded: true, error: { code: 'OS_TOO_OLD', message: tooOld } }));
+    assert.equal(statusText(sec), tooOld);
+    assert.equal(btn.hidden, true, 'nothing to install or download');
+    assert.equal(byText(sec, 'Show in Finder').hidden, true);
+    assert.equal(byText(sec, 'Releases page').hidden, false);
+  } finally {
+    view.close();
+    await removeUpdateApi();
+    await sleep(200);
+  }
+});
+
 test('settings › Updates: a copy that cannot update itself points to GitHub; without the updater API there is no section', async () => {
   const { setState, setSettings } = await load('main/store.js');
   const { createSettingsView } = await load('main/settings-view.js');
@@ -1965,10 +2089,30 @@ test('update banner: after an in-app update macOS asks for the permissions again
     assert.ok(root.textContent.includes(msg));
     byText(root, 'Details').click();
     assert.deepEqual(opened, [['updates', { focusSection: true }]]);
+
+    // MACFLOW-5: the app was still running for another user; reported like the other next-start failures.
+    setUpdateState(updateState({ platform: 'macos', status: 'error', error: { code: 'MAC_APP_IN_USE', message: 'Tunnelview is open for another user.' } }));
+    assert.match(root.textContent, /The update did not complete/);
+    assert.ok(root.textContent.includes('Tunnelview is open for another user.'));
   } finally {
     root.remove();
     store.update = null;
   }
+});
+
+test('update banner: a too-old Mac gets no "available" banner; a copy that cannot replace itself here says so', async () => {
+  const { normUpdateState } = await load('main/store.js');
+  const { pickUpdateBanner } = await load('main/updates.js');
+  const none = { version: '', justUpdated: '', failure: '' };
+  const u = (patch) => normUpdateState(updateState(patch));
+  const tooOld = u({ platform: 'macos', status: 'error', latest: LATEST, downloaded: true, error: { code: 'OS_TOO_OLD', message: 'x' } });
+  assert.equal(pickUpdateBanner(tooOld, null, none), null, 'MACFLOW-1: nothing this Mac can install');
+  const where = { code: 'TRANSLOCATED', message: 'Move Tunnelview with Finder into Applications.' };
+  const got = pickUpdateBanner(u({ platform: 'macos', status: 'ready', latest: LATEST, downloaded: true, installBlocked: where }), null, none);
+  assert.deepEqual([got.title, got.sub], ['Tunnelview 0.3.0 is downloaded', where.message]);
+  const dl = pickUpdateBanner(u({ platform: 'macos', status: 'downloading', latest: LATEST, installBlocked: where }), null, none);
+  assert.equal(dl.sub, where.message, 'not "It installs only after you confirm"');
+  assert.equal(pickUpdateBanner(u({ status: 'ready', latest: LATEST, downloaded: true }), null, none).title, 'Tunnelview 0.3.0 is ready to install');
 });
 
 test('remote: the Tailscale banner no longer claims Tunnelview never goes outside the tailnet', async () => {

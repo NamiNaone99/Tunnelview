@@ -367,6 +367,12 @@ test('second viewer while busy (pending prompt, then active session) → denied:
   assert.equal((await once(c, 'closed')).reason, 'denied:busy');
   const info = await getJson(port, PROTOCOL.INFO_PATH);
   assert.equal(info.body.busy, true);
+  assert.equal(info.body.updating, false, 'busy with a session, not an update');
+  // No updating marker on a session's 'busy'.
+  const r = await rawRequest(port);
+  await waitFor(() => r.msgs.some((m) => m.t === 'denied'));
+  assert.deepEqual(r.msgs.find((m) => m.t === 'denied'), { t: 'denied', reason: 'busy' });
+  await closeRaw(r);
 });
 
 test('while main installs an update (deps.busy) every admission is denied busy, a prompt answered meanwhile too', async (t) => {
@@ -376,25 +382,44 @@ test('while main installs an update (deps.busy) every admission is denied busy, 
   host.on('request', (r) => requests.push(r));
   const sessions = [];
   host.on('session-start', (s) => sessions.push(s));
-  // A correct password (no prompt) and a prompt request: both refused, no prompt shown.
+  // A correct password (no prompt) and a prompt request: both refused, no prompt shown. The
+  // viewer says the host is updating, not that someone else is connected.
   const pw = viewerFor(t, ts, port, { password: PASSWORD });
   pw.connect();
-  assert.equal((await once(pw, 'closed')).reason, 'denied:busy');
+  const pwClosed = await once(pw, 'closed');
+  assert.equal(pwClosed.reason, 'host-updating');
+  assert.match(pwClosed.message, /installing a Tunnelview update/);
   const ask = viewerFor(t, ts, port);
   ask.connect();
-  assert.equal((await once(ask, 'closed')).reason, 'denied:busy');
+  assert.equal((await once(ask, 'closed')).reason, 'host-updating');
   assert.equal(requests.length, 0, 'no prompt while installing');
-  assert.equal((await getJson(port, PROTOCOL.INFO_PATH)).body.busy, true);
+  const info = (await getJson(port, PROTOCOL.INFO_PATH)).body;
+  assert.equal(info.busy, true);
+  assert.equal(info.updating, true, '/info says why it is busy');
+  // On the wire it is still reason 'busy' (a v0.2.0 viewer shows that) with the extra marker.
+  const r = await rawRequest(port);
+  await waitFor(() => r.msgs.some((m) => m.t === 'denied'));
+  assert.deepEqual(r.msgs.find((m) => m.t === 'denied'), { t: 'denied', reason: 'busy', updating: true });
+  await closeRaw(r);
   // The install starts while a prompt is showing: accepting it does not start a session.
   updating = false;
+  assert.equal((await getJson(port, PROTOCOL.INFO_PATH)).body.updating, false);
   const late = viewerFor(t, ts, port);
   late.connect();
   await phase(late, 'waiting');
   assert.equal(requests.length, 1);
   updating = true;
   requests[0].respond({ accept: true });
-  assert.equal((await once(late, 'closed')).reason, 'denied:busy');
+  assert.equal((await once(late, 'closed')).reason, 'host-updating');
   assert.equal(sessions.length, 0);
+  // main refusing the prompt with 'busy' while it installs (index.js onRequest) carries the marker too.
+  updating = false;
+  const refused = viewerFor(t, ts, port);
+  refused.connect();
+  await phase(refused, 'waiting');
+  updating = true;
+  requests[1].respond({ accept: false, reason: 'busy' });
+  assert.equal((await once(refused, 'closed')).reason, 'host-updating');
   // Installed (or failed): sessions start again.
   updating = false;
   const ok = viewerFor(t, ts, port, { password: PASSWORD });
@@ -564,7 +589,7 @@ test('GET /tunnelview/v1/info → JSON; other paths 404; non-IP Host 403', async
   const r = await getJson(port, PROTOCOL.INFO_PATH);
   assert.equal(r.status, 200);
   assert.match(r.type, /application\/json/);
-  assert.deepEqual(r.body, { app: 'Tunnelview', protocol: V, version: '0.1.0-test', hostname: 'test-host', os: 'windows', passwordSet: true, acceptMode: 'password-only', busy: false, enabled: true });
+  assert.deepEqual(r.body, { app: 'Tunnelview', protocol: V, version: '0.1.0-test', hostname: 'test-host', os: 'windows', passwordSet: true, acceptMode: 'password-only', busy: false, updating: false, enabled: true });
   assert.equal((await getJson(port, '/')).status, 404);
   assert.equal((await getJson(port, '/tunnelview/v1')).status, 404);
   assert.equal((await getJson(port, PROTOCOL.INFO_PATH, { Host: 'attacker.example' })).status, 403);

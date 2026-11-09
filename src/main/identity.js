@@ -5,9 +5,12 @@
  * must survive updates, crashes and damaged files, and it must never change behind the user's back
  * (CRITIQUE B3). A silent new key would make every phone report "not the computer you paired with".
  *
- *   userData/identity.json      {v:1, createdAt, pub: base64url(raw 32 bytes), priv: base64(PKCS8 DER)}
- *   userData/identity.json.bak  the same bytes, written after every successful write
- *   userData/identity.json.old  the previous identity.json, kept by reset()
+ *   <dir>/identity.json      {v:1, createdAt, pub: base64url(raw 32 bytes), priv: base64(PKCS8 DER)}
+ *   <dir>/identity.json.bak  the same bytes, written after every successful write
+ *   <dir>/identity.json.old  the previous identity.json, kept by reset()
+ * <dir> (index.js identityFileFor()): %LOCALAPPDATA%\Tunnelview on Windows, never the roaming
+ * profile (%APPDATA%): roaming would give every computer the user signs in to the same key, and a
+ * reset on one would silently replace the others' key at the next sync. macOS: userData.
  *
  * Stored like settings.json (atomic temp file + rename, mode 0600), with no safeStorage: on macOS
  * its keychain item is tied to the ad-hoc code signature, which changes with every update.
@@ -25,7 +28,7 @@
  * way to get a new key once a key file has existed.
  * The private key never leaves this module: not to a renderer, not into settings.json.
  *
- *   const identity = createIdentity({ file: path.join(app.getPath('userData'), 'identity.json') });
+ *   const identity = createIdentity({ file: identityFileFor() });   // index.js
  *   identity.load()               → {ok, error}; never throws (retry() is the same, for the UI)
  *   identity.unavailable          → true while no key can be used; identity.error says why:
  *                                   'CORRUPT' | 'READ_FAILED' | 'VERSION' (written by a newer

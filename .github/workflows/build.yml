@@ -149,6 +149,29 @@ jobs:
           codesign --verify --deep --strict --verbose=2 dist/mac-arm64/Tunnelview.app
           codesign --verify --deep --strict --verbose=2 dist/mac/Tunnelview.app
 
+      # Each release zip, checked the way the in-app updater installs it (updater.js _installMac):
+      # a zip that would fail those checks on users' Macs never gets into a signed manifest.
+      # `ls -A`: the updater's readdir counts dot-entries too.
+      - name: Verify the update zips the way the updater installs them
+        run: |
+          want="$(node -p "require('./package.json').version")"
+          for pair in arm64:arm64 x64:x86_64; do
+            a="${pair%%:*}"; cpu="${pair##*:}"
+            zip="dist/Tunnelview-${want}-mac-${a}.zip"
+            [ -f "$zip" ] || { echo "::error::$zip is missing"; exit 1; }
+            tmp="$(mktemp -d)"
+            ditto -x -k --noqtn "$zip" "$tmp"
+            [ "$(ls -A "$tmp")" = "Tunnelview.app" ] || { echo "::error::$zip must hold exactly Tunnelview.app"; exit 1; }
+            app="$tmp/Tunnelview.app"; plist="$app/Contents/Info.plist"
+            [ "$(plutil -extract CFBundleIdentifier raw -o - "$plist")" = "io.github.naminaone99.tunnelview" ] || { echo "::error::$zip: wrong bundle id"; exit 1; }
+            [ "$(plutil -extract CFBundleShortVersionString raw -o - "$plist")" = "$want" ] || { echo "::error::$zip: wrong version"; exit 1; }
+            [ "$(plutil -extract CFBundleExecutable raw -o - "$plist")" = "Tunnelview" ] || { echo "::error::$zip: wrong executable"; exit 1; }
+            lipo -archs "$app/Contents/MacOS/Tunnelview" | tr ' ' '\n' | grep -qx "$cpu" || { echo "::error::$zip: not $cpu"; exit 1; }
+            codesign --verify --deep --strict --verbose=2 "$app"
+            rm -rf "$tmp"
+            echo "ok: $zip"
+          done
+
       # Fuses are flipped before signing, so this also confirms the signed binaries carry them.
       - name: Verify Electron fuses and ASAR integrity
         run: node scripts/verify-fuses.js dist/mac-arm64/Tunnelview.app dist/mac/Tunnelview.app

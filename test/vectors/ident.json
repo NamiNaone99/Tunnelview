@@ -589,7 +589,7 @@
               "viewerId": "nPHONEp1x2CNTRL"
             }
           ],
-          "note": "an older host: no ident",
+          "note": "no ident: a host older than 0.3, or a 0.3+ host whose key is unavailable right now (hello.version tells them apart)",
           "result": {
             "ok": false,
             "reason": "no-ident"

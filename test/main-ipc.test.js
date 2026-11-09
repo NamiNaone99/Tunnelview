@@ -537,9 +537,11 @@ test('fetchInfo distinguishes ok / not-allowed / incompatible / error / refused 
     if (mode === '403') { res.writeHead(403); res.end(); return; }
     if (mode === '503') { res.writeHead(503); res.end(); return; }
     if (mode === 'other') { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"hello":1}'); return; }
-    const body = mode === 'ok'
-      ? { app: PROTOCOL.APP_ID, protocol: PROTOCOL.PROTOCOL_VERSION, version: '1.0', os: 'macos', passwordSet: true, acceptMode: 'ask', busy: false }
-      : { app: PROTOCOL.APP_ID, protocol: PROTOCOL.PROTOCOL_VERSION + 1 };
+    const info = { app: PROTOCOL.APP_ID, protocol: PROTOCOL.PROTOCOL_VERSION, version: '1.0', os: 'macos', passwordSet: true, acceptMode: 'ask', busy: false };
+    const body = mode === 'ok' ? info
+      : mode === 'updating' ? { ...info, busy: true, updating: true }
+        : mode === 'stray-updating' ? { ...info, busy: false, updating: true }
+          : { app: PROTOCOL.APP_ID, protocol: PROTOCOL.PROTOCOL_VERSION + 1 };
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(body));
   });
@@ -549,6 +551,12 @@ test('fetchInfo distinguishes ok / not-allowed / incompatible / error / refused 
     const ok = await ipc.fetchInfo('127.0.0.1', port);
     assert.equal(ok.status, 'ok');
     assert.equal(ok.info.passwordSet, true);
+    assert.equal(ok.info.updating, false);
+    // busy because it installs an update (the device grid says "Updating", not "Busy").
+    mode = 'updating';
+    assert.deepEqual((await ipc.fetchInfo('127.0.0.1', port)).info, { version: '1.0', os: 'macos', passwordSet: true, acceptMode: 'ask', busy: true, updating: true });
+    mode = 'stray-updating';
+    assert.equal((await ipc.fetchInfo('127.0.0.1', port)).info.updating, false, 'only together with busy');
     mode = 'newer';
     assert.equal((await ipc.fetchInfo('127.0.0.1', port)).status, 'incompatible');
     mode = '426';

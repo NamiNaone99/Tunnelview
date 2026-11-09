@@ -489,6 +489,8 @@ function parseInfo(j) {
     passwordSet: j.passwordSet === true,
     acceptMode: j.acceptMode === 'password-only' ? 'password-only' : 'ask',
     busy: j.busy === true,
+    // busy because it installs a Tunnelview update (0.3+ hosts), not because of another session.
+    updating: j.busy === true && j.updating === true,
   };
 }
 
@@ -1053,12 +1055,14 @@ function sanitizeUpdateState(s) {
   const p = status === 'downloading' && isObj(o.progress) ? o.progress : null;
   const e = isObj(o.error) && isStr(o.error.code, 32) && ERROR_CODE_RE.test(o.error.code) ? o.error : null;
   const j = isObj(o.justUpdated) && isStr(o.justUpdated.to, 32) && SEMVER_RE.test(o.justUpdated.to) ? o.justUpdated : null;
+  const b = isObj(o.installBlocked) && isStr(o.installBlocked.code, 32) && ERROR_CODE_RE.test(o.installBlocked.code) ? o.installBlocked : null;
   return {
     status,
     phase: status === 'installing' && UPDATE_PHASES.includes(o.phase) ? o.phase : null,
     currentVersion: clean(o.currentVersion, 64),
     platform: o.platform === 'windows' || o.platform === 'macos' ? o.platform : 'other',
     supported: o.supported === true,
+    installBlocked: b ? { code: b.code, message: clean(b.message, 500) } : null,
     autoCheck: o.autoCheck === true,
     lastCheckAt: nonNeg(o.lastCheckAt),
     latest: l ? {
@@ -1342,6 +1346,9 @@ function register(context) {
 
   // Resolves when the download is verified (or failed); progress arrives through update:state.
   handle('update:download', ['main'], async () => sanitizeUpdateResult(upd() ? await upd().download() : NO_UPDATER));
+
+  // Stops a running download; the pending update:download then answers {ok:false, code:'CANCELLED'}.
+  handle('update:cancel', ['main'], () => sanitizeUpdateResult(upd() && typeof upd().cancelDownload === 'function' ? upd().cancelDownload() : NO_UPDATER));
 
   // Only from this click, never on its own. updater.js refuses during an incoming session, a
   // pending incoming request or an outgoing session, and checks again right before it starts

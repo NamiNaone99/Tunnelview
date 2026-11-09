@@ -24,7 +24,8 @@ const GH = 'https://github.com/NamiNaone99/Tunnelview';
 const WIN_NAME = 'Tunnelview-Setup-0.4.0-x64.exe';
 const MAC_NAME = 'Tunnelview-0.4.0-mac-arm64.zip';
 const APP_ID = 'io.github.naminaone99.tunnelview';
-const DAMAGED = 'The downloaded update is damaged, so it was deleted. Download it again.';
+// MACFLOW-2: a bundle that fails a check on this Mac keeps the zip and never says "download again".
+const CHECK_FAILED = 'The downloaded update did not pass the macOS checks, so it was not installed. Get the new version from the GitHub releases page.';
 
 /** Every manifest and asset straight from github.com (redirects are covered by updater.test.js). */
 function directGithub(release = REL, manifest = MANIFEST) {
@@ -237,6 +238,42 @@ test('Windows: EBUSY on the exclusive open is retried (antivirus); a lock that s
   assert.equal(s.error, null);
 });
 
+test('Windows: when the installer cannot be moved back (still locked), the staged copy stays the download; the next install uses it', async () => {
+  // WINFLOW-1: LOCKED after the move into install-*, and the move back fails too.
+  let busy = 1000;
+  let holdBack = true;
+  const heldFs = Object.assign(Object.create(fs), {
+    openSync(p, flags, mode) {
+      if (typeof flags === 'number' && busy-- > 0) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+      return fs.openSync(p, flags, mode);
+    },
+    renameSync(from, to) {
+      if (holdBack && /[\\/]install-[A-Za-z0-9]{6}[\\/]/.test(from)) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+      return fs.renameSync(from, to);
+    },
+  });
+  const t = await readyWin({ fs: heldFs });
+  const r = await t.u.install();
+  assert.equal(r.code, 'LOCKED');
+  assert.equal(t.spawned.length, 0);
+  const installDirs = fs.readdirSync(t.updates).filter((n) => n.startsWith('install-'));
+  assert.equal(installDirs.length, 1, 'the install-* folder that holds it stays');
+  const staged = path.join(t.updates, installDirs[0], WIN_NAME);
+  assert.ok(fs.readFileSync(staged).equals(REL.assets[WIN_NAME]), 'the verified installer is not lost');
+  let s = t.u.getState();
+  assert.equal(s.downloaded, true, 'still offered: Restart and install, no new download');
+  assert.deepEqual(t.u.reveal(), { ok: true });
+  assert.deepEqual(t.shown, [staged], 'Show in folder points at the file that exists');
+  // The other program lets go: the next install moves it from there, re-hashes it, launches it.
+  busy = 0;
+  holdBack = false;
+  assert.deepEqual(await t.u.install(), { ok: true });
+  assert.equal(t.spawned.length, 1);
+  assert.ok(t.spawned[0].staged.equals(REL.assets[WIN_NAME]));
+  s = t.u.getState();
+  assert.equal(s.error, null);
+});
+
 test('Windows: a session that starts during the verification stops the launch, as a refusal (the state goes back)', async () => {
   // The blocker turns on at the exclusive open (the re-hash), i.e. after install()'s first gate.
   let blocker = null;
@@ -365,12 +402,18 @@ async function readyMac(o = {}) {
   const updates = path.join(userData, 'updates');
   const running = { CFBundleIdentifier: o.runningId || APP_ID };
   const fresh = { CFBundleIdentifier: o.id || APP_ID, CFBundleShortVersionString: o.version || '0.4.0', CFBundleExecutable: o.exe || 'Tunnelview' };
+  if (o.minOS) fresh.LSMinimumSystemVersion = o.minOS;
+  const uid = fs.statSync(real).uid;
+  const me = o.uid === undefined ? uid : o.uid;
   const calls = [];
   const execFile = (file, args, opts, cb) => {
     calls.push([file, ...args]);
     if (o.onExec) o.onExec(file, args);
     const reply = (code, out = '') => setImmediate(() => cb(code ? Object.assign(new Error(`exit ${code}`), { code }) : null, out, ''));
+    // What execFile reports when its `timeout` stopped the tool.
+    const killed = () => setImmediate(() => cb(Object.assign(new Error('Command failed'), { killed: true, code: null, signal: 'SIGTERM' }), '', ''));
     if (file === '/usr/bin/plutil') {
+      if (o.plutilKilled === args[1]) return killed();
       const plist = args[args.length - 1];
       const v = (plist.startsWith(real) ? running : fresh)[args[1]];
       return v === undefined ? reply(1) : reply(0, `${v}\n`);
@@ -390,10 +433,30 @@ async function readyMac(o = {}) {
       fs.cpSync(args[0], args[1], { recursive: true });
       return reply(0);
     }
-    if (file === '/usr/bin/codesign') return reply(o.codesignFor ? o.codesignFor(args[args.length - 1]) : (o.codesign || 0));
+    if (file === '/usr/bin/codesign') {
+      if (o.codesignKilled) return killed();
+      return reply(o.codesignFor ? o.codesignFor(args[args.length - 1]) : (o.codesign || 0));
+    }
     if (file === '/usr/bin/xattr') return reply(args[0] === '-p' ? (o.quarantined ? 0 : 1) : 0);
+    if (file === '/bin/ps') { // uid=,comm=: launchd, and this copy run by this account
+      if (o.psFails) return reply(1);
+      const self = `${me} ${path.join(real, 'Contents', 'MacOS', 'Tunnelview')}\n`;
+      return reply(0, o.ps ? o.ps(me, real) : `    0 /sbin/launchd\n  ${self}`);
+    }
     return reply(127);
   };
+  // The app's folder as a Mac reports it: 0755 unless the test says otherwise (on a Windows host
+  // every folder reads as 0666, which would look world-writable: SHARED_LOCATION).
+  const baseFs = o.fs || fs;
+  const parentDir = path.dirname(real);
+  const macFs = Object.assign(Object.create(baseFs), {
+    statSync(p, opts) {
+      const st = baseFs.statSync(p, opts);
+      if (!st || path.resolve(String(p)) !== parentDir) return st;
+      const mode = (st.mode & ~0o7777) | (o.parentMode === undefined ? 0o755 : o.parentMode);
+      return Object.create(st, { mode: { value: mode, enumerable: true } });
+    },
+  });
   const spawned = [];
   const spawn = (file, args, opts) => {
     const child = new EventEmitter();
@@ -404,7 +467,6 @@ async function readyMac(o = {}) {
   };
   const quits = { n: 0 };
   const shown = [];
-  const uid = fs.statSync(real).uid;
   const u = U.createUpdater({
     appVersion: '0.3.0',
     isPackaged: true,
@@ -415,10 +477,11 @@ async function readyMac(o = {}) {
     arch: o.arch || 'arm64',
     translated: o.translated || false,
     pid: 4242,
-    getuid: () => (o.uid === undefined ? uid : o.uid),
+    getuid: () => me,
     homedir: '/Users/test',
+    systemVersion: o.systemVersion === undefined ? '15.1' : o.systemVersion,
     path,
-    fs: o.fs || fs,
+    fs: macFs,
     transport: directGithub(),
     keys: KEY.keys,
     spawn,
@@ -451,9 +514,11 @@ test('macOS: the bundle is verified, staged next to the app, and the helper gets
     ['/usr/bin/plutil', '-extract', 'CFBundleIdentifier', 'raw', '-o', '-', path.join(fresh, 'Contents', 'Info.plist')],
     ['/usr/bin/plutil', '-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', path.join(fresh, 'Contents', 'Info.plist')],
     ['/usr/bin/plutil', '-extract', 'CFBundleExecutable', 'raw', '-o', '-', path.join(fresh, 'Contents', 'Info.plist')],
+    ['/usr/bin/plutil', '-extract', 'LSMinimumSystemVersion', 'raw', '-o', '-', path.join(fresh, 'Contents', 'Info.plist')],
     ['/usr/bin/codesign', '--verify', '--deep', '--strict', '--verbose=2', fresh],
     ['/usr/bin/xattr', '-d', '-r', '-s', 'com.apple.quarantine', fresh],
     ['/usr/bin/xattr', '-p', 'com.apple.quarantine', fresh],
+    ['/bin/ps', '-axo', 'uid=,comm='],
   ]);
   assert.equal(path.dirname(xdir), path.join(t.updates, '0.4.0'), 'extracted into a fresh folder under updates/<version>');
   assert.equal(t.spawned.length, 1);
@@ -482,7 +547,7 @@ test('macOS: the bundle is verified, staged next to the app, and the helper gets
   assert.equal(t.u.getState().phase, 'quitting');
 });
 
-test('macOS: a damaged bundle is never installed; staging and the download are deleted', async () => {
+test('macOS: a bundle that fails the checks is never installed; the verified zip is kept (no "download again")', async () => {
   const cases = [
     [{ id: 'com.example.other' }, 'BAD_BUNDLE'],
     [{ version: '0.3.9' }, 'WRONG_VERSION'],
@@ -496,16 +561,118 @@ test('macOS: a damaged bundle is never installed; staging and the download are d
   for (const [o, code] of cases) {
     const t = await readyMac(o);
     const r = await t.u.install();
-    assert.deepEqual(r, { ok: false, code, message: DAMAGED }, JSON.stringify(o));
+    assert.deepEqual(r, { ok: false, code, message: CHECK_FAILED }, JSON.stringify(o));
+    assert.equal(U.MESSAGES[code], CHECK_FAILED);
+    assert.doesNotMatch(r.message, /download it again/i);
     assert.equal(t.spawned.length, 0);
     assert.deepEqual(stagingLeft(t), [], 'no staging folder left next to the app');
-    assert.deepEqual(fs.readdirSync(path.join(t.updates, '0.4.0')), [], 'zip and extraction folder deleted');
+    assert.deepEqual(fs.readdirSync(path.join(t.updates, '0.4.0')), [MAC_NAME], 'the zip stays; the extraction folder goes');
     assert.equal(fs.existsSync(path.join(t.updates, 'pending.json')), false);
-    assert.equal(t.u.getState().downloaded, false);
+    assert.equal(t.u.getState().downloaded, true, 'nothing to download again');
     assert.equal(t.u.getState().error.code, code);
     await F.settle();
     assert.equal(t.quits.n, 0);
   }
+  // Only a zip that no longer matches its signed hash is deleted (TAMPERED), before it is unpacked.
+  const t = await readyMac();
+  const bytes = Buffer.from(fs.readFileSync(t.zip));
+  bytes[bytes.length - 1] ^= 0x55;
+  fs.writeFileSync(t.zip, bytes);
+  assert.deepEqual(await t.u.install(), { ok: false, code: 'TAMPERED', message: U.MESSAGES.TAMPERED });
+  assert.ok(!t.calls.some((c) => c[0] === '/usr/bin/ditto'), 'never unpacked');
+  assert.deepEqual(fs.readdirSync(path.join(t.updates, '0.4.0')), []);
+  assert.equal(t.u.getState().downloaded, false);
+});
+
+test('macOS: a check stopped by its time limit is VERIFY_TIMEOUT (try again), never CODESIGN_FAILED; the zip is kept', async () => {
+  for (const o of [{ codesignKilled: true }, { plutilKilled: 'CFBundleShortVersionString' }, { plutilKilled: 'LSMinimumSystemVersion' }]) {
+    const t = await readyMac(o);
+    const r = await t.u.install();
+    assert.deepEqual(r, { ok: false, code: 'VERIFY_TIMEOUT', message: U.MESSAGES.VERIFY_TIMEOUT }, JSON.stringify(o));
+    assert.match(r.message, /took too long.*Try again/);
+    assert.deepEqual(fs.readdirSync(path.join(t.updates, '0.4.0')), [MAC_NAME]);
+    assert.equal(t.u.getState().downloaded, true);
+    assert.equal(t.spawned.length, 0);
+    assert.deepEqual(stagingLeft(t), []);
+  }
+  // A real non-zero codesign answer stays CODESIGN_FAILED.
+  const t = await readyMac({ codesign: 1 });
+  assert.equal((await t.u.install()).code, 'CODESIGN_FAILED');
+});
+
+test('macOS: an update that needs a newer macOS (LSMinimumSystemVersion) is refused before anything moves; the check keeps saying so', async () => {
+  const t = await readyMac({ minOS: '14.0', systemVersion: '13.6.1' });
+  const r = await t.u.install();
+  assert.deepEqual(r, { ok: false, code: 'OS_TOO_OLD', message: 'Tunnelview 0.4.0 needs macOS 14.0 or newer, so it was not installed. Tunnelview 0.3.0 stays installed.' });
+  assert.equal(t.spawned.length, 0);
+  assert.deepEqual(stagingLeft(t), []);
+  assert.ok(!t.calls.some((c) => c[0] === '/usr/bin/codesign'), 'refused before codesign');
+  assert.deepEqual(fs.readdirSync(path.join(t.updates, '0.4.0')), [MAC_NAME], 'kept: this Mac may be upgraded');
+  await F.settle();
+  assert.equal(t.quits.n, 0);
+  // A later check (the daily one, or Check now) does not offer "Restart and install" again.
+  const s = await t.u.check();
+  assert.equal(s.status, 'error');
+  assert.equal(s.error.code, 'OS_TOO_OLD');
+  assert.equal(s.downloaded, true);
+  // A new enough macOS installs it; an unknown macOS version refuses.
+  for (const [systemVersion, ok] of [['14.0', true], ['14.5.1', true], ['15', true], ['', false], ['13.7', false]]) {
+    const m = await readyMac({ minOS: '14.0', systemVersion });
+    assert.equal((await m.u.install()).ok, ok, `macOS ${systemVersion || '(unknown)'}`);
+  }
+});
+
+test('osAtLeast: dotted numbers compared part by part, missing parts are 0, anything else refuses', () => {
+  assert.equal(U.osAtLeast('13.6.1', '13.6'), true);
+  assert.equal(U.osAtLeast('13', '13.0.0'), true);
+  assert.equal(U.osAtLeast('10.15.7', '10.15'), true);
+  assert.equal(U.osAtLeast('12.7', '13.0'), false);
+  assert.equal(U.osAtLeast('10.9', '10.10'), false, 'numbers, not strings');
+  assert.equal(U.osAtLeast('', '11.0'), false);
+  assert.equal(U.osAtLeast('14.0', 'abc'), false);
+  assert.equal(U.osAtLeast('14.0', '14.0.1.2'), false, 'at most three parts');
+  assert.equal(U.osAtLeast('14.0', '-1'), false);
+  assert.equal(U.osAtLeast(undefined, '11'), false);
+});
+
+test('macOS: a folder other accounts can change (/Users/Shared) is SHARED_LOCATION: refused before anything is unpacked, shown, and reported up front', async () => {
+  for (const parentMode of [0o1777, 0o777, 0o757]) {
+    const t = await readyMac({ parentMode });
+    const blocked = t.u.getState().installBlocked;
+    assert.deepEqual(blocked, { code: 'SHARED_LOCATION', message: U.MESSAGES.SHARED_LOCATION });
+    assert.equal(t.u.getState().supported, true, 'the download still works');
+    const r = await t.u.install();
+    assert.deepEqual(r, { ok: false, code: 'SHARED_LOCATION', message: U.MESSAGES.SHARED_LOCATION });
+    assert.equal(t.spawned.length, 0);
+    assert.ok(!t.calls.some((c) => c[0] === '/usr/bin/ditto'), 'nothing extracted');
+    assert.deepEqual(stagingLeft(t), []);
+    assert.deepEqual(t.shown, [t.zip]);
+    assert.equal(t.u.getState().downloaded, true);
+  }
+  // A group-writable admin folder (/Applications is root:admin 0775) is fine.
+  const ok = await readyMac({ parentMode: 0o775 });
+  assert.equal(ok.u.getState().installBlocked, null);
+  assert.deepEqual(await ok.u.install(), { ok: true });
+});
+
+test('macOS: Tunnelview open in another account (fast user switching) is refused without quitting; a ps that fails proves nothing', async () => {
+  const other = (me, real) => `  ${me} ${path.join(real, 'Contents', 'MacOS', 'Tunnelview')}\n  ${me + 1} ${path.join(real, 'Contents', 'Frameworks', 'Tunnelview Helper.app', 'Contents', 'MacOS', 'Tunnelview Helper')}\n`;
+  const t = await readyMac({ ps: other });
+  const r = await t.u.install();
+  assert.deepEqual(r, { ok: false, code: 'IN_USE_BY_OTHER_USER', message: U.MESSAGES.IN_USE_BY_OTHER_USER });
+  assert.equal(t.spawned.length, 0);
+  assert.deepEqual(stagingLeft(t), []);
+  assert.equal(fs.existsSync(path.join(t.updates, 'pending.json')), false);
+  await F.settle();
+  assert.equal(t.quits.n, 0, 'this copy keeps running');
+  const s = t.u.getState();
+  assert.equal(s.status, 'ready', 'a refusal: the state goes back');
+  assert.equal(s.error, null);
+  assert.equal(s.downloaded, true);
+  // Another account's copy of ANOTHER bundle, or a path that only starts the same: not ours.
+  const lookalike = (me, real) => `  ${me + 1} ${real}-old${path.sep}Contents${path.sep}MacOS${path.sep}Tunnelview\n  ${me + 1} ${path.join(path.dirname(real), 'Other.app', 'Contents', 'MacOS', 'Tunnelview')}\n`;
+  assert.deepEqual(await (await readyMac({ ps: lookalike })).u.install(), { ok: true });
+  assert.deepEqual(await (await readyMac({ psFails: true })).u.install(), { ok: true }, 'the helper\'s own busy check stays the backstop');
 });
 
 test('macOS: an unpack that fails (free space, the time limit) keeps the verified zip; the next try unpacks it again', async () => {
@@ -513,7 +680,7 @@ test('macOS: an unpack that fails (free space, the time limit) keeps the verifie
     const t = await readyMac({ dittoFails: code });
     const r = await t.u.install();
     assert.deepEqual(r, { ok: false, code: 'EXTRACT_FAILED', message: U.MESSAGES.EXTRACT_FAILED });
-    assert.notEqual(r.message, DAMAGED);
+    assert.notEqual(r.message, CHECK_FAILED);
     assert.match(r.message, /free space/);
     assert.deepEqual(fs.readdirSync(path.join(t.updates, '0.4.0')), [MAC_NAME], 'the zip stays, the x-* folder is gone');
     assert.equal(t.u.getState().downloaded, true);
@@ -627,11 +794,30 @@ test('macOS: translocated, read-only, unwritable, another owner, not Tunnelview 
     assert.equal(t.u.getState().downloaded, true);
     assert.deepEqual(t.shown, revealed ? [t.zip] : [], `${code}: zip shown in Finder`);
   }
+  // MACFLOW-4: what can be known without a tool is in the state before any click, so the window
+  // offers "Download" and "Show in Finder" instead of a Restart and install that must fail.
+  for (const [o, code] of [[{ translocated: true }, 'TRANSLOCATED'], [{ uid: 987654 }, 'NOT_OWNER']]) {
+    const t = await readyMac(o);
+    const s = t.u.getState();
+    assert.deepEqual(s.installBlocked, { code, message: U.MESSAGES[code] }, code);
+    assert.equal(s.supported, true, `${code}: the download stays offered`);
+    assert.equal(s.downloaded, true);
+  }
+  const fine = await readyMac();
+  assert.equal(fine.u.getState().installBlocked, null);
+  const translocatedMsg = U.MESSAGES.TRANSLOCATED;
+  for (const m of [translocatedMsg, U.MESSAGES.READ_ONLY_LOCATION, U.MESSAGES.SHARED_LOCATION]) {
+    assert.match(m, /on a standard account, the Applications folder in your home folder/, 'DOCS-8');
+  }
+  assert.match(U.MESSAGES.NOT_WRITABLE, /Applications folder in your home folder/);
 });
 
 test('macOS: an execPath outside a Tunnelview.app bundle (development) is NOT_TUNNELVIEW', async () => {
   const t = await readyMac();
   t.u._execPath = path.join(t.root, 'node_modules', 'electron', 'dist', 'Electron'); // as `npm start` runs it
+  const s = t.u.getState();
+  assert.equal(s.supported, false, 'the releases page instead of a download that could never install');
+  assert.equal(s.installBlocked, null);
   assert.equal((await t.u.install()).code, 'NOT_TUNNELVIEW');
   assert.deepEqual(t.calls, []);
 });
@@ -681,7 +867,14 @@ test('MAC_SWAP_SCRIPT: a constant with paths only in $1-$6; sh can parse it', ()
   assert.ok(!/\$[7-9]/.test(s));
   assert.match(s, /trap '' HUP INT TERM/);
   assert.match(s, /\/bin\/kill -0 "\$pid"/);
-  for (const tool of ['/bin/mv', '/bin/rm', '/bin/sleep', '/usr/bin/open', '/usr/bin/tccutil']) assert.ok(s.includes(tool), tool);
+  for (const tool of ['/bin/mv', '/bin/rm', '/bin/sleep', '/usr/bin/open', '/usr/bin/tccutil', '/usr/bin/stat', '/usr/bin/id']) assert.ok(s.includes(tool), tool);
+  // MACFLOW-1: the helper never deletes the old bundle; the new version removes it on its first
+  // successful start (_processPending), so a bundle that cannot launch leaves the old one.
+  assert.ok(!s.includes('rm -rf -- "$old"'), 'the backup survives the swap');
+  assert.ok(!/\/bin\/rm[^\n]*\$old/.test(s), 'no rm of $old at all');
+  // SEC-3: open only a bundle this account owns (never one another account put at $dest).
+  assert.ok(s.includes('reopen() { [ "$(/usr/bin/stat -f %u "$dest" 2>/dev/null)" = "$(/usr/bin/id -u)" ] && /usr/bin/open "$dest"; }'));
+  assert.equal(s.split('/usr/bin/open').length - 1, 1, 'open only inside reopen()');
   assert.ok(!/(^|[\s;])(mv|rm|open|sleep|ps) /m.test(s), 'every tool by absolute path');
   for (const word of ['ok', 'timeout', 'busy', 'precondition', 'move-old-failed', 'move-new-failed', 'rollback-failed', 'bad-args']) assert.ok(s.includes(`say ${word}`), word);
   // A copy started from the bundle meanwhile (a Dock click) is waited for, then refused, before
@@ -746,6 +939,46 @@ test('next start (Windows): the new version is running → justUpdated, every le
   assert.deepEqual(fs.readdirSync(updates), [], 'marker, staging folder and old downloads removed');
 });
 
+test('next start: justUpdated names the version that is running, also when it is newer than the marker\'s target', () => {
+  // WINFLOW-3: 0.4.0 was installed in-app, then 0.4.1 by hand before the first start.
+  const userData = F.tmpDir();
+  const updates = path.join(userData, 'updates');
+  const staged = path.join(updates, 'install-Pp4Oo5', WIN_NAME);
+  fs.mkdirSync(path.dirname(staged), { recursive: true });
+  fs.writeFileSync(staged, 'installer');
+  fs.writeFileSync(path.join(updates, 'pending.json'), JSON.stringify({ v: 1, platform: 'win32', from: '0.3.0', to: '0.4.0', at: 1, staged }));
+  const { u, r } = nextStart(userData, { appVersion: '0.4.1' });
+  assert.deepEqual(r, { justUpdated: { from: '0.3.0', to: '0.4.1' } });
+  assert.deepEqual(u.getState().justUpdated, { from: '0.3.0', to: '0.4.1' });
+  assert.deepEqual(fs.readdirSync(updates), []);
+  // A pre-release build reports its plain x.y.z (what ipc.js and the window accept).
+  fs.writeFileSync(path.join(updates, 'pending.json'), JSON.stringify({ v: 1, platform: 'win32', from: '0.3.0', to: '0.4.0', at: 1, staged }));
+  assert.deepEqual(nextStart(userData, { appVersion: '0.4.2-beta.1' }).r, { justUpdated: { from: '0.3.0', to: '0.4.2' } });
+});
+
+test('next start (Windows): an installer that cannot be moved back stays where it is, is shown, and survives the cleanup', () => {
+  // WINFLOW-1, next start: antivirus still holds the staged installer.
+  const userData = F.tmpDir();
+  const updates = path.join(userData, 'updates');
+  const staged = path.join(updates, 'install-Hh7Jj8', WIN_NAME);
+  fs.mkdirSync(path.dirname(staged), { recursive: true });
+  fs.writeFileSync(staged, 'installer');
+  fs.writeFileSync(path.join(updates, 'pending.json'), JSON.stringify({ v: 1, platform: 'win32', from: '0.3.0', to: '0.4.0', at: 1, staged }));
+  const held = Object.assign(Object.create(fs), {
+    renameSync(from, to) {
+      if (from === staged) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+      return fs.renameSync(from, to);
+    },
+  });
+  const { u, shown } = nextStart(userData, { appVersion: '0.3.0', fs: held });
+  const s = u.getState();
+  assert.equal(s.status, 'error');
+  assert.equal(s.error.code, 'INSTALL_INCOMPLETE');
+  assert.ok(fs.existsSync(staged), 'not deleted with the other leftovers');
+  assert.deepEqual(u.reveal(), { ok: true });
+  assert.deepEqual(shown, [staged], 'Show in folder finds it');
+});
+
 test('next start (Windows): still the old version → INSTALL_INCOMPLETE; the installer is kept for another try', () => {
   const userData = F.tmpDir();
   const updates = path.join(userData, 'updates');
@@ -788,6 +1021,8 @@ test('next start (macOS): the helper\'s outcome decides the message; only our ow
   let t = nextStart(userData, { appVersion: '0.3.0', platform: 'darwin', arch: 'arm64', getuid: () => uid });
   assert.equal(t.u.getState().error.code, 'MAC_REPLACE_FAILED');
   assert.match(t.u.getState().error.message, /App Management/);
+  // DOCS-7: the step that brings the install button back (the error state has no latest version).
+  assert.match(t.u.getState().error.message, /then click Check now and install it again \(the download is kept\)/);
   assert.equal(fs.existsSync(stage), false, 'staging removed');
   assert.equal(fs.existsSync(backup), true, 'never the old bundle after a failure');
   assert.deepEqual(fs.readdirSync(updates), [], 'marker and result consumed');
@@ -883,7 +1118,7 @@ test('next start (Windows): an old copy started while the installer still runs l
   }
 });
 
-test('next start (macOS): before the helper wrote an outcome the marker is left alone; `busy` is INSTALL_INCOMPLETE and the zip stays', () => {
+test('next start (macOS): before the helper wrote an outcome the marker is left alone; `busy` is MAC_APP_IN_USE and the zip stays', () => {
   const root = F.tmpDir();
   const userData = path.join(root, 'userData');
   const updates = path.join(userData, 'updates');
@@ -906,11 +1141,12 @@ test('next start (macOS): before the helper wrote an outcome the marker is left 
   assert.ok(fs.existsSync(path.join(updates, 'pending.json')));
   assert.ok(fs.existsSync(path.join(stage, 'Tunnelview.app')), 'the staged bundle is not deleted under the helper');
 
-  // The helper refused to move a bundle that was running (`busy`): did not complete, zip kept.
+  // The helper refused to move a bundle that was running (`busy`, MACFLOW-5: possibly in another
+  // account): its own message says what to quit, zip kept.
   fs.writeFileSync(path.join(updates, 'install-result'), 'busy\n');
   t = nextStart(userData, { ...mac, appVersion: '0.3.0', now: () => NOW + 10 * 1000 });
   let s = t.u.getState();
-  assert.equal(s.error.code, 'INSTALL_INCOMPLETE');
+  assert.deepEqual(s.error, { code: 'MAC_APP_IN_USE', message: 'The update to 0.4.0 did not complete because Tunnelview was still open, possibly in another user account on this Mac. Quit Tunnelview there, then check for updates to try again.' });
   assert.ok(fs.existsSync(path.join(updates, '0.4.0', MAC_NAME)), 'the zip stays for another try');
   assert.deepEqual(t.u.reveal(), { ok: true });
   assert.equal(fs.existsSync(stage), false, 'our staging folder goes');

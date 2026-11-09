@@ -1070,7 +1070,7 @@ async function identVectors({ PROTOCOL, pairing }) {
             { args: [pub, hello(desktop), { cnonce: null, hostId: HOST_ID }], note: 'a desktop viewer: no client nonce' },
             { args: [b64url(OTHER_KEY.pub), hello(sign(OTHER_KEY, b64(run(0x90, 16)), CNONCE_2, '12', '7'), b64(run(0x90, 16))), { cnonce: CNONCE_2, hostId: '12', viewerId: '7' }], note: 'numeric node IDs, 16-byte nonce' },
             { args: [pub, withIdent({ note: 'x', ext: { a: 1 } }), expect], note: 'unknown ident fields are ignored' },
-            { args: [pub, hello(undefined), expect], note: 'an older host: no ident' },
+            { args: [pub, hello(undefined), expect], note: 'no ident: a host older than 0.3, or a 0.3+ host whose key is unavailable right now (hello.version tells them apart)' },
             [pub, hello(null), expect],
             [pub, null, expect], [pub, 'hello', expect], [pub, [], expect],
             [pub, hello('signed'), expect],

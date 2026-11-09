@@ -484,15 +484,38 @@ function main() {
   }
 
   /**
-   * Where downloads and the staged installer live. Windows: %LOCALAPPDATA%\Tunnelview\updates,
-   * never the roaming profile (userData), which folder redirection can put on a network share: the
-   * elevated installer must be read from a local disk, and 100+ MB must not roam. macOS: userData.
+   * %LOCALAPPDATA%\Tunnelview on Windows (<home>\AppData\Local when LOCALAPPDATA is not an
+   * absolute path): per user AND per computer. userData (%APPDATA%) is the roaming profile, which
+   * folder redirection can put on a network share and which a roaming profile copies to every
+   * computer the user signs in to.
    */
-  function updatesDirFor() {
-    if (!IS_WIN) return path.join(app.getPath('userData'), 'updates');
+  function localAppDir() {
     const local = process.env.LOCALAPPDATA;
     const base = typeof local === 'string' && path.isAbsolute(local) ? local : path.join(app.getPath('home'), 'AppData', 'Local');
-    return path.join(base, 'Tunnelview', 'updates');
+    return path.join(base, 'Tunnelview');
+  }
+
+  /**
+   * Where downloads and the staged installer live. Windows: %LOCALAPPDATA%\Tunnelview\updates,
+   * never the roaming profile (userData): the elevated installer must be read from a local disk,
+   * and 100+ MB must not roam. macOS: userData. A development run (not packaged) can never
+   * install, so it keeps to userData/updates on Windows too and never touches the installed
+   * app's folder (pending.json, a verified download, a download in progress).
+   */
+  function updatesDirFor() {
+    if (!IS_WIN || !app.isPackaged) return path.join(app.getPath('userData'), 'updates');
+    return path.join(localAppDir(), 'updates');
+  }
+
+  /**
+   * This computer's identity key. Windows: %LOCALAPPDATA%\Tunnelview\identity.json, never the
+   * roaming profile: a roaming profile would give every computer the user signs in to the same
+   * key, and a Reset identity… on one of them would silently replace the key of the others at the
+   * next profile sync (every phone paired with them then reports "not the computer you paired
+   * with"). It is also not copied to the profile server. macOS: userData/identity.json.
+   */
+  function identityFileFor() {
+    return path.join(IS_WIN ? localAppDir() : app.getPath('userData'), 'identity.json');
   }
 
   /** updater.js with the real OS behind it; its init() reads what a previous install left. */
@@ -509,6 +532,8 @@ function main() {
         platform: process.platform,
         arch: process.arch,
         translated: () => app.runningUnderARM64Translation === true,
+        // macOS version for the update's LSMinimumSystemVersion check ('' elsewhere).
+        systemVersion: () => (IS_MAC && typeof process.getSystemVersion === 'function' ? process.getSystemVersion() : ''),
         pid: process.pid,
         getuid: typeof process.getuid === 'function' ? () => process.getuid() : null,
         sessionBlocker: updateBlocker,
@@ -1054,14 +1079,15 @@ function main() {
   /* ---------------------------------------------------------------- identity + pairing */
 
   /**
-   * This computer's identity key (userData/identity.json, identity.js). A damaged file leaves it
-   * unavailable and untouched (Settings › Security offers Retry / Reset identity…); it is never
-   * replaced behind the user's back. Only the state and the fingerprint are logged, never key bytes.
+   * This computer's identity key (identity.js; identityFileFor(): %LOCALAPPDATA%\Tunnelview on
+   * Windows, userData on macOS). A damaged file leaves it unavailable and untouched (Settings ›
+   * Security offers Retry / Reset identity…); it is never replaced behind the user's back. Only the
+   * state and the fingerprint are logged, never key bytes.
    */
   function loadIdentity() {
     let id = null;
     try {
-      id = createIdentity({ file: path.join(app.getPath('userData'), 'identity.json') });
+      id = createIdentity({ file: identityFileFor() });
       id.load();
     } catch (err) {
       console.error('[main] identity could not be loaded:', err && err.message);

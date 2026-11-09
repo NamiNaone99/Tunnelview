@@ -14,7 +14,7 @@ import {
 import { pushLayer, openPasswordDialog, removePassword, confirmDialog } from './dialogs.js';
 import {
   describeUpdate, updatePlan, revealLabel, checkNow, setAutoCheck, downloadAndInstall, installWithConfirm,
-  revealDownloaded, openReleases,
+  revealDownloaded, openReleases, cancelDownload,
 } from './updates.js';
 
 const SECTIONS = [
@@ -356,7 +356,12 @@ export function createSettingsView() {
       READ_FAILED: 'The identity file can’t be read.',
       VERSION: 'The identity file was written by a newer version of Tunnelview.',
       WRITE_FAILED: 'A new identity couldn’t be saved.',
-      MISSING: 'The identity file and its backup are gone. Put them back and Retry, or reset the identity.',
+      MISSING: 'The identity file and its backup are gone. Put one back and Retry before you restart Tunnelview, or reset the identity.',
+    };
+    // Where identity.js keeps the key (index.js identityFileFor()), so the user knows what to check.
+    const ID_FOLDERS = {
+      windows: '%LOCALAPPDATA%\\Tunnelview',
+      macos: '~/Library/Application Support/Tunnelview',
     };
     const fpEl = h('span', { class: 'mono selectable' });
     const copyBtn = h('button', {
@@ -376,6 +381,7 @@ export function createSettingsView() {
     };
     const resetBtn = h('button', { class: 'btn btn-sm btn-ghost text-danger', type: 'button', dataset: LOCK, onClick: confirmReset }, 'Reset identity…');
     const errText = h('div', { class: 'dim' });
+    const whereText = h('div', { class: 'dim selectable id-where' });
     const retry = async (e) => {
       const b = e && e.currentTarget;
       if (b) b.disabled = true;
@@ -389,6 +395,7 @@ export function createSettingsView() {
       h('div', { class: 'grow' },
         h('div', { class: 'strong' }, "This computer can't prove its identity to phones right now"),
         errText,
+        whereText,
         h('div', { class: 'dim' }, 'Phones keep their pairing. Retry once the cause is fixed, or reset the identity so phones pair again.'),
         h('div', { class: 'row gap-4 id-actions' },
           h('button', { class: 'btn btn-sm', type: 'button', onClick: retry }, icon('refresh'), 'Retry'),
@@ -400,7 +407,7 @@ export function createSettingsView() {
       h('div', { class: 'row gap-16 id-head' }, h('div', { class: 'set-text grow' }, title, desc), h('div', { class: 'set-ctl' }, resetBtn)),
       unavailable,
       wasReset);
-    bind(() => {
+    bind((s, st) => {
       const id = store.identity;
       el.hidden = !hasIdentityApi() || !id;
       if (el.hidden) return;
@@ -410,6 +417,9 @@ export function createSettingsView() {
       unavailable.hidden = id.available;
       errText.textContent = ID_ERRORS[id.error] || '';
       errText.hidden = !ID_ERRORS[id.error];
+      const folder = ID_FOLDERS[st && st.platform];
+      whereText.textContent = folder ? `The files are identity.json and identity.json.bak in ${folder}.` : '';
+      whereText.hidden = !folder;
       wasReset.hidden = !id.wasReset;
     });
     return el;
@@ -596,6 +606,10 @@ export function createSettingsView() {
     // Download and install / Restart and install, Show in folder, Releases page
     const primaryBtn = h('button', { class: 'btn btn-sm btn-primary', type: 'button', 'aria-describedby': 'update-hint', onClick: onPrimary });
     const revealBtn = h('button', { class: 'btn btn-sm', type: 'button', onClick: () => revealDownloaded() });
+    const cancelBtn = h('button', {
+      class: 'btn btn-sm', type: 'button', hidden: true,
+      onClick: () => { if (updatePlan(current(), store.updateOps).cancel) cancelDownload(); },
+    }, icon('x'), 'Cancel download');
     const releasesBtn = h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onClick: () => openReleases() }, icon('external'), 'Releases page');
     const hintText = h('span');
     const hint = h('div', { class: 'small update-hint', id: 'update-hint', hidden: true }, icon('lock', { size: 14 }), hintText);
@@ -605,6 +619,7 @@ export function createSettingsView() {
       if (!p || !p.enabled) return;
       if (p.action === 'download') await downloadAndInstall();
       else if (p.action === 'install') await installWithConfirm();
+      else if (p.action === 'reveal') await revealDownloaded();
       else if (p.action === 'releases') await openReleases();
     }
 
@@ -653,11 +668,12 @@ export function createSettingsView() {
       if (p) {
         setBtn(primaryBtn, p);
         const lead = p.busy && p.label.endsWith('…') ? h('span', { class: 'spinner spinner-sm spinner-on-accent' })
-          : icon(p.action === 'releases' ? 'external' : p.action === 'install' ? 'refresh' : 'download');
+          : icon(p.action === 'releases' ? 'external' : p.action === 'install' ? 'refresh' : p.action === 'reveal' ? 'folder' : 'download');
         primaryBtn.replaceChildren(lead, p.label);
       }
       revealBtn.hidden = !plan.reveal;
       revealBtn.replaceChildren(icon('folder'), revealLabel(u.platform));
+      cancelBtn.hidden = !plan.cancel;
       releasesBtn.hidden = !plan.releases;
       hint.hidden = !plan.hint;
       hintText.textContent = plan.hint;
@@ -679,7 +695,7 @@ export function createSettingsView() {
         detailEl,
         progress,
         notesBlock,
-        h('div', { class: 'row gap-4 update-actions' }, primaryBtn, revealBtn, h('span', { class: 'spacer' }), releasesBtn),
+        h('div', { class: 'row gap-4 update-actions' }, primaryBtn, cancelBtn, revealBtn, h('span', { class: 'spacer' }), releasesBtn),
         hint,
         live));
   }
@@ -751,7 +767,7 @@ export function createSettingsView() {
       h('header', { class: 'sheet-head' },
         h('div', { class: 'grow' }, h('h2', { id: 'settings-title' }, 'Settings'),
           h('div', { class: 'small faint' }, hasUpdateApi()
-            ? 'Remote sessions stay inside your tailnet; only update checks go to GitHub'
+            ? 'Remote sessions stay inside your tailnet; only updates come from GitHub'
             : 'Remote sessions stay inside your tailnet')),
         closeBtn),
       h('nav', { class: 'sheet-nav', 'aria-label': 'Settings sections' }, navBtns),

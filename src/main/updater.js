@@ -14,7 +14,9 @@
  *   updater.dispose()                      timers off; a running check / download is aborted
  *   updater.getState()   → UpdateState     (shape: src/preload/main.js)
  *   updater.check()      → Promise<UpdateState>
- *   updater.download()   → Promise<Result> resolves when the download is verified (or failed)
+ *   updater.download()   → Promise<Result> resolves when the download is verified (or failed);
+ *                                          {ok:false, code:'CANCELLED'} after cancelDownload()
+ *   updater.cancelDownload() → Result      stop a running download (the state goes back to 'available')
  *   updater.install()    → Promise<Result> {ok:true} once the installer / helper runs; the app quits
  *   updater.reveal()     → Result          show the downloaded file in Explorer / Finder
  *   updater.settingsChanged(keys)          autoUpdateCheck toggled: reschedule
@@ -28,8 +30,9 @@
  *
  * deps (everything that touches the OS is injectable; tests make no network connection and start
  * no installer): appVersion, isPackaged, settings {get, update}, userData, updatesDir (default
- * <userData>/updates; index.js gives Windows %LOCALAPPDATA%\Tunnelview\updates), resourcesPath,
- * execPath, platform, arch, translated (bool or fn: Rosetta / ARM64 translation), pid, getuid,
+ * <userData>/updates; index.js gives an installed Windows copy %LOCALAPPDATA%\Tunnelview\updates),
+ * resourcesPath, execPath, platform, arch, translated (bool or fn: Rosetta / ARM64 translation),
+ * systemVersion (macOS version string, process.getSystemVersion()), pid, getuid,
  * sessionBlocker (→ 'INCOMING_SESSION'|'INCOMING_REQUEST'|'OUTGOING_SESSION'|null), quit,
  * showItemInFolder, transport {get(url, {headers, timeoutMs, signal}) → Promise<IncomingMessage-like>},
  * fs, path, spawn, execFile, now, timers {setTimeout, clearTimeout}, keys, homedir, exlockFlag, log.
@@ -40,7 +43,10 @@
  * offered only when its version is strictly greater than the running one. Schedule (U3): first
  * check 60 s after start, then every 24 h; settings.lastUpdateCheckAt (written after every
  * completed check, automatic or manual) keeps restarts from checking more than once a day, and a
- * value more than 24 h in the future (clock moved back) counts as never. A failed check is quiet
+ * value more than 24 h in the future (clock moved back) counts as never. One exception: while a
+ * finished download newer than this version waits in updatesDir (the user deferred the install,
+ * then restarted), the first check after a start runs 60 s after it whatever lastUpdateCheckAt
+ * says, so "Restart and install" comes back without a day's wait. A failed check is quiet
  * (status line only). One that may pass soon (network, timeout, HTTP 429 / 5xx, no manifest yet)
  * is tried again after 2 h, then 4, 8 and 16 h, at most a day; any other failure (a manifest that
  * does not verify, TLS, a bad redirect, another HTTP error) counts as that day's check.
@@ -50,8 +56,11 @@
  * manifest, so a release published between the two requests cannot mix files. Streams to
  * <updatesDir>/<version>/<name>.partial with a running SHA-256 and byte count (more bytes than
  * the manifest's size stop it at once), then renames to <name>. A wrong size or hash deletes the
- * file. Only the newest version folder is kept. A same-version manifest that lists other bytes
- * (a rebuilt release) drops the earlier download.
+ * file. Besides the 30 s socket idle timeout, a download that gets fewer than 64 KiB (or the
+ * rest of the file) in any 60 s stops with TIMEOUT, so a trickling response cannot hold the
+ * updater forever; the user can also cancel it (cancelDownload). Only the newest version folder
+ * is kept. A same-version manifest that lists other bytes (a rebuilt release) drops the earlier
+ * download.
  *
  * Install (U5), refused during an incoming session, a pending incoming request or an outgoing
  * session (checked first and again right before anything is started; a session that starts
@@ -61,7 +70,9 @@
  *            copied folders are not supported) and only when updatesDir is on a local disk (not a
  *            UNC path). The verified file is moved into a fresh mkdtemp folder
  *            (<updatesDir>\install-XXXXXX), re-hashed under an exclusive lock (UV_FS_O_EXLOCK;
- *            EBUSY retried for about 10 s, then LOCKED with the download kept), then, in the same
+ *            EBUSY retried for about 10 s, then LOCKED with the download kept: moved back, or, when
+ *            the program holding it blocks that move too, left in its install-* folder and used
+ *            from there next time), then, in the same
  *            tick, `resources\elevate.exe <installer> /S --updated --force-run` is spawned (no
  *            shell, no -wait). A direct spawn of the installer fails with EACCES and shows no UAC
  *            prompt. elevate.exe exits once the user answers UAC: 0 → the installer runs and
@@ -70,22 +81,32 @@
  *            anything else → LAUNCH_FAILED. The installer's own exit code cannot be seen.
  *   macOS    (ad-hoc signed zip): the running bundle (from execPath) must not be translocated, must
  *            be io.github.naminaone99.tunnelview, owned by this user, in a folder this user can
- *            write (a probe folder made and removed there proves it). The zip is re-hashed,
+ *            write (a probe folder made and removed there proves it) and other accounts cannot
+ *            (not world-writable, such as /Users/Shared: SHARED_LOCATION). The zip is re-hashed,
  *            extracted with `ditto -x -k --noqtn` into a fresh folder (a failure there is local,
  *            such as free space, and keeps the zip), and the bundle is checked: exactly
  *            Tunnelview.app, bundle id, CFBundleShortVersionString == manifest version,
- *            CFBundleExecutable, Mach-O architecture, `codesign --verify --deep --strict`, no
- *            quarantine. Only then is the staging folder <parent>/.Tunnelview-update-XXXXXX made and
- *            the bundle moved into it; then `/bin/sh -c MAC_SWAP_SCRIPT` (a constant; paths only as
- *            arguments) is spawned detached and Tunnelview quits. The helper waits for this PID to
- *            exit (≤ 120 s) and for nothing else to run from the bundle (≤ 5 s, else `busy`), moves
- *            the old bundle aside, moves the new one in (rolling back on failure), deletes the old
- *            one, resets the Screen Recording / Accessibility / Downloads permission entries
- *            (ad-hoc: each build is a new code identity, like scripts/mac-install.sh) and opens the
- *            app. It writes its outcome to <updatesDir>/install-result.
+ *            CFBundleExecutable, LSMinimumSystemVersion ≤ this Mac's macOS (else OS_TOO_OLD: a
+ *            bundle macOS refuses to open never replaces a working one), Mach-O architecture,
+ *            `codesign --verify --deep --strict`, no quarantine. A bundle check that fails keeps the
+ *            zip (it matched its signed hash, so downloading it again cannot help), and a check
+ *            killed by its time limit is VERIFY_TIMEOUT (try again). Tunnelview running from the
+ *            bundle in another user account refuses the install (IN_USE_BY_OTHER_USER) before
+ *            anything quits. Only then is the staging folder <parent>/.Tunnelview-update-XXXXXX made
+ *            and the bundle moved into it; then `/bin/sh -c MAC_SWAP_SCRIPT` (a constant; paths only
+ *            as arguments) is spawned detached and Tunnelview quits. The helper waits for this PID
+ *            to exit (≤ 120 s) and for nothing else to run from the bundle (≤ 5 s, else `busy`),
+ *            moves the old bundle aside, moves the new one in (rolling back on failure), resets the
+ *            Screen Recording / Accessibility / Downloads permission entries (ad-hoc: each build is a
+ *            new code identity, like scripts/mac-install.sh) and opens the app, only while it is
+ *            owned by this user. The old bundle stays, hidden, as .Tunnelview-old-*.app until the
+ *            new version has started once (init() removes it then), so a new version that macOS
+ *            will not start still leaves the old one on disk. The helper writes its outcome to
+ *            <updatesDir>/install-result.
  *   Both write <updatesDir>/pending.json {v:1, platform, from, to, at, …} first; init() on the
- *   next start reads it: running version ≥ `to` → justUpdated, else INSTALL_INCOMPLETE (or
- *   MAC_REPLACE_FAILED) and the download is kept for another try. An old copy started while the
+ *   next start reads it: running version ≥ `to` → justUpdated {from, to: the running version},
+ *   else INSTALL_INCOMPLETE (or MAC_REPLACE_FAILED, or MAC_APP_IN_USE after the helper's `busy`)
+ *   and the download is kept for another try. An old copy started while the
  *   install still runs (Windows: the staged installer is still locked, ≤ 15 min; macOS: no helper
  *   outcome yet, ≤ 150 s) leaves the marker for the next start. An automatic check does not
  *   replace that next-start failure while it offers the same version again.
@@ -120,6 +141,10 @@ const BUSY_RETRY_MS = 30 * 60 * 1000;
 const MAX_TIMER_MS = 0x7fffffff;
 const CHECK_DEADLINE_MS = 30 * 1000;    // the whole manifest check
 const SOCKET_IDLE_MS = 30 * 1000;       // no byte for this long → the request fails (download too)
+// A download that gets fewer than STALL_MIN_BYTES (or the rest of the file) in any STALL_WINDOW_MS
+// stops with TIMEOUT: one byte every 25 s would never trip the socket idle timeout.
+const STALL_WINDOW_MS = 60 * 1000;
+const STALL_MIN_BYTES = 64 * 1024;
 const RENAME_RETRIES = 5;
 const LOCK_RETRY_MS = 200;
 const LOCK_RETRIES = 50;                // about 10 s of EBUSY (antivirus scanning the new file)
@@ -135,7 +160,7 @@ const APP_ID = 'io.github.naminaone99.tunnelview';
 const WIN_UNINSTALLER = 'Uninstall Tunnelview.exe';
 const MAC_APP_NAME = 'Tunnelview.app';
 const MAC_EXECUTABLE = 'Tunnelview';
-const MAC_TOOLS = Object.freeze({ sh: '/bin/sh', ditto: '/usr/bin/ditto', codesign: '/usr/bin/codesign', plutil: '/usr/bin/plutil', xattr: '/usr/bin/xattr' });
+const MAC_TOOLS = Object.freeze({ sh: '/bin/sh', ditto: '/usr/bin/ditto', codesign: '/usr/bin/codesign', plutil: '/usr/bin/plutil', xattr: '/usr/bin/xattr', ps: '/bin/ps' });
 const MAC_HELPER_ENV_PATH = '/usr/bin:/bin:/usr/sbin:/sbin';
 const MAC_DITTO_TIMEOUT_MS = 300 * 1000;
 const MAC_CODESIGN_TIMEOUT_MS = 180 * 1000;
@@ -152,26 +177,33 @@ const MAC_BACKUP_RE = /^\.Tunnelview-old-[0-9a-f]{12}\.app$/;
 const UA_VERSION_RE = /^[0-9A-Za-z.+-]{1,32}$/;
 const RUNNING_VERSION_RE = /^(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 const UAC_RE = /could not be launched: (\d+)\s*$/;
+const OS_VERSION_RE = /^\d{1,4}(\.\d{1,4}){0,2}$/;
 
 const STATUSES = Object.freeze(['idle', 'checking', 'up-to-date', 'available', 'downloading', 'ready', 'installing', 'error']);
 const PHASES = Object.freeze(['preparing', 'waiting-for-approval', 'quitting']);
 const BLOCKERS = Object.freeze(['INCOMING_SESSION', 'INCOMING_REQUEST', 'OUTGOING_SESSION']);
 // Thrown inside an install that had already started: answered like the refusals before it (the
 // state goes back to what it was), never as status 'error'.
-const LATE_REFUSALS = new Set([...BLOCKERS, 'SESSION_ACTIVE', 'NOT_SUPPORTED', 'NOT_READY', 'BUSY']);
+const LATE_REFUSALS = new Set([...BLOCKERS, 'SESSION_ACTIVE', 'NOT_SUPPORTED', 'NOT_READY', 'BUSY', 'IN_USE_BY_OTHER_USER']);
 
 /*
  * The helper that replaces the macOS bundle after Tunnelview has quit. A constant: every path
  * arrives as an argument ($1 … $6), never as script text. Writes one word to $result:
  * ok | timeout | busy | precondition | move-old-failed | move-new-failed | rollback-failed | bad-args.
- * `busy`: a Tunnelview process (one started from the Dock meanwhile, or a helper process that
- * outlived the old app) still runs from the bundle after 5 s, so nothing is moved.
+ * `busy`: a Tunnelview process (one started from the Dock meanwhile, a helper process that
+ * outlived the old app, or a copy running in another user account) still runs from the bundle
+ * after 5 s, so nothing is moved.
+ * The old bundle is never deleted here: it stays as $old until the new version has started once
+ * (init() → _cleanupMacStaging), so a new bundle macOS refuses to open still leaves one on disk.
+ * `reopen` opens $dest only while this user owns it: whatever another account managed to put
+ * there (a folder others can write) is never launched as this user.
  */
 const MAC_SWAP_SCRIPT = [
   'pid=$1; dest=$2; stage=$3; old=$4; result=$5; bid=$6',
   'new="$stage/Tunnelview.app"',
   "trap '' HUP INT TERM",
   'say() { echo "$1" > "$result.tmp" && /bin/mv -f "$result.tmp" "$result"; }',
+  'reopen() { [ "$(/usr/bin/stat -f %u "$dest" 2>/dev/null)" = "$(/usr/bin/id -u)" ] && /usr/bin/open "$dest"; }',
   'case $dest in /*.app) ;; *) say bad-args; exit 2 ;; esac',
   'case $stage in /*/.Tunnelview-update-*) ;; *) say bad-args; exit 2 ;; esac',
   'case $old in /*/.Tunnelview-old-*.app) ;; *) say bad-args; exit 2 ;; esac',
@@ -187,27 +219,29 @@ const MAC_SWAP_SCRIPT = [
   'n=0',
   'while busy; do',
   '  n=$((n + 1))',
-  '  if [ "$n" -ge 25 ]; then say busy; /usr/bin/open "$dest"; exit 1; fi',
+  '  if [ "$n" -ge 25 ]; then say busy; reopen; exit 1; fi',
   '  /bin/sleep 0.2',
   'done',
   'if [ ! -d "$new" ] || [ -L "$new" ] || [ -e "$old" ] || [ -L "$old" ] || [ -L "$dest" ] || [ ! -d "$dest" ]; then',
-  '  say precondition; /usr/bin/open "$dest"; exit 1',
+  '  say precondition; reopen; exit 1',
   'fi',
-  'if ! /bin/mv -- "$dest" "$old"; then say move-old-failed; /usr/bin/open "$dest"; exit 1; fi',
+  'if ! /bin/mv -- "$dest" "$old"; then say move-old-failed; reopen; exit 1; fi',
   'if [ -e "$dest" ] || ! /bin/mv -- "$new" "$dest"; then',
   '  if [ ! -e "$dest" ] && /bin/mv -- "$old" "$dest"; then say move-new-failed; else say rollback-failed; fi',
-  '  /usr/bin/open "$dest"; exit 1',
+  '  reopen; exit 1',
   'fi',
-  '/bin/rm -rf -- "$old"',
   '/bin/rmdir -- "$stage" 2>/dev/null',
   'for svc in ScreenCapture Accessibility SystemPolicyDownloadsFolder; do /usr/bin/tccutil reset "$svc" "$bid" >/dev/null 2>&1; done',
   'say ok',
-  '/usr/bin/open "$dest"',
+  'reopen',
 ].join('\n');
 
 /* ------------------------------------------------------------------ error codes → English */
 
-const DAMAGED = 'The downloaded update is damaged, so it was deleted. Download it again.';
+// A bundle that matched its signed hash but failed a check on this Mac: downloading the same
+// bytes again cannot help, so the zip is kept and the user is sent to the releases page.
+const CHECK_FAILED = 'The downloaded update did not pass the macOS checks, so it was not installed. Get the new version from the GitHub releases page.';
+const STANDARD_ACCOUNT_APPS = 'the Applications folder (on a standard account, the Applications folder in your home folder)';
 const MESSAGES = Object.freeze({
   // checking / downloading
   NETWORK: 'Could not reach GitHub. Check the internet connection and try again.',
@@ -225,6 +259,8 @@ const MESSAGES = Object.freeze({
   SIZE_MISMATCH: 'The downloaded file has the wrong size, so it was deleted. Try again.',
   HASH_MISMATCH: 'The downloaded file does not match its signed checksum, so it was deleted. Try again.',
   DISK_ERROR: 'Could not save the update on this computer. Check that the disk has free space.',
+  CANCELLED: 'Download cancelled.',
+  NOT_DOWNLOADING: 'No download is running.',
   // refusals (the state does not change)
   INCOMING_SESSION: 'Someone is connected to this computer. Install the update after the session ends.',
   INCOMING_REQUEST: 'Someone is asking to connect to this computer. Install the update after you answer.',
@@ -240,21 +276,26 @@ const MESSAGES = Object.freeze({
   TAMPERED: 'The update file changed after it was checked, so it was not used. Download it again.',
   LOCKED: 'Another program (such as antivirus software) is using the update file. Try again in a moment.',
   // macOS install
-  TRANSLOCATED: 'macOS is running Tunnelview from a temporary read-only copy. Move Tunnelview into the Applications folder with Finder, open it again, then install the update.',
-  READ_ONLY_LOCATION: 'Tunnelview is running from a read-only place (such as the disk image). Move it into the Applications folder, open it again, then install the update.',
-  NOT_WRITABLE: 'Your account cannot replace Tunnelview in its folder. Ask an administrator, or install the downloaded update by hand.',
+  TRANSLOCATED: `macOS is running Tunnelview from a temporary read-only copy. With Finder, move Tunnelview into ${STANDARD_ACCOUNT_APPS}, open it again, then install the update.`,
+  READ_ONLY_LOCATION: `Tunnelview is running from a read-only place (such as the disk image). Move it into ${STANDARD_ACCOUNT_APPS}, open it again, then install the update.`,
+  NOT_WRITABLE: 'Your account cannot replace Tunnelview in its folder. Ask an administrator, move Tunnelview into the Applications folder in your home folder, or install the downloaded update by hand.',
   NOT_OWNER: 'Tunnelview was installed by another user account, so this account cannot replace it. Ask that user or an administrator, or install the downloaded update by hand.',
+  SHARED_LOCATION: `Tunnelview is in a folder that other accounts on this Mac can change, so it cannot replace itself there. Move it into ${STANDARD_ACCOUNT_APPS}, open it again, then install the update.`,
   NOT_TUNNELVIEW: 'This copy of Tunnelview cannot update itself (it is not an installed Tunnelview app). Get the new version from the GitHub releases page.',
   EXTRACT_FAILED: 'Could not unpack the update. Check that the disk has free space, then try again.',
-  BAD_BUNDLE: DAMAGED,
-  WRONG_VERSION: DAMAGED,
-  WRONG_ARCH: DAMAGED,
-  CODESIGN_FAILED: DAMAGED,
-  QUARANTINED: DAMAGED,
+  BAD_BUNDLE: CHECK_FAILED,
+  WRONG_VERSION: CHECK_FAILED,
+  WRONG_ARCH: CHECK_FAILED,
+  CODESIGN_FAILED: CHECK_FAILED,
+  QUARANTINED: CHECK_FAILED,
+  VERIFY_TIMEOUT: 'Checking the downloaded update took too long, so it was not installed. Try again.',
+  OS_TOO_OLD: (i) => `Tunnelview ${i.to || 'the new version'} needs macOS ${i.need || 'a newer version'} or newer, so it was not installed. Tunnelview ${i.current || 'the current version'} stays installed.`,
+  IN_USE_BY_OTHER_USER: 'Tunnelview is open in another user account on this Mac. Quit it there, then install the update.',
   SPAWN_FAILED: 'Could not start the update helper. Tunnelview keeps running; try again.',
   // the next start
   INSTALL_INCOMPLETE: (i) => `The update to ${i.to || 'the new version'} did not complete; Tunnelview ${i.current || 'the current version'} is still installed. Check for updates to try again.`,
-  MAC_REPLACE_FAILED: (i) => `macOS did not let Tunnelview replace itself, so Tunnelview ${i.current || 'the current version'} is still installed. Allow Tunnelview in System Settings › Privacy & Security › App Management, or install the downloaded update by hand.`,
+  MAC_REPLACE_FAILED: (i) => `macOS did not let Tunnelview replace itself, so Tunnelview ${i.current || 'the current version'} is still installed. Allow Tunnelview in System Settings › Privacy & Security › App Management, then click Check now and install it again (the download is kept), or install the downloaded update by hand.`,
+  MAC_APP_IN_USE: (i) => `The update to ${i.to || 'the new version'} did not complete because Tunnelview was still open, possibly in another user account on this Mac. Quit Tunnelview there, then check for updates to try again.`,
 });
 const MANIFEST_CODE = Object.freeze({
   TOO_LARGE: 'MANIFEST_TOO_LARGE',
@@ -263,11 +304,12 @@ const MANIFEST_CODE = Object.freeze({
   BAD_SIGNATURE: 'MANIFEST_BAD_SIGNATURE',
   INVALID: 'MANIFEST_INVALID',
 });
-// The download itself is at fault: it is deleted. Not EXTRACT_FAILED or LOCKED: the zip / installer
-// passed its signed hash right before, so the cause is this computer (free space, a slow disk,
-// another program holding the file) and downloading the same bytes again cannot help.
-const DAMAGED_CODES = new Set(['BAD_BUNDLE', 'WRONG_VERSION', 'WRONG_ARCH', 'CODESIGN_FAILED', 'QUARANTINED', 'TAMPERED']);
-const REVEAL_CODES = new Set(['TRANSLOCATED', 'READ_ONLY_LOCATION', 'NOT_WRITABLE', 'NOT_OWNER']);
+// The download itself is at fault: it is deleted. Only TAMPERED (the bytes no longer match the
+// signed hash). Every other failure comes after the zip / installer passed its signed hash right
+// before (EXTRACT_FAILED, LOCKED, the bundle checks, OS_TOO_OLD, VERIFY_TIMEOUT): the same bytes
+// would fail the same way, or the cause is this computer, so downloading again cannot help.
+const DAMAGED_CODES = new Set(['TAMPERED']);
+const REVEAL_CODES = new Set(['TRANSLOCATED', 'READ_ONLY_LOCATION', 'NOT_WRITABLE', 'NOT_OWNER', 'SHARED_LOCATION']);
 
 function messageFor(code, info = {}) {
   const m = MESSAGES[code];
@@ -348,6 +390,24 @@ function parseRunningVersion(v) {
   return m ? { base: `${m[1]}.${m[2]}.${m[3]}`, pre: !!m[4] } : null;
 }
 
+/**
+ * macOS version `have` is at least `need` ("13", "13.5", "14.0.1"; missing parts count as 0).
+ * Anything that is not such a dotted number is false: an unreadable version never passes.
+ */
+function osAtLeast(have, need) {
+  const h = typeof have === 'string' ? have.trim() : '';
+  const n = typeof need === 'string' ? need.trim() : '';
+  if (!OS_VERSION_RE.test(h) || !OS_VERSION_RE.test(n)) return false;
+  const a = h.split('.').map(Number);
+  const b = n.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const x = a[i] || 0;
+    const y = b[i] || 0;
+    if (x !== y) return x > y;
+  }
+  return true;
+}
+
 function netError(err, signal) {
   if (err && err.updaterCode) return err;
   if (signal && signal.aborted) {
@@ -404,6 +464,9 @@ class Updater extends EventEmitter {
     let translated = deps.translated;
     try { translated = typeof translated === 'function' ? translated() : translated; } catch { translated = false; }
     this._platformKey = platformKeyFor(this._platform, this._arch, translated === true);
+    let systemVersion = deps.systemVersion;
+    try { systemVersion = typeof systemVersion === 'function' ? systemVersion() : systemVersion; } catch { systemVersion = ''; }
+    this._systemVersion = typeof systemVersion === 'string' ? systemVersion : '';
     this._fs = deps.fs || nodeFs;
     this._path = deps.path || (this._platform === 'win32' ? nodePath.win32 : nodePath.posix);
     this._userData = deps.userData;
@@ -447,6 +510,9 @@ class Updater extends EventEmitter {
     this._nextStartFailure = null; // {to, code}: init() found an install that did not take
     this._pendingDeferred = false; // init() left pending.json for a still-running install
     this._busyInstallDir = null;   // …and this Windows staging folder with it
+    this._keepInstallDir = null;   // init(): a staged installer that could not be moved back stays here
+    this._resumeDownload = false;  // init() found a finished download: the first check runs 60 s after start
+    this._osRefused = null;        // {to, need, current}: OS_TOO_OLD for that version in this run
   }
 
   get justUpdated() { return this._justUpdated ? { ...this._justUpdated } : null; }
@@ -471,12 +537,16 @@ class Updater extends EventEmitter {
     const s = this._settingsNow();
     const latest = this._latest;
     const entry = latest && this._platformKey ? latest.files[this._platformKey] : null;
+    const block = this._macInstallBlock();
     return {
       status: this._status,
       phase: this._status === 'installing' ? this._phase : null,
       currentVersion: this._appVersion,
       platform: this._platform === 'win32' ? 'windows' : this._platform === 'darwin' ? 'macos' : 'other',
-      supported: this._supported,
+      supported: this._supported && block !== 'NOT_TUNNELVIEW',
+      // macOS: where this copy runs from, it cannot replace itself (install() would refuse with
+      // this code). The download stays offered: the verified zip can be installed by hand.
+      installBlocked: block && block !== 'NOT_TUNNELVIEW' ? { code: block, message: messageFor(block) } : null,
       autoCheck: s.autoUpdateCheck === true,
       lastCheckAt: Number.isSafeInteger(s.lastUpdateCheckAt) ? s.lastUpdateCheckAt : null,
       latest: latest ? { version: latest.version, date: latest.date, notes: latest.notes, size: entry ? entry.size : 0 } : null,
@@ -541,6 +611,41 @@ class Updater extends EventEmitter {
     return this._platform === 'darwin';
   }
 
+  /**
+   * Why the running macOS bundle cannot replace itself where it is, cheaply (no tool runs): the
+   * same location checks install() makes, as a code, or null. Not darwin / not supported: null.
+   */
+  _macInstallBlock() {
+    if (this._platform !== 'darwin' || !this._supported) return null;
+    const b = this._macBundle();
+    if (b.code) return b.code;
+    const fs = this._fs;
+    try {
+      fs.accessSync(b.parent, fs.constants.W_OK);
+    } catch (err) {
+      return err && err.code === 'EROFS' ? 'READ_ONLY_LOCATION' : 'NOT_WRITABLE';
+    }
+    if (this._sharedFolder(b.parent)) return 'SHARED_LOCATION';
+    if (this._getuid) {
+      let owner = null;
+      try { owner = fs.statSync(b.real).uid; } catch { /* unknown */ }
+      if (owner !== this._getuid()) return 'NOT_OWNER';
+    }
+    return null;
+  }
+
+  /**
+   * The app's folder is one other accounts may change (world-writable, such as /Users/Shared;
+   * unreadable counts too). The sticky bit protects the bundle there only until the helper moves
+   * it aside: another account could then put its own bundle at that path. Only the folder's owner
+   * (root for /Users/Shared) can change its mode, so this cannot be undone by a race.
+   */
+  _sharedFolder(parent) {
+    let st = null;
+    try { st = this._fs.statSync(parent); } catch { st = null; }
+    return !st || (st.mode & 0o002) !== 0;
+  }
+
   /** Next-start bookkeeping: the pending-install marker, then leftovers. Never throws. */
   init() {
     try { this._processPending(); } catch (err) { this._log.error('[updater] pending install check failed:', err && err.message); }
@@ -548,7 +653,20 @@ class Updater extends EventEmitter {
     if (this._platform === 'darwin' && !this._pendingDeferred) {
       try { this._sweepMacStaging(); } catch (err) { this._log.warn('[updater] staging cleanup failed:', err && err.message); }
     }
+    // A verified download the user has not installed yet (cancelled the confirmation, declined the
+    // prompt, an install that did not take): the first check after this start finds it again
+    // without waiting for the rest of the day (_schedule).
+    try { this._resumeDownload = this._hasCompleteDownload(); } catch { this._resumeDownload = false; }
     return { justUpdated: this.justUpdated };
+  }
+
+  /** <updatesDir>/<v>/<this platform's asset for v> exists for a v newer than this version. */
+  _hasCompleteDownload() {
+    if (!this._platformKey || !this._running) return false;
+    let names = [];
+    try { names = this._fs.readdirSync(this._updatesDir); } catch { return false; }
+    return names.some((v) => manifestLib.validVersion(v) && this._isNewer(v)
+      && this._isFile(this._path.join(this._updatesDir, v, manifestLib.assetName(this._platformKey, v))));
   }
 
   start() {
@@ -600,7 +718,8 @@ class Updater extends EventEmitter {
     const now = this._now();
     const last = this._lastCheck();
     let due = this._startedAt + FIRST_CHECK_DELAY_MS;
-    if (last !== null) due = Math.max(due, last + CHECK_INTERVAL_MS);
+    // A finished download waits (init()): the first check of this start is not held back a day.
+    if (last !== null && !this._resumeDownload) due = Math.max(due, last + CHECK_INTERVAL_MS);
     if (this._retryAt) due = Math.max(due, this._retryAt);
     const delay = Math.min(Math.max(0, due - now), MAX_TIMER_MS);
     this._timer = this._timers.setTimeout(() => { this._timer = null; this._autoCheck(); }, delay);
@@ -742,6 +861,13 @@ class Updater extends EventEmitter {
         this._status = 'error';
         this._error = keep;
       }
+      // This Mac already refused that version (OS_TOO_OLD) in this run: "ready to install" again
+      // would only repeat the refusal.
+      const o = this._osRefused;
+      if (o && this._downloaded && this._latest && this._latest.version === o.to) {
+        this._status = 'error';
+        this._error = { code: 'OS_TOO_OLD', message: messageFor('OS_TOO_OLD', o) };
+      }
     } catch (err) {
       const e = netError(err, ac.signal);
       if (e.updaterCode !== 'ABORTED' || !this._disposed) {
@@ -768,6 +894,7 @@ class Updater extends EventEmitter {
       this._timers.clearTimeout(deadline);
       this._op = null;
       this._abort = null;
+      this._resumeDownload = false; // back to the daily rhythm (U3), whatever this check found
       if (!this._disposed) {
         this._schedule();
         this._emit();
@@ -800,6 +927,28 @@ class Updater extends EventEmitter {
     this._abort = ac;
     this._progress = { received: 0, total: entry.size, percent: 0 };
     this._setStatus('downloading', { error: null, phase: null });
+    // Stall watchdog: at least STALL_MIN_BYTES (or the rest of the file) per STALL_WINDOW_MS,
+    // from the first request on. Injected timers, so the tests' manual clock drives it.
+    let received = 0;
+    let mark = 0;
+    let watchdog = null;
+    const stopWatchdog = () => {
+      if (watchdog) { try { this._timers.clearTimeout(watchdog); } catch { /* ignore */ } }
+      watchdog = null;
+    };
+    const armWatchdog = () => {
+      watchdog = this._timers.setTimeout(() => {
+        watchdog = null;
+        if (received - mark < Math.min(STALL_MIN_BYTES, entry.size - mark)) {
+          this._log.warn(`[updater] download stalled: ${received - mark} bytes in ${STALL_WINDOW_MS / 1000} s`);
+          ac.abort(updateError('TIMEOUT'));
+          return;
+        }
+        mark = received;
+        armWatchdog();
+      }, STALL_WINDOW_MS);
+      if (watchdog && typeof watchdog.unref === 'function') watchdog.unref();
+    };
     try {
       const url = assetUrl(this._platformKey, m.version, entry.name);
       try {
@@ -808,6 +957,7 @@ class Updater extends EventEmitter {
       } catch (err) {
         throw updateError('DISK_ERROR', { detail: err && err.code });
       }
+      armWatchdog();
       const res = await this._open(url, ac.signal, SOCKET_IDLE_MS);
       const declared = res.headers ? res.headers['content-length'] : undefined;
       if (declared !== undefined && Number(declared) !== entry.size) {
@@ -815,7 +965,6 @@ class Updater extends EventEmitter {
         throw updateError('SIZE_MISMATCH');
       }
       const hash = crypto.createHash('sha256');
-      let received = 0;
       const meter = new Transform({
         transform: (chunk, _enc, cb) => {
           received += chunk.length;
@@ -826,14 +975,22 @@ class Updater extends EventEmitter {
         },
       });
       const out = fs.createWriteStream(partial, { mode: 0o600 });
-      out.on('error', (e) => { if (e && typeof e === 'object') e.updaterDisk = true; });
+      // Only an error that starts at the file is a disk error. pipeline() also destroys `out` with
+      // the network's error (a reset, the idle timeout, a premature close: the response is gone
+      // before its end) or the abort's: those are not tagged. A response that ended normally (all
+      // of a small file already read) does not make a later write error the network's.
+      const responseFailed = () => !!res.destroyed && !res.readableEnded;
+      out.on('error', (e) => { if (e && typeof e === 'object' && !responseFailed() && !ac.signal.aborted) e.updaterDisk = true; });
       try {
         await pipeline(res, meter, out, { signal: ac.signal });
       } catch (err) {
         if (err && err.updaterCode) throw err;
+        if (ac.signal.aborted) throw netError(err, ac.signal); // TIMEOUT (stalled), CANCELLED, ABORTED
         if (err && err.updaterDisk) throw updateError('DISK_ERROR', { detail: err.code });
         throw netError(err, ac.signal);
       }
+      stopWatchdog();
+      if (ac.signal.aborted) throw netError(null, ac.signal);
       if (received !== entry.size) throw updateError('SIZE_MISMATCH');
       if (hash.digest('hex') !== entry.sha256) throw updateError('HASH_MISMATCH');
       try {
@@ -853,13 +1010,30 @@ class Updater extends EventEmitter {
       this._unlinkQuiet(partial);
       const e = netError(err, ac.signal);
       if (e.updaterCode === 'ABORTED' && this._disposed) return refusal('BUSY');
+      if (e.updaterCode === 'CANCELLED') {
+        // The user's Cancel: back to offering the download, no error.
+        this._progress = null;
+        this._phase = null;
+        this._status = this._latest ? 'available' : 'idle';
+        this._error = null;
+        this._log.log('[updater] download cancelled');
+        return refusal('CANCELLED');
+      }
       this._log.warn(`[updater] download failed: ${e.updaterCode}`);
       return this._fail(e);
     } finally {
+      stopWatchdog();
       this._op = null;
       this._abort = null;
       if (!this._disposed) this._emit();
     }
+  }
+
+  /** The user's Cancel on a running download (ipc 'update:cancel'). */
+  cancelDownload() {
+    if (this._disposed || this._op !== 'download' || !this._abort) return refusal('NOT_DOWNLOADING');
+    try { this._abort.abort(updateError('CANCELLED')); } catch { /* ignore */ }
+    return { ok: true };
   }
 
   _progressTick(received, total) {
@@ -930,9 +1104,10 @@ class Updater extends EventEmitter {
       const e = err && err.updaterCode ? err : updateError(this._platform === 'win32' ? 'LAUNCH_FAILED' : 'SPAWN_FAILED');
       if (!err || !err.updaterCode) this._log.error('[updater] install failed:', err && err.message);
       if (LATE_REFUSALS.has(e.updaterCode)) {
-        // A session that started meanwhile (or a quit, or the file gone): a refusal like the ones
-        // above, so the state goes back to what it was. The file is back where it was (if not,
-        // _downloaded is null and it has to be downloaded again).
+        // A session that started meanwhile (or a quit, the file gone, Tunnelview open in another
+        // account): a refusal like the ones above, so the state goes back to what it was. The
+        // file is back where it was, or still in its install-* folder (_downloaded points there);
+        // only a file that is gone (NOT_READY) has to be downloaded again.
         this._phase = null;
         if (this._downloaded) {
           this._status = before.status;
@@ -1004,10 +1179,17 @@ class Updater extends EventEmitter {
       if (err && err.code === 'ENOENT') { this._downloaded = null; throw updateError('NOT_READY'); }
       throw updateError('DISK_ERROR', { detail: err && err.code });
     }
-    // Back where download() put it, so a declined prompt or a failed launch can be retried.
+    // Back where download() put it, so a declined prompt or a failed launch can be retried. When
+    // the move back fails too (LOCKED: the program that holds the file without delete sharing
+    // blocks renames as well), the verified file stays in its install-* folder and the next
+    // install() uses it from there (moved again, and re-hashed under EXLOCK before any launch).
     const restore = () => {
-      try { fs.renameSync(staged, d.file); } catch { this._downloaded = null; }
-      this._rmQuiet(stageDir);
+      try {
+        fs.renameSync(staged, d.file);
+        this._rmQuiet(stageDir);
+      } catch {
+        this._downloaded = { ...d, file: staged };
+      }
     };
     let fd;
     try {
@@ -1141,21 +1323,47 @@ class Updater extends EventEmitter {
     return { real, parent: P.dirname(real) };
   }
 
+  /** → {code, killed, stdout, stderr}; killed: stopped by its time limit (not the tool's own answer). */
   _run(file, args, timeoutMs) {
     return new Promise((resolve) => {
       try {
         this._execFile(file, args, { timeout: timeoutMs, maxBuffer: 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
-          resolve({ code: err ? (Number.isInteger(err.code) ? err.code : -1) : 0, stdout: String(stdout || ''), stderr: String(stderr || '') });
+          resolve({
+            code: err ? (Number.isInteger(err.code) ? err.code : -1) : 0,
+            killed: !!(err && err.killed),
+            stdout: String(stdout || ''),
+            stderr: String(stderr || ''),
+          });
         });
       } catch {
-        resolve({ code: -1, stdout: '', stderr: '' });
+        resolve({ code: -1, killed: false, stdout: '', stderr: '' });
       }
     });
   }
 
+  /** One Info.plist value, or null when it is not there. A plutil killed by its time limit: VERIFY_TIMEOUT. */
   async _plist(plist, key) {
     const r = await this._run(MAC_TOOLS.plutil, ['-extract', key, 'raw', '-o', '-', plist], MAC_TOOL_TIMEOUT_MS);
+    if (r.killed) throw updateError('VERIFY_TIMEOUT', { detail: 'plutil' });
     return r.code === 0 ? r.stdout.trim() : null;
+  }
+
+  /**
+   * Another user account runs Tunnelview from this bundle (fast user switching): the helper would
+   * only end in `busy` after this copy quit. `ps` failing proves nothing either way: the helper's
+   * own check stays the backstop.
+   */
+  async _inUseByOtherUser(real) {
+    if (!this._getuid) return false;
+    const me = this._getuid();
+    const r = await this._run(MAC_TOOLS.ps, ['-axo', 'uid=,comm='], MAC_TOOL_TIMEOUT_MS);
+    if (r.code !== 0) return false;
+    const inside = `${real}${this._path.sep}Contents${this._path.sep}`;
+    for (const line of r.stdout.split('\n')) {
+      const m = /^\s*(\d+)\s+(.+)$/.exec(line);
+      if (m && Number(m[1]) !== me && m[2].startsWith(inside)) return true;
+    }
+    return false;
   }
 
   _readHead(file, bytes) {
@@ -1191,6 +1399,9 @@ class Updater extends EventEmitter {
         throw stageError(err);
       }
       try { fs.rmdirSync(probe); } catch { this._rmQuiet(probe); }
+      // Writable by other accounts too (/Users/Shared): once the helper has moved the bundle
+      // aside, another account could put its own Tunnelview.app at this path.
+      if (this._sharedFolder(parent)) throw updateError('SHARED_LOCATION');
       if (this._getuid) {
         let owner = null;
         try { owner = fs.statSync(real).uid; } catch { /* unknown */ }
@@ -1222,13 +1433,27 @@ class Updater extends EventEmitter {
       if (await this._plist(plist, 'CFBundleIdentifier') !== APP_ID) throw updateError('BAD_BUNDLE');
       if (await this._plist(plist, 'CFBundleShortVersionString') !== d.version) throw updateError('WRONG_VERSION');
       if (await this._plist(plist, 'CFBundleExecutable') !== MAC_EXECUTABLE) throw updateError('BAD_BUNDLE');
+      // A bundle macOS refuses to open ("You can't use this version of the application with this
+      // version of macOS") must never replace one that works.
+      const minOS = await this._plist(plist, 'LSMinimumSystemVersion');
+      if (minOS !== null && !osAtLeast(this._systemVersion, minOS)) {
+        this._osRefused = { to: d.version, need: minOS, current: this._appVersion };
+        throw updateError('OS_TOO_OLD', this._osRefused);
+      }
       let cpus = [];
       try { cpus = machoCpuTypes(this._readHead(P.join(newApp, 'Contents', 'MacOS', MAC_EXECUTABLE), 4096)); } catch { cpus = []; }
       if (!cpus.includes(MACHO_CPU[this._platformKey])) throw updateError('WRONG_ARCH');
-      const codesign = (app) => this._run(MAC_TOOLS.codesign, ['--verify', '--deep', '--strict', '--verbose=2', app], MAC_CODESIGN_TIMEOUT_MS);
-      if ((await codesign(newApp)).code !== 0) throw updateError('CODESIGN_FAILED');
+      // Killed by its time limit (a slow disk): nothing proves the bundle wrong, so try again.
+      const codesignOk = async (app, failCode) => {
+        const r = await this._run(MAC_TOOLS.codesign, ['--verify', '--deep', '--strict', '--verbose=2', app], MAC_CODESIGN_TIMEOUT_MS);
+        if (r.killed) throw updateError('VERIFY_TIMEOUT', { detail: 'codesign' });
+        if (r.code !== 0) throw updateError(failCode.code, failCode.info);
+      };
+      await codesignOk(newApp, { code: 'CODESIGN_FAILED' });
       await this._run(MAC_TOOLS.xattr, ['-d', '-r', '-s', 'com.apple.quarantine', newApp], MAC_TOOL_TIMEOUT_MS);
       if ((await this._run(MAC_TOOLS.xattr, ['-p', 'com.apple.quarantine', newApp], MAC_TOOL_TIMEOUT_MS)).code === 0) throw updateError('QUARANTINED');
+      // Before anything quits: a copy in another account would make the helper end in `busy`.
+      if (await this._inUseByOtherUser(real)) throw updateError('IN_USE_BY_OTHER_USER');
 
       // Tunnelview is quitting (dispose): nothing goes next to the app, nothing is handed over.
       if (this._disposed) throw updateError('BUSY');
@@ -1246,7 +1471,7 @@ class Updater extends EventEmitter {
         // Our own copy to the app's volume, of a bundle that already passed codesign: a failure
         // is the copy's (the target volume), not the download's, so the zip is kept.
         if ((await this._run(MAC_TOOLS.ditto, [newApp, staged], MAC_DITTO_TIMEOUT_MS)).code !== 0) throw updateError('NOT_WRITABLE', { detail: 'copy' });
-        if ((await codesign(staged)).code !== 0) throw updateError('NOT_WRITABLE', { detail: 'copy codesign' });
+        await codesignOk(staged, { code: 'NOT_WRITABLE', info: { detail: 'copy codesign' } });
       }
       this._rmQuiet(xdir);
       xdir = null;
@@ -1332,22 +1557,36 @@ class Updater extends EventEmitter {
     this._log.log(`[updater] the update to ${p.to} ${done ? 'completed' : 'did not complete'}${result ? ` (helper: ${result.replace(/[^a-z-]/g, '')})` : ''}`);
     if (p.platform === 'darwin') this._cleanupMacStaging(p, done);
     if (done) {
-      this._justUpdated = { from: manifestLib.validVersion(p.from) ? p.from : '', to: p.to };
+      // The version that actually runs: the marker can outlive a failed install, and a newer
+      // version installed by hand later must not be reported as the marker's target.
+      const to = this._running ? this._running.base : p.to;
+      this._justUpdated = { from: manifestLib.validVersion(p.from) ? p.from : '', to };
       return;
     }
     const name = this._platformKey ? manifestLib.assetName(this._platformKey, p.to) : null;
     const keep = name ? P.join(this._updatesDir, p.to, name) : null;
     const staged = p.platform === 'win32' ? this._stagedInstaller(p) : null;
+    let stuck = null;
     if (staged && keep) {
       // The staged installer goes back next to the downloads, for another try.
       try {
         fs.mkdirSync(P.dirname(keep), { recursive: true });
         fs.renameSync(staged, keep);
-      } catch { /* left for the cleanup */ }
+      } catch {
+        // Held by another program: it stays where it is (spared by _cleanupUpdatesDir this time)
+        // and "Show in folder" shows it there.
+        stuck = staged;
+        this._keepInstallDir = P.dirname(staged);
+      }
     }
     if (keep && this._isFile(keep)) this._revealFile = keep;
-    const macReplace = p.platform === 'darwin' && ['precondition', 'move-old-failed', 'move-new-failed'].includes(result);
-    const e = updateError(macReplace ? 'MAC_REPLACE_FAILED' : 'INSTALL_INCOMPLETE', { to: p.to, current: this._appVersion });
+    else if (stuck && this._isFile(stuck)) this._revealFile = stuck;
+    let code = 'INSTALL_INCOMPLETE';
+    if (p.platform === 'darwin' && ['precondition', 'move-old-failed', 'move-new-failed'].includes(result)) code = 'MAC_REPLACE_FAILED';
+    // The helper found Tunnelview still running from the bundle (another user account, or a copy
+    // that outlived the old app): say so, "check for updates" alone would fail the same way.
+    else if (p.platform === 'darwin' && result === 'busy') code = 'MAC_APP_IN_USE';
+    const e = updateError(code, { to: p.to, current: this._appVersion });
     this._fail(e);
     this._nextStartFailure = { to: p.to, code: e.updaterCode };
   }
@@ -1440,7 +1679,7 @@ class Updater extends EventEmitter {
     for (const name of names) {
       const full = P.join(this._updatesDir, name);
       if (INSTALL_DIR_RE.test(name)) {
-        if (full !== this._busyInstallDir) this._rmQuiet(full);
+        if (full !== this._busyInstallDir && full !== this._keepInstallDir) this._rmQuiet(full);
       } else if (name === `${RESULT_FILE}.tmp` || name === `${PENDING_FILE}.tmp`) {
         if (!this._pendingDeferred) this._rmQuiet(full);
       } else if (manifestLib.validVersion(name)) {
@@ -1511,4 +1750,7 @@ module.exports = {
   platformKeyFor,
   machoCpuTypes,
   parseRunningVersion,
+  osAtLeast,
+  STALL_WINDOW_MS,
+  STALL_MIN_BYTES,
 };

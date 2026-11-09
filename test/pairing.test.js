@@ -562,6 +562,14 @@ test('host: no ident and no features without a usable key; /info features with o
   assert.deepEqual((await getInfo(broken.port)).body.features, []);
   assert.throws(() => broken.host.startPairing(), { code: 'NO_IDENTITY' });
 
+  // A paired phone reaching that host is told its identity is unavailable (Retry / Reset on that
+  // computer), not that it needs an update, and the pairing is not thrown away (no key mismatch).
+  const phone = phoneVia(broken.port);
+  t.after(() => phone.closeAll());
+  const record = { hostId: SELF_ID, keyPub: b64url(HOST.pub), name: '', ips: [LINK_V4], port: broken.port, selfId: PHONE.node.stableId };
+  assert.deepEqual(await phone.connect(record), { ok: false, reason: 'host-identity-unavailable' });
+  assert.deepEqual(phone.sent, [], 'nothing sent');
+
   // Usable: both features, and the rest of /info as before.
   const good = await startPairHost(t);
   const info = (await getInfo(good.port)).body;
@@ -920,7 +928,12 @@ test('phone simulator: a hello from the wrong key, an old host or another connec
   t.after(() => phone.closeAll());
   const run = (fn) => { script = fn; return phone.connect(record); };
 
-  assert.deepEqual(await run(() => base), { ok: false, reason: 'host-update-needed' });
+  // No ident: from a 0.3+ host its key is unavailable right now (Retry there), not "update it";
+  // from an older one, an update is what it needs. Nothing is sent in either case.
+  assert.deepEqual(await run(() => base), { ok: false, reason: 'host-identity-unavailable' });
+  assert.deepEqual(await run(() => ({ ...base, version: '0.2.0' })), { ok: false, reason: 'host-update-needed' });
+  assert.deepEqual(await run(() => ({ ...base, version: '1.0.0' })), { ok: false, reason: 'host-identity-unavailable' });
+  assert.deepEqual(await run(() => ({ ...base, version: 'nonsense' })), { ok: false, reason: 'host-update-needed' });
   assert.deepEqual(await run((cn) => signed(OTHER, cn)), { ok: false, reason: 'host-key-mismatch' }, 'another key, on both addresses');
   assert.deepEqual(await run(() => signed(HOST, CNONCE_2)), { ok: false, reason: 'host-key-mismatch' }, 'replayed from another connection');
   assert.deepEqual(await run((cn) => signed(HOST, cn, { hostId: 'nOTHERHOST' })), { ok: false, reason: 'host-key-mismatch' });

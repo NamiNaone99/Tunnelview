@@ -53,7 +53,8 @@ function signRaw(key, payloadBytes, kid = key.kid) {
 
 /**
  * A transport like updater.js's nodeTransport, answered by `route(url, n)`:
- *   {status?, headers?, body?: Buffer|string|Array} | {error: Error} | {hang: true} | null (ENOTFOUND)
+ *   {status?, headers?, body?: Buffer|string|Array} | {error: Error} | {hang: true}
+ *   | {stream: Readable} (the test writes the body, or destroys it with an error) | null (ENOTFOUND)
  * Every request is logged with its headers. An aborted signal destroys the response stream.
  */
 function fakeTransport(route) {
@@ -67,7 +68,9 @@ function fakeTransport(route) {
         if (!r) { reject(Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' })); return; }
         if (r.error) { reject(r.error); return; }
         let res;
-        if (r.hang) {
+        if (r.stream) {
+          res = r.stream;
+        } else if (r.hang) {
           res = new Readable({ read() {} });
         } else {
           const chunks = r.body === undefined ? [] : Array.isArray(r.body) ? r.body : [r.body];

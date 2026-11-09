@@ -37,8 +37,11 @@ function setPlatform(p) {
 }
 
 // Every load() makes a userData folder, and index.js writes identity.json (a private key) into
-// it: all of them go when this file is done.
+// it (macOS) or into <LOCALAPPDATA>\Tunnelview (Windows; load() points LOCALAPPDATA inside that
+// same folder, so no test ever reads or replaces this machine's real key): all of them go when
+// this file is done.
 const userDataDirs = [];
+const DEFAULT_LOCAL = Symbol('a LocalAppData folder inside the load\'s temp folder');
 test.after(() => {
   for (const dir of userDataDirs) {
     try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 }); } catch { /* still in use: left to the OS */ }
@@ -51,10 +54,12 @@ function stub(rel, exports) {
 }
 
 /**
- * Load a fresh index.js for `platform`.
- * @param {{platform:string, settings?:object, loginItem?:object, screen?:string, before?:(h)=>void}} opts
+ * Load a fresh index.js for `platform`. LOCALAPPDATA is <tmp>/LocalAppData while index.js starts
+ * (localAppData: a string sets it, null removes it), then restored: index.js reads it only then.
+ * @param {{platform:string, settings?:object, loginItem?:object, screen?:string, before?:(h)=>void,
+ *          isPackaged?:boolean, localAppData?:string|null}} opts
  */
-async function load({ platform, settings: initialSettings = null, loginItem = null, screen: screenStatus = 'granted', before = null }) {
+async function load({ platform, settings: initialSettings = null, loginItem = null, screen: screenStatus = 'granted', before = null, isPackaged = true, localAppData = DEFAULT_LOCAL }) {
   setPlatform(platform);
   for (const k of Object.keys(require.cache)) if (k.startsWith(SRC)) delete require.cache[k];
 
@@ -64,10 +69,14 @@ async function load({ platform, settings: initialSettings = null, loginItem = nu
     fs.mkdirSync(path.join(userData, 'userData'), { recursive: true });
     fs.writeFileSync(path.join(userData, 'userData', 'settings.json'), JSON.stringify({ version: 1, ...initialSettings }));
   }
+  const savedLocal = process.env.LOCALAPPDATA;
+  const local = localAppData === DEFAULT_LOCAL ? path.join(userData, 'LocalAppData') : localAppData;
+  if (local === null || local === undefined) delete process.env.LOCALAPPDATA; else process.env.LOCALAPPDATA = local;
 
   const h = {
     platform,
     userData,
+    localAppData: local,
     execCalls: [],
     switches: [],
     fwOutput: () => JSON.stringify({ category: 'Private', profileEnabled: 'True', allowInbound: 'True', rules: [] }),
@@ -136,7 +145,7 @@ async function load({ platform, settings: initialSettings = null, loginItem = nu
     setBounds() {}
   }
   const app = Object.assign(new EventEmitter(), {
-    isPackaged: true,
+    isPackaged,
     commandLine: { hasSwitch: () => false, appendSwitch(name, value) { h.switches.push(value === undefined ? name : `${name}=${value}`); } },
     setAppUserModelId() {},
     enableSandbox() {},
@@ -278,10 +287,14 @@ async function load({ platform, settings: initialSettings = null, loginItem = nu
   h.windowsMod = require(path.join(SRC, 'main/windows.js'));
   if (before) before(h);
 
-  h.exports = require(path.join(SRC, 'main/index.js'));
-  await settle();
-  await sleep(20);
-  await settle();
+  try {
+    h.exports = require(path.join(SRC, 'main/index.js'));
+    await settle();
+    await sleep(20);
+    await settle();
+  } finally {
+    if (savedLocal === undefined) delete process.env.LOCALAPPDATA; else process.env.LOCALAPPDATA = savedLocal;
+  }
   return h;
 }
 
@@ -734,17 +747,35 @@ test('Windows viewer decodes video in software unless gpuVideoDecode is on; macO
 
 /* ================================================================== identity + pairing a phone */
 
-test('identity: userData/identity.json loaded before the host, passed to it; pairing events reach the main window; a session cancels the offer', async () => {
-  const h = await load({
-    platform: 'win32',
-    // The harness stubs auth.js as {}; identity.js needs its real base64 helpers.
-    before: () => {
-      const file = require.resolve(path.join(SRC, 'main/auth.js'));
-      delete require.cache[file];
-      require(file);
-    },
-  });
-  assert.ok(fs.existsSync(path.join(h.userData, 'userData', 'identity.json')), 'created in userData');
+// The harness stubs auth.js as {}; identity.js needs its real base64 helpers.
+const realAuth = () => {
+  const file = require.resolve(path.join(SRC, 'main/auth.js'));
+  delete require.cache[file];
+  require(file);
+};
+
+test('identity: on Windows in %LOCALAPPDATA%\\Tunnelview (never the roaming profile), on macOS in userData', async () => {
+  const win = await load({ platform: 'win32', before: realAuth });
+  const local = path.join(win.localAppData, 'Tunnelview', 'identity.json');
+  assert.ok(fs.existsSync(local), 'created under LOCALAPPDATA');
+  assert.ok(fs.existsSync(`${local}.bak`));
+  assert.equal(fs.existsSync(path.join(win.userData, 'userData', 'identity.json')), false, 'not in userData (roaming %APPDATA%)');
+  assert.equal(fs.existsSync(path.join(win.userData, 'appData', 'Tunnelview', 'identity.json')), false, 'not under appData');
+  // The same computer starting again finds the same key there.
+  const fp = win.host.deps.identity.fingerprint();
+  const again = await load({ platform: 'win32', before: realAuth, localAppData: win.localAppData });
+  assert.equal(again.host.deps.identity.fingerprint(), fp);
+  // LOCALAPPDATA unset (or not absolute): the profile's AppData\Local, still not the roaming folder.
+  const unset = await load({ platform: 'win32', before: realAuth, localAppData: null });
+  assert.ok(fs.existsSync(path.join(unset.userData, 'home', 'AppData', 'Local', 'Tunnelview', 'identity.json')));
+  const mac = await load({ platform: 'darwin', before: realAuth });
+  assert.ok(fs.existsSync(path.join(mac.userData, 'userData', 'identity.json')), 'macOS: userData');
+  assert.equal(fs.existsSync(path.join(mac.localAppData, 'Tunnelview', 'identity.json')), false);
+});
+
+test('identity: loaded before the host, passed to it; pairing events reach the main window; a session cancels the offer', async () => {
+  const h = await load({ platform: 'win32', before: realAuth });
+  assert.ok(fs.existsSync(path.join(h.localAppData, 'Tunnelview', 'identity.json')), 'created under LOCALAPPDATA');
   const id = h.host.deps.identity;
   assert.ok(id && id.unavailable === false, 'HostServer got the loaded identity');
   const main = mainWindow(h);
@@ -814,6 +845,7 @@ test('updater: created with the app facts, init() before start(); install is blo
   assert.equal(typeof d.quit, 'function');
   assert.equal(typeof d.showItemInFolder, 'function');
   assert.equal(d.translated(), false);
+  assert.equal(d.systemVersion(), '', 'the macOS version (LSMinimumSystemVersion check) only on a Mac');
   assert.equal(d.sessionBlocker(), null);
 
   startSession(h);
@@ -874,26 +906,23 @@ test('updater: its state reaches the main window cleaned; session changes and au
 });
 
 test('updater: Windows stages under %LOCALAPPDATA% (never the roaming or redirected AppData), macOS under userData', async () => {
-  const saved = process.env.LOCALAPPDATA;
-  const restore = () => { if (saved === undefined) delete process.env.LOCALAPPDATA; else process.env.LOCALAPPDATA = saved; };
-  const local = path.join(os.tmpdir(), 'tunnelview-localappdata');
-  try {
-    process.env.LOCALAPPDATA = local;
-    let h = await load({ platform: 'win32' });
-    assert.equal(h.updater.deps.updatesDir, path.join(local, 'Tunnelview', 'updates'));
-    assert.notEqual(path.dirname(h.updater.deps.updatesDir), h.updater.deps.userData);
-    // Not set (or not an absolute path): the profile's AppData/Local.
-    for (const v of [undefined, 'relative/dir']) {
-      if (v === undefined) delete process.env.LOCALAPPDATA; else process.env.LOCALAPPDATA = v;
-      h = await load({ platform: 'win32' });
-      assert.equal(h.updater.deps.updatesDir, path.join(h.userData, 'home', 'AppData', 'Local', 'Tunnelview', 'updates'), String(v));
-    }
-    process.env.LOCALAPPDATA = local;
-    h = await load({ platform: 'darwin' });
-    assert.equal(h.updater.deps.updatesDir, path.join(h.userData, 'userData', 'updates'));
-  } finally {
-    restore();
+  let h = await load({ platform: 'win32' });
+  const local = h.localAppData;
+  assert.equal(h.updater.deps.updatesDir, path.join(local, 'Tunnelview', 'updates'));
+  assert.notEqual(path.dirname(h.updater.deps.updatesDir), h.updater.deps.userData);
+  // Not set (or not an absolute path): the profile's AppData/Local.
+  for (const v of [null, 'relative/dir']) {
+    h = await load({ platform: 'win32', localAppData: v });
+    assert.equal(h.updater.deps.updatesDir, path.join(h.userData, 'home', 'AppData', 'Local', 'Tunnelview', 'updates'), String(v));
   }
+  h = await load({ platform: 'darwin' });
+  assert.equal(h.updater.deps.updatesDir, path.join(h.userData, 'userData', 'updates'));
+  // A development run (npm start, or --user-data-dir) can never install: it keeps to its own
+  // userData and never reads or deletes the installed app's %LOCALAPPDATA%\Tunnelview\updates.
+  h = await load({ platform: 'win32', isPackaged: false });
+  assert.equal(h.updater.deps.updatesDir, path.join(h.userData, 'userData', 'updates'));
+  assert.ok(!h.updater.deps.updatesDir.startsWith(h.localAppData));
+  assert.equal(h.updater.deps.isPackaged, false);
 });
 
 test('updater: while it installs no session starts (HostServer busy, no prompt, no outgoing connect); waking from sleep reschedules', async () => {
