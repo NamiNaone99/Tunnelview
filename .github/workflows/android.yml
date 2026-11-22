@@ -1,7 +1,9 @@
 # Tunnelview Android viewer (mobile/): test, build an UNSIGNED APK, then sign it in a separate
 # job that holds the key but runs no third-party build code (no pub, Gradle or npm).
-#   - test:         format, analyze, unit tests, repo gates.
-#   - build:        universal release APK (R8, not debuggable, unsigned) + gates
+#   - test:         format, analyze, unit tests, repo gates. The unit tests include the interop
+#                   suite: the app's real transport, pairing and session code against the
+#                   desktop's real HostServer over loopback (needs `npm ci`: the ws package).
+#   - build:       universal release APK (R8, not debuggable, unsigned) + gates
 #                   (scripts/check-apk.js). No secrets, no environment, no caches. The Flutter
 #                   SDK is a hash-pinned archive.
 #   - sign-dev:     branch pushes in this repository: dev key (repository secrets),
@@ -23,19 +25,33 @@ on:
     branches:
       - main
       - mobile-0.3
+    # The host files are here because the interop tests run them: a change to the host's side of
+    # the protocol must be checked against the phone.
     paths:
       - "mobile/**"
       - "scripts/check-apk.js"
       - "test/check-apk.test.js"
       - "package.json"
+      - "package-lock.json"
       - ".github/workflows/android.yml"
+      - "src/main/host-server.js"
+      - "src/main/pairing.js"
+      - "src/main/auth.js"
+      - "src/shared/protocol.js"
+      - "test/support/**"
   pull_request:
     paths:
       - "mobile/**"
       - "scripts/check-apk.js"
       - "test/check-apk.test.js"
       - "package.json"
+      - "package-lock.json"
       - ".github/workflows/android.yml"
+      - "src/main/host-server.js"
+      - "src/main/pairing.js"
+      - "src/main/auth.js"
+      - "src/shared/protocol.js"
+      - "test/support/**"
   workflow_call:
 
 permissions:
@@ -148,9 +164,22 @@ jobs:
         working-directory: mobile
         run: flutter analyze
 
+      # The interop tests (mobile/test/interop_real_host_test.dart) start the desktop's real
+      # HostServer with node (test/support/mobile-interop-host.js). It needs one package, ws:
+      # production dependencies only (no Electron), install scripts off, lockfile enforced.
+      # This job holds no secrets.
+      - name: Desktop host dependencies for the interop tests
+        id: npmci
+        if: ${{ !cancelled() && steps.pubget.outcome == 'success' }}
+        run: npm ci --ignore-scripts --omit=dev --no-audit --no-fund
+
+      # TUNNELVIEW_INTEROP=required: the interop suite fails instead of being skipped when node
+      # or the host's dependencies are missing.
       - name: flutter test
         if: ${{ !cancelled() && steps.pubget.outcome == 'success' }}
         working-directory: mobile
+        env:
+          TUNNELVIEW_INTEROP: required
         run: flutter test
 
   build:
