@@ -16,8 +16,8 @@ const int _maxDisplayId = 128;
 // overrides and isolates, BOM. A host-chosen name with U+202E could look like
 // another device.
 final RegExp _unsafeLabelRe = RegExp(
-  '[\u0000-\u001f\u007f-\u009f​‌‎‏؜'
-  '‪-‮⁦-⁩﻿]',
+  '[\u0000-\u001f\u007f-\u009f\u200b\u200c\u200e\u200f\u061c'
+  '\u202a-\u202e\u2066-\u2069\ufeff]',
 );
 
 /// Untrusted value to a single-line display string: unsafe characters
@@ -41,8 +41,9 @@ String _jsString(Object value) {
     return value.toInt().toString();
   }
   if (value is Map) return '[object Object]';
-  if (value is List)
+  if (value is List) {
     return value.map((e) => e == null ? '' : _jsString(e)).join(',');
+  }
   return value.toString();
 }
 
