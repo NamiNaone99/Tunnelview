@@ -22,6 +22,11 @@
     WS_PATH: '/tunnelview/v1',
     INFO_PATH: '/tunnelview/v1/info',
     PROTOCOL_HEADER: 'x-tunnelview-protocol', // lower-case (Node lowercases incoming header names)
+    // Optional upgrade header (mobile viewers): canonical base64 of CLIENT_NONCE_BYTES random bytes.
+    // The host echoes it in hello.ident, so a signature cannot be replayed onto another connection.
+    // Desktop viewers do not send it; a malformed value is refused with HTTP 400.
+    CLIENT_NONCE_HEADER: 'x-tunnelview-client-nonce',
+    CLIENT_NONCE_BYTES: 32,
     MAX_WS_PAYLOAD: 1024 * 1024,
     HANDSHAKE_TIMEOUT_MS: 8000,
     PING_INTERVAL_MS: 15000,
@@ -43,6 +48,8 @@
       ICE: 'ice',
       PERMISSIONS: 'permissions',
       BYE: 'bye',
+      PAIR: 'pair', // V→H, only in state hello and only with a client nonce (PAIR below)
+      PAIR_RESULT: 'pair-result',
     }),
 
     DENY: Object.freeze({
@@ -68,6 +75,29 @@
       KDF_DEFAULT: Object.freeze({ N: 32768, r: 8, p: 1, keylen: 32 }),
       KDF_LIMITS: Object.freeze({ maxN: 131072, maxR: 16, maxP: 4, keylen: 32 }),
     }),
+
+    // hello.ident: the host's Ed25519 identity key signs
+    //   utf8(CONTEXT + nonce + '|' + (clientNonce || '') + '|' + hostId + '|' + viewerId)
+    // so a paired phone knows the hello comes from the computer it paired with (src/main/pairing.js).
+    IDENT: Object.freeze({ CONTEXT: 'Tunnelview-hello-v1|', ALG: 'ed25519', VERSION: 1 }),
+
+    // Pairing a phone: a single live offer with a TOKEN_BYTES token, shown as a QR code / link
+    //   LINK_PREFIX + base64url(JSON {v, id, n, a, p, k, t, x})
+    // proof = base64(HMAC-SHA256(token, CONTEXT + nonce + '|' + clientNonce + '|' + hostId + '|' + viewerId)).
+    // Every refusal answers pair-result {ok:false, reason: FAILED}, so a reply never tells another
+    // node whether an offer exists; MAX_FAILURES wrong proofs burn the offer.
+    PAIR: Object.freeze({
+      CONTEXT: 'Tunnelview-pair-v1|',
+      TTL_MS: 120000,
+      TOKEN_BYTES: 16,
+      LINK_PREFIX: 'tunnelview://pair/1/',
+      LINK_VERSION: 1,
+      MAX_FAILURES: 3,
+      FAILED: 'failed',
+    }),
+
+    // GET /info `features` while the identity key is available ([] otherwise).
+    INFO_FEATURES: Object.freeze(['ident-v1', 'pair-v1']),
 
     // WebRTC data channel labels (all created by the host, ordered + reliable)
     CHANNEL: Object.freeze({ INPUT: 'input', CONTROL: 'control', FILE: 'file' }),

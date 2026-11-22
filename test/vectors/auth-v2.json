@@ -1,0 +1,2131 @@
+{
+  "about": "Password proofs (protocol v2) from src/main/auth.js. proofs: full derivations; a viewer must reproduce key = scrypt(UTF-8(NFC(password)), base64-decoded salt, kdf) and proof = base64(HMAC-SHA256(key, message)), where message = context + nonce + \"|\" + hostId + \"|\" + viewerId and the nonce stays the base64 string. hmacVectors: proofs from a stored password record (stored = what the host keeps; proof = base64(HMAC-SHA256(base64-decoded stored.key, message))). functions: the auth.js function of that name. Regenerate with node scripts/make-mobile-fixtures.js.",
+  "context": "Tunnelview-auth-v2|",
+  "format": 1,
+  "functions": {
+    "computeProof": {
+      "about": "computeProof(password, {salt, kdf}, nonceB64, {hostId, viewerId}) rejects with error.code before running scrypt. The checks run in this order: binding, kdf, salt, nonce, password.",
+      "cases": [
+        {
+          "args": [
+            "never-hashed",
+            {
+              "kdf": {
+                "N": 16384,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "AAECAwQFBgcICQoLDA0ODw=="
+            },
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            null
+          ],
+          "error": "BAD_BINDING"
+        },
+        {
+          "args": [
+            "never-hashed",
+            {
+              "kdf": {
+                "N": 16384,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "AAECAwQFBgcICQoLDA0ODw=="
+            },
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            {
+              "hostId": "a|b",
+              "viewerId": "nV"
+            }
+          ],
+          "error": "BAD_BINDING"
+        },
+        {
+          "args": [
+            "never-hashed",
+            {
+              "kdf": {
+                "N": 16384,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "AAECAwQFBgcICQoLDA0ODw=="
+            },
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            {
+              "hostId": "nHOSTabc123CNTRL"
+            }
+          ],
+          "error": "BAD_BINDING"
+        },
+        {
+          "args": [
+            "never-hashed",
+            {
+              "kdf": {
+                "N": 1048576,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "AAECAwQFBgcICQoLDA0ODw=="
+            },
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            null
+          ],
+          "error": "BAD_BINDING",
+          "note": "the binding is checked first"
+        },
+        {
+          "args": [
+            "never-hashed",
+            null,
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            {
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nVIEWxyz789CNTRL"
+            }
+          ],
+          "error": "BAD_KDF"
+        },
+        {
+          "args": [
+            "never-hashed",
+            {
+              "kdf": null,
+              "salt": "AAECAwQFBgcICQoLDA0ODw=="
+            },
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            {
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nVIEWxyz789CNTRL"
+            }
+          ],
+          "error": "BAD_KDF"
+        },
+        {
+          "args": [
+            "never-hashed",
+            {
+              "kdf": {
+                "N": 8192,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "AAECAwQFBgcICQoLDA0ODw=="
+            },
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            {
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nVIEWxyz789CNTRL"
+            }
+          ],
+          "error": "BAD_KDF"
+        },
+        {
+          "args": [
+            "never-hashed",
+            {
+              "kdf": {
+                "N": 8192,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "bad!"
+            },
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            {
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nVIEWxyz789CNTRL"
+            }
+          ],
+          "error": "BAD_KDF",
+          "note": "kdf before salt"
+        },
+        {
+          "args": [
+            "never-hashed",
+            {
+              "kdf": {
+                "N": 16384,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "bad!"
+            },
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            {
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nVIEWxyz789CNTRL"
+            }
+          ],
+          "error": "BAD_SALT"
+        },
+        {
+          "args": [
+            "never-hashed",
+            {
+              "kdf": {
+                "N": 16384,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "AAAAAAAAAAAAAAAAAAAA"
+            },
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            {
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nVIEWxyz789CNTRL"
+            }
+          ],
+          "error": "BAD_SALT",
+          "note": "salt below 16 bytes"
+        },
+        {
+          "args": [
+            "never-hashed",
+            {
+              "kdf": {
+                "N": 16384,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            {
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nVIEWxyz789CNTRL"
+            }
+          ],
+          "error": "BAD_SALT",
+          "note": "salt above 64 bytes"
+        },
+        {
+          "args": [
+            "never-hashed",
+            {
+              "kdf": {
+                "N": 16384,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "-_v7-_v7-_v7-_v7-_v7-w=="
+            },
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            {
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nVIEWxyz789CNTRL"
+            }
+          ],
+          "error": "BAD_SALT",
+          "note": "base64url salt"
+        },
+        {
+          "args": [
+            "never-hashed",
+            {
+              "kdf": {
+                "N": 16384,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "AAECAwQFBgcICQoLDA0ODx=="
+            },
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            {
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nVIEWxyz789CNTRL"
+            }
+          ],
+          "error": "BAD_SALT",
+          "note": "non-canonical salt"
+        },
+        {
+          "args": [
+            "never-hashed",
+            {
+              "kdf": {
+                "N": 16384,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "bad!"
+            },
+            "nope",
+            {
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nVIEWxyz789CNTRL"
+            }
+          ],
+          "error": "BAD_SALT",
+          "note": "salt before nonce"
+        },
+        {
+          "args": [
+            "never-hashed",
+            {
+              "kdf": {
+                "N": 16384,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "AAECAwQFBgcICQoLDA0ODw=="
+            },
+            "nope",
+            {
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nVIEWxyz789CNTRL"
+            }
+          ],
+          "error": "BAD_NONCE"
+        },
+        {
+          "args": [
+            "never-hashed",
+            {
+              "kdf": {
+                "N": 16384,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "AAECAwQFBgcICQoLDA0ODw=="
+            },
+            "AAAAAAAAAAAAAAAAAAAA",
+            {
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nVIEWxyz789CNTRL"
+            }
+          ],
+          "error": "BAD_NONCE",
+          "note": "nonce below 16 bytes"
+        },
+        {
+          "args": [
+            "never-hashed",
+            {
+              "kdf": {
+                "N": 16384,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "AAECAwQFBgcICQoLDA0ODw=="
+            },
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=\n",
+            {
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nVIEWxyz789CNTRL"
+            }
+          ],
+          "error": "BAD_NONCE"
+        },
+        {
+          "args": [
+            "",
+            {
+              "kdf": {
+                "N": 16384,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "AAECAwQFBgcICQoLDA0ODw=="
+            },
+            "nope",
+            {
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nVIEWxyz789CNTRL"
+            }
+          ],
+          "error": "BAD_NONCE",
+          "note": "nonce before password"
+        },
+        {
+          "args": [
+            "",
+            {
+              "kdf": {
+                "N": 16384,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "AAECAwQFBgcICQoLDA0ODw=="
+            },
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            {
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nVIEWxyz789CNTRL"
+            }
+          ],
+          "error": "BAD_PASSWORD_INPUT"
+        },
+        {
+          "args": [
+            123,
+            {
+              "kdf": {
+                "N": 16384,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "AAECAwQFBgcICQoLDA0ODw=="
+            },
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            {
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nVIEWxyz789CNTRL"
+            }
+          ],
+          "error": "BAD_PASSWORD_INPUT"
+        },
+        {
+          "args": [
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            {
+              "kdf": {
+                "N": 16384,
+                "keylen": 32,
+                "p": 1,
+                "r": 8
+              },
+              "salt": "AAECAwQFBgcICQoLDA0ODw=="
+            },
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            {
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nVIEWxyz789CNTRL"
+            }
+          ],
+          "error": "BAD_PASSWORD_INPUT",
+          "note": "longer than 1024 UTF-16 units"
+        }
+      ]
+    },
+    "decodeB64": {
+      "about": "decodeB64(s, minBytes, maxBytes): strict, canonical standard base64 (salt 16..64, nonce 16..64, proof 32..32). Result: the bytes as lower-case hex, or null.",
+      "cases": [
+        {
+          "args": [
+            "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+            32,
+            32
+          ],
+          "result": "0707070707070707070707070707070707070707070707070707070707070707"
+        },
+        {
+          "args": [
+            "AAECAwQFBgcICQoLDA0ODw==",
+            16,
+            64
+          ],
+          "result": "000102030405060708090a0b0c0d0e0f"
+        },
+        {
+          "args": [
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+Pw==",
+            16,
+            64
+          ],
+          "note": "64 bytes: the longest salt or nonce",
+          "result": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+        },
+        {
+          "args": [
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0A=",
+            16,
+            64
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            "AAECAwQFBgcICQoLDA0O",
+            16,
+            64
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            "AAAA",
+            4,
+            8
+          ],
+          "note": "3 bytes is below the minimum",
+          "result": null
+        },
+        {
+          "args": [
+            "AAA=",
+            1,
+            8
+          ],
+          "result": "0000"
+        },
+        {
+          "args": [
+            "AA==",
+            1,
+            8
+          ],
+          "result": "00"
+        },
+        {
+          "args": [
+            "AAB=",
+            1,
+            8
+          ],
+          "note": "non-zero padding bits",
+          "result": null
+        },
+        {
+          "args": [
+            "AB==",
+            1,
+            8
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            "AAECAwQFBgcICQoLDA0ODx==",
+            16,
+            64
+          ],
+          "note": "non-zero padding bits",
+          "result": null
+        },
+        {
+          "args": [
+            "AA-_",
+            1,
+            8
+          ],
+          "note": "base64url is not accepted",
+          "result": null
+        },
+        {
+          "args": [
+            "AAAA\n",
+            1,
+            8
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            " AAAA",
+            1,
+            8
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            "AAA",
+            1,
+            8
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            "",
+            0,
+            8
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            "====",
+            1,
+            8
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            "A===",
+            1,
+            8
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            "AA=A",
+            1,
+            8
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            null,
+            1,
+            8
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            42,
+            1,
+            8
+          ],
+          "result": null
+        }
+      ]
+    },
+    "normalizeBinding": {
+      "about": "normalizeBinding({hostId, viewerId}) -> {hostId, viewerId} or null. Both must be Tailscale StableNodeIDs, /^[A-Za-z0-9_-]{1,64}$/, compared exactly.",
+      "cases": [
+        {
+          "args": [
+            {
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nVIEWxyz789CNTRL"
+            }
+          ],
+          "result": {
+            "hostId": "nHOSTabc123CNTRL",
+            "viewerId": "nVIEWxyz789CNTRL"
+          }
+        },
+        {
+          "args": [
+            {
+              "hostId": "12",
+              "viewerId": "7"
+            }
+          ],
+          "note": "numeric IDs (Headscale)",
+          "result": {
+            "hostId": "12",
+            "viewerId": "7"
+          }
+        },
+        {
+          "args": [
+            {
+              "extra": 1,
+              "hostId": "n_A-1",
+              "viewerId": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            }
+          ],
+          "note": "other keys are dropped",
+          "result": {
+            "hostId": "n_A-1",
+            "viewerId": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        },
+        {
+          "args": [
+            {
+              "hostId": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+              "viewerId": "v"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "hostId": "",
+              "viewerId": "v"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "hostId": "h",
+              "viewerId": ""
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "hostId": "h"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "hostId": 42,
+              "viewerId": "v"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "hostId": "a|b",
+              "viewerId": "v"
+            }
+          ],
+          "note": "\"|\" separates the fields of the HMAC message",
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "hostId": "h",
+              "viewerId": "has space"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "hostId": " h",
+              "viewerId": "v"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "hostId": "100.101.102.103",
+              "viewerId": "v"
+            }
+          ],
+          "note": "an IP is not a node ID",
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "hostId": "n\u00c4",
+              "viewerId": "v"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "hostIp": "100.101.102.103",
+              "viewerIp": "100.90.5.6"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {}
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            null
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            "x"
+          ],
+          "result": null
+        }
+      ]
+    },
+    "validateKdf": {
+      "about": "validateKdf(kdf) -> bool. The viewer runs it on hello.auth.kdf before any scrypt.",
+      "cases": [
+        {
+          "args": [
+            {
+              "N": 32768,
+              "keylen": 32,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "note": "the default (32 MiB)",
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "keylen": 32,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "note": "the least work accepted: N*r = 2^17",
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "keylen": 32,
+              "p": 1,
+              "r": 16
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "N": 32768,
+              "keylen": 32,
+              "p": 4,
+              "r": 8
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "N": 65536,
+              "keylen": 32,
+              "p": 1,
+              "r": 4
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "N": 262144,
+              "keylen": 32,
+              "p": 1,
+              "r": 1
+            }
+          ],
+          "note": "N above 2^17",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "keylen": 32,
+              "p": 1,
+              "r": 17
+            }
+          ],
+          "note": "r above 16",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 32768,
+              "keylen": 32,
+              "p": 5,
+              "r": 8
+            }
+          ],
+          "note": "p above 4",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 32768,
+              "keylen": 64,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "note": "keylen must be 32",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 131072,
+              "keylen": 32,
+              "p": 4,
+              "r": 16
+            }
+          ],
+          "note": "scrypt would need more than 64 MiB",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 65536,
+              "keylen": 32,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "note": "scrypt would need more than 64 MiB",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 131072,
+              "keylen": 32,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 131072,
+              "keylen": 32,
+              "p": 1,
+              "r": 4
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 65536,
+              "keylen": 32,
+              "p": 1,
+              "r": 16
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 131072,
+              "keylen": 32,
+              "p": 1,
+              "r": 1
+            }
+          ],
+          "note": "N must stay below 2^(16*r)",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 8192,
+              "keylen": 32,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "note": "too little work: a rogue host could crack the proof cheaply",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 1024,
+              "keylen": 32,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 2,
+              "keylen": 32,
+              "p": 1,
+              "r": 1
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 30000,
+              "keylen": 32,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "note": "not a power of two",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 32768,
+              "keylen": 32,
+              "p": 1,
+              "r": 8.5
+            }
+          ],
+          "note": "not an integer",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": "32768",
+              "keylen": 32,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "note": "a string is not a number",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 32768,
+              "keylen": 32,
+              "p": 1,
+              "r": 0
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 32768,
+              "keylen": 32,
+              "p": 0,
+              "r": 8
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": -32768,
+              "keylen": 32,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 9007199254740992,
+              "keylen": 32,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "note": "not a safe integer",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 32768,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "note": "keylen missing",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 32768,
+              "keylen": 32,
+              "maxmem": 1,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "note": "other keys are ignored",
+          "result": true
+        },
+        {
+          "args": [
+            {}
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            null
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "x"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            []
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            32768
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 8192,
+              "keylen": 32,
+              "p": 1,
+              "r": 1
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 8192,
+              "keylen": 32,
+              "p": 4,
+              "r": 1
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 8192,
+              "keylen": 32,
+              "p": 1,
+              "r": 4
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 8192,
+              "keylen": 32,
+              "p": 4,
+              "r": 4
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 8192,
+              "keylen": 32,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 8192,
+              "keylen": 32,
+              "p": 4,
+              "r": 8
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 8192,
+              "keylen": 32,
+              "p": 1,
+              "r": 16
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "N": 8192,
+              "keylen": 32,
+              "p": 4,
+              "r": 16
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "keylen": 32,
+              "p": 1,
+              "r": 1
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "keylen": 32,
+              "p": 4,
+              "r": 1
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "keylen": 32,
+              "p": 1,
+              "r": 4
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "keylen": 32,
+              "p": 4,
+              "r": 4
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "keylen": 32,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "keylen": 32,
+              "p": 4,
+              "r": 8
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "keylen": 32,
+              "p": 1,
+              "r": 16
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "keylen": 32,
+              "p": 4,
+              "r": 16
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "N": 32768,
+              "keylen": 32,
+              "p": 1,
+              "r": 1
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 32768,
+              "keylen": 32,
+              "p": 4,
+              "r": 1
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 32768,
+              "keylen": 32,
+              "p": 1,
+              "r": 4
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "N": 32768,
+              "keylen": 32,
+              "p": 4,
+              "r": 4
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "N": 32768,
+              "keylen": 32,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "N": 32768,
+              "keylen": 32,
+              "p": 4,
+              "r": 8
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "N": 32768,
+              "keylen": 32,
+              "p": 1,
+              "r": 16
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 32768,
+              "keylen": 32,
+              "p": 4,
+              "r": 16
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 65536,
+              "keylen": 32,
+              "p": 1,
+              "r": 1
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 65536,
+              "keylen": 32,
+              "p": 4,
+              "r": 1
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 65536,
+              "keylen": 32,
+              "p": 1,
+              "r": 4
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "N": 65536,
+              "keylen": 32,
+              "p": 4,
+              "r": 4
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "N": 65536,
+              "keylen": 32,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 65536,
+              "keylen": 32,
+              "p": 4,
+              "r": 8
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 65536,
+              "keylen": 32,
+              "p": 1,
+              "r": 16
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 65536,
+              "keylen": 32,
+              "p": 4,
+              "r": 16
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 131072,
+              "keylen": 32,
+              "p": 1,
+              "r": 1
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 131072,
+              "keylen": 32,
+              "p": 4,
+              "r": 1
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 131072,
+              "keylen": 32,
+              "p": 1,
+              "r": 4
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 131072,
+              "keylen": 32,
+              "p": 4,
+              "r": 4
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 131072,
+              "keylen": 32,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 131072,
+              "keylen": 32,
+              "p": 4,
+              "r": 8
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 131072,
+              "keylen": 32,
+              "p": 1,
+              "r": 16
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 131072,
+              "keylen": 32,
+              "p": 4,
+              "r": 16
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 262144,
+              "keylen": 32,
+              "p": 1,
+              "r": 1
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 262144,
+              "keylen": 32,
+              "p": 4,
+              "r": 1
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 262144,
+              "keylen": 32,
+              "p": 1,
+              "r": 4
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 262144,
+              "keylen": 32,
+              "p": 4,
+              "r": 4
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 262144,
+              "keylen": 32,
+              "p": 1,
+              "r": 8
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 262144,
+              "keylen": 32,
+              "p": 4,
+              "r": 8
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 262144,
+              "keylen": 32,
+              "p": 1,
+              "r": 16
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 262144,
+              "keylen": 32,
+              "p": 4,
+              "r": 16
+            }
+          ],
+          "result": false
+        }
+      ]
+    },
+    "verifyProof": {
+      "about": "verifyProof(stored, nonceB64, proofB64, {hostId, viewerId}) -> bool: the host side. stored = {salt, N, r, p, keylen, key}.",
+      "cases": [
+        {
+          "args": [
+            {
+              "N": 16384,
+              "key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+              "keylen": 32,
+              "p": 1,
+              "r": 8,
+              "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+            },
+            "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+            "xvxr3gGEkhZ1evAYiFYNgw1qM/T0yQgaGJaDelvsEc4=",
+            {
+              "hostId": "nHoSt1234CNTRL",
+              "viewerId": "nV1ewer567CNTRL"
+            }
+          ],
+          "note": "test/auth.test.js fixed vector",
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+              "keylen": 32,
+              "p": 1,
+              "r": 8,
+              "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+            },
+            "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+            "xvxr3gGEkhZ1evAYiFYNgw1qM/T0yQgaGJaDelvsEc4=",
+            {
+              "hostId": "nV1ewer567CNTRL",
+              "viewerId": "nHoSt1234CNTRL"
+            }
+          ],
+          "note": "IDs swapped",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+              "keylen": 32,
+              "p": 1,
+              "r": 8,
+              "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+            },
+            "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+            "xvxr3gGEkhZ1evAYiFYNgw1qM/T0yQgaGJaDelvsEc4=",
+            {
+              "hostId": "nHoSt1234CNTRL",
+              "viewerId": "nMALLORY"
+            }
+          ],
+          "note": "relayed by another node: the host sees the relay as the viewer",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+              "keylen": 32,
+              "p": 1,
+              "r": 8,
+              "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+            },
+            "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+            "xvxr3gGEkhZ1evAYiFYNgw1qM/T0yQgaGJaDelvsEc4=",
+            {
+              "hostId": "nhost1234cntrl",
+              "viewerId": "nV1ewer567CNTRL"
+            }
+          ],
+          "note": "node IDs are case-sensitive",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+              "keylen": 32,
+              "p": 1,
+              "r": 8,
+              "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+            },
+            "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+            "qJtFD/keDRPRMSptqRap1WZI7Qf1waLcxmYqcKlj8aE=",
+            {
+              "hostId": "nHoSt1234CNTRL",
+              "viewerId": "nV1ewer567CNTRL"
+            }
+          ],
+          "note": "bound to IPs instead of node IDs",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+              "keylen": 32,
+              "p": 1,
+              "r": 8,
+              "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+            },
+            "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+            "5744Yi/AS2VJpyCkFNERWhcT5RutJuh/FnjPmDSf3oU=",
+            {
+              "hostId": "nHoSt1234CNTRL",
+              "viewerId": "nV1ewer567CNTRL"
+            }
+          ],
+          "note": "a protocol v1 proof",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+              "keylen": 32,
+              "p": 1,
+              "r": 8,
+              "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+            },
+            "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+            "xvxr3gGEkhZ1evAYiFYNgw1qM_T0yQgaGJaDelvsEc4=",
+            {
+              "hostId": "nHoSt1234CNTRL",
+              "viewerId": "nV1ewer567CNTRL"
+            }
+          ],
+          "note": "base64url proof",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+              "keylen": 32,
+              "p": 1,
+              "r": 8,
+              "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+            },
+            "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+            "",
+            {
+              "hostId": "nHoSt1234CNTRL",
+              "viewerId": "nV1ewer567CNTRL"
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+              "keylen": 32,
+              "p": 1,
+              "r": 8,
+              "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+            },
+            "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+            "not base64!",
+            {
+              "hostId": "nHoSt1234CNTRL",
+              "viewerId": "nV1ewer567CNTRL"
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+              "keylen": 32,
+              "p": 1,
+              "r": 8,
+              "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+            },
+            "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+            "xvxr3gGEkhZ1evAYiFYNgw1qM/T0yQgaGJaDelvs",
+            {
+              "hostId": "nHoSt1234CNTRL",
+              "viewerId": "nV1ewer567CNTRL"
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+              "keylen": 32,
+              "p": 1,
+              "r": 8,
+              "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+            },
+            "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+            "xvxr3gGEkhZ1evAYiFYNgw1qM/T0yQgaGJaDelvsEc4=AAAA",
+            {
+              "hostId": "nHoSt1234CNTRL",
+              "viewerId": "nV1ewer567CNTRL"
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+              "keylen": 32,
+              "p": 1,
+              "r": 8,
+              "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+            },
+            "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+            "AAAAAAAAAAAAAAAAAAAAAA==",
+            {
+              "hostId": "nHoSt1234CNTRL",
+              "viewerId": "nV1ewer567CNTRL"
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+              "keylen": 32,
+              "p": 1,
+              "r": 8,
+              "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+            },
+            "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            {
+              "hostId": "nHoSt1234CNTRL",
+              "viewerId": "nV1ewer567CNTRL"
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+              "keylen": 32,
+              "p": 1,
+              "r": 8,
+              "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+            },
+            "AAAAAAAAAAAAAAAAAAAA",
+            "ICUMunhef9WW/SEMEGsQMYwuvynxXO4ksdks0k7kBek=",
+            {
+              "hostId": "nHoSt1234CNTRL",
+              "viewerId": "nV1ewer567CNTRL"
+            }
+          ],
+          "note": "nonce below 16 bytes (the proof matches it)",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+              "keylen": 32,
+              "p": 1,
+              "r": 8,
+              "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+            },
+            "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiJ=",
+            "1HGAuJs+iS7Zx38DhmWXCFpkG1DJt/xRZ66+MAd1iJ4=",
+            {
+              "hostId": "nHoSt1234CNTRL",
+              "viewerId": "nV1ewer567CNTRL"
+            }
+          ],
+          "note": "non-canonical nonce (the proof matches it)",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+              "keylen": 32,
+              "p": 1,
+              "r": 8,
+              "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+            },
+            "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+            "xvxr3gGEkhZ1evAYiFYNgw1qM/T0yQgaGJaDelvsEc4=",
+            null
+          ],
+          "note": "no binding",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 3,
+              "key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+              "keylen": 32,
+              "p": 1,
+              "r": 8,
+              "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+            },
+            "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+            "xvxr3gGEkhZ1evAYiFYNgw1qM/T0yQgaGJaDelvsEc4=",
+            {
+              "hostId": "nHoSt1234CNTRL",
+              "viewerId": "nV1ewer567CNTRL"
+            }
+          ],
+          "note": "stored KDF invalid",
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "N": 16384,
+              "key": "short",
+              "keylen": 32,
+              "p": 1,
+              "r": 8,
+              "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+            },
+            "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+            "xvxr3gGEkhZ1evAYiFYNgw1qM/T0yQgaGJaDelvsEc4=",
+            {
+              "hostId": "nHoSt1234CNTRL",
+              "viewerId": "nV1ewer567CNTRL"
+            }
+          ],
+          "note": "stored key invalid",
+          "result": false
+        },
+        {
+          "args": [
+            {},
+            "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+            "xvxr3gGEkhZ1evAYiFYNgw1qM/T0yQgaGJaDelvsEc4=",
+            {
+              "hostId": "nHoSt1234CNTRL",
+              "viewerId": "nV1ewer567CNTRL"
+            }
+          ],
+          "result": false
+        }
+      ]
+    }
+  },
+  "hmacVectors": [
+    {
+      "hostId": "nHoSt1234CNTRL",
+      "message": "Tunnelview-auth-v2|IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=|nHoSt1234CNTRL|nV1ewer567CNTRL",
+      "name": "test/auth.test.js fixed v2 vector",
+      "nonce": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+      "proof": "xvxr3gGEkhZ1evAYiFYNgw1qM/T0yQgaGJaDelvsEc4=",
+      "stored": {
+        "N": 16384,
+        "key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+        "keylen": 32,
+        "p": 1,
+        "r": 8,
+        "salt": "MzMzMzMzMzMzMzMzMzMzMw=="
+      },
+      "viewerId": "nV1ewer567CNTRL"
+    }
+  ],
+  "kdfDefault": {
+    "N": 32768,
+    "keylen": 32,
+    "p": 1,
+    "r": 8
+  },
+  "kdfLimits": {
+    "keylen": 32,
+    "maxN": 131072,
+    "maxP": 4,
+    "maxR": 16
+  },
+  "maxAttemptsPerConnection": 3,
+  "minKdfWork": 131072,
+  "proofs": [
+    {
+      "hostId": "nHOSTabc123CNTRL",
+      "kdf": {
+        "N": 32768,
+        "keylen": 32,
+        "p": 1,
+        "r": 8
+      },
+      "key": "eo40JB24mNWRdcaWU4xBdGepdf/laQaEJfFhiNMVnFg=",
+      "message": "Tunnelview-auth-v2|EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=|nHOSTabc123CNTRL|nVIEWxyz789CNTRL",
+      "name": "protocol 3.6.3 vector 1",
+      "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+      "password": "correct horse battery staple",
+      "passwordNfcUtf8Hex": "636f727265637420686f727365206261747465727920737461706c65",
+      "proof": "XIc59V892Z5TTBp3wSmxmA2Cdc3hZ2XeUeaFeCD0ujE=",
+      "salt": "AAECAwQFBgcICQoLDA0ODw==",
+      "viewerId": "nVIEWxyz789CNTRL"
+    },
+    {
+      "hostId": "nHOSTabc123CNTRL",
+      "kdf": {
+        "N": 32768,
+        "keylen": 32,
+        "p": 1,
+        "r": 8
+      },
+      "key": "8RxkFwPyAulJPnkf0MXWcuxeIqFWiOezhMMYHxoNiXk=",
+      "message": "Tunnelview-auth-v2|EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=|nHOSTabc123CNTRL|nVIEWxyz789CNTRL",
+      "name": "protocol 3.6.3 vector 2 (decomposed e-acute, Thai)",
+      "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+      "password": "Cafe\u0301 \u0e44\u0e17\u0e22",
+      "passwordNfcUtf8Hex": "436166c3a920e0b984e0b897e0b8a2",
+      "proof": "A+x4LqT9YsfifsfP7iPTwaSU8oWlHeEm3cB//9527SE=",
+      "salt": "AAECAwQFBgcICQoLDA0ODw==",
+      "viewerId": "nVIEWxyz789CNTRL"
+    },
+    {
+      "hostId": "nHOSTabc123CNTRL",
+      "kdf": {
+        "N": 32768,
+        "keylen": 32,
+        "p": 1,
+        "r": 8
+      },
+      "key": "8RxkFwPyAulJPnkf0MXWcuxeIqFWiOezhMMYHxoNiXk=",
+      "message": "Tunnelview-auth-v2|EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=|nHOSTabc123CNTRL|nVIEWxyz789CNTRL",
+      "name": "NFC: the precomposed e-acute gives vector 2",
+      "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+      "password": "Caf\u00e9 \u0e44\u0e17\u0e22",
+      "passwordNfcUtf8Hex": "436166c3a920e0b984e0b897e0b8a2",
+      "proof": "A+x4LqT9YsfifsfP7iPTwaSU8oWlHeEm3cB//9527SE=",
+      "salt": "AAECAwQFBgcICQoLDA0ODw==",
+      "viewerId": "nVIEWxyz789CNTRL"
+    },
+    {
+      "hostId": "12",
+      "kdf": {
+        "N": 16384,
+        "keylen": 32,
+        "p": 1,
+        "r": 8
+      },
+      "key": "qzjGrJ94KSTqCJ5no9FjXbuKCNVpi0Pq4fkBe6eN3tw=",
+      "message": "Tunnelview-auth-v2|gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8=|12|7",
+      "name": "astral characters, numeric node IDs (Headscale)",
+      "nonce": "gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8=",
+      "password": "p\u00e4ssw\u00f6rd \ud83d\udd11 \u5bc6\u7801",
+      "passwordNfcUtf8Hex": "70c3a4737377c3b6726420f09f949120e5af86e7a081",
+      "proof": "9oPB1kx+fkdvoMLgN9uVbuAStKAG514k2U92PcyA/8U=",
+      "salt": "QEFCQ0RFRkdISUpLTE1OTw==",
+      "viewerId": "7"
+    },
+    {
+      "hostId": "h-_Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9x",
+      "kdf": {
+        "N": 16384,
+        "keylen": 32,
+        "p": 2,
+        "r": 8
+      },
+      "key": "nADq6dghEH6bJwW82rsMjeQvUdzflB1L3Bw0UQRpGn8=",
+      "message": "Tunnelview-auth-v2|oKGio6SlpqeoqaqrrK2urw==|h-_Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9Ab9x|vZz0_-Zz0_-Zz0_-Zz0_-Zz0_-Zz0_-Zz0_-Zz0_-Zz0_-Zz0_-Zz0_-Zz0_-abc",
+      "name": "limits: 1024-unit password, 64-byte salt, 16-byte nonce, 64-character IDs, p = 2",
+      "nonce": "oKGio6SlpqeoqaqrrK2urw==",
+      "password": "pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-pass-word",
+      "passwordNfcUtf8Hex": "706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d706173732d776f7264",
+      "proof": "pi9s1FcC57Iq85jhZjgdEV7A6OKB678PmIXjKJcxnyo=",
+      "salt": "wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==",
+      "viewerId": "vZz0_-Zz0_-Zz0_-Zz0_-Zz0_-Zz0_-Zz0_-Zz0_-Zz0_-Zz0_-Zz0_-Zz0_-abc"
+    }
+  ],
+  "scryptMaxmem": 67108864
+}

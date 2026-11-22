@@ -1,0 +1,753 @@
+{
+  "about": "Limits of the host's input validators: stages.panel = sanitizeInput in src/renderer/panel/validate.js, stages.ipc = sanitizeInput in src/main/ipc.js, stages.injector = validate in src/main/input/index.js. host = all three in that order, which is what a viewer's messages must fit (lengths in UTF-16 units; out-of-range values are clamped, not refused, where a stage clamps). Measured by probing the real functions. Regenerate with node scripts/make-mobile-fixtures.js.",
+  "format": 1,
+  "functions": {
+    "hostInput": {
+      "about": "One input data-channel message through panel, ipc and injector in turn -> what the host injects, or null (dropped).",
+      "cases": [
+        {
+          "args": [
+            {
+              "t": "mm",
+              "x": 0.25,
+              "y": 0.75
+            }
+          ],
+          "result": {
+            "t": "mm",
+            "x": 0.25,
+            "y": 0.75
+          }
+        },
+        {
+          "args": [
+            {
+              "t": "mm",
+              "x": -1,
+              "y": 2
+            }
+          ],
+          "note": "points are clamped into [0, 1]",
+          "result": {
+            "t": "mm",
+            "x": 0,
+            "y": 1
+          }
+        },
+        {
+          "args": [
+            {
+              "t": "mm",
+              "x": "0.5",
+              "y": 0.5
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "t": "mm",
+              "x": 0.5
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "b": 0,
+              "n": 1,
+              "t": "md",
+              "x": 0.5,
+              "y": 0.5
+            }
+          ],
+          "result": {
+            "b": 0,
+            "n": 1,
+            "t": "md",
+            "x": 0.5,
+            "y": 0.5
+          }
+        },
+        {
+          "args": [
+            {
+              "b": 0,
+              "n": 2,
+              "t": "md",
+              "x": 0.5,
+              "y": 0.5
+            }
+          ],
+          "result": {
+            "b": 0,
+            "n": 2,
+            "t": "md",
+            "x": 0.5,
+            "y": 0.5
+          }
+        },
+        {
+          "args": [
+            {
+              "b": 0,
+              "n": 3,
+              "t": "md",
+              "x": 0.5,
+              "y": 0.5
+            }
+          ],
+          "result": {
+            "b": 0,
+            "n": 3,
+            "t": "md",
+            "x": 0.5,
+            "y": 0.5
+          }
+        },
+        {
+          "args": [
+            {
+              "b": 0,
+              "n": 4,
+              "t": "md",
+              "x": 0.5,
+              "y": 0.5
+            }
+          ],
+          "note": "the click count clamps at 3, it does not wrap",
+          "result": {
+            "b": 0,
+            "n": 3,
+            "t": "md",
+            "x": 0.5,
+            "y": 0.5
+          }
+        },
+        {
+          "args": [
+            {
+              "b": 0,
+              "t": "md",
+              "x": 0.5,
+              "y": 0.5
+            }
+          ],
+          "result": {
+            "b": 0,
+            "n": 1,
+            "t": "md",
+            "x": 0.5,
+            "y": 0.5
+          }
+        },
+        {
+          "args": [
+            {
+              "b": 0,
+              "n": 0,
+              "t": "md",
+              "x": 0.5,
+              "y": 0.5
+            }
+          ],
+          "result": {
+            "b": 0,
+            "n": 1,
+            "t": "md",
+            "x": 0.5,
+            "y": 0.5
+          }
+        },
+        {
+          "args": [
+            {
+              "b": 0,
+              "n": 2.5,
+              "t": "md",
+              "x": 0.5,
+              "y": 0.5
+            }
+          ],
+          "result": {
+            "b": 0,
+            "n": 1,
+            "t": "md",
+            "x": 0.5,
+            "y": 0.5
+          }
+        },
+        {
+          "args": [
+            {
+              "b": 2,
+              "n": 1,
+              "t": "mu",
+              "x": 1,
+              "y": 0
+            }
+          ],
+          "result": {
+            "b": 2,
+            "n": 1,
+            "t": "mu",
+            "x": 1,
+            "y": 0
+          }
+        },
+        {
+          "args": [
+            {
+              "b": 4,
+              "n": 1,
+              "t": "md",
+              "x": 0.5,
+              "y": 0.5
+            }
+          ],
+          "result": {
+            "b": 4,
+            "n": 1,
+            "t": "md",
+            "x": 0.5,
+            "y": 0.5
+          }
+        },
+        {
+          "args": [
+            {
+              "b": 5,
+              "n": 1,
+              "t": "md",
+              "x": 0.5,
+              "y": 0.5
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "b": -1,
+              "n": 1,
+              "t": "md",
+              "x": 0.5,
+              "y": 0.5
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "b": 1.5,
+              "n": 1,
+              "t": "md",
+              "x": 0.5,
+              "y": 0.5
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "dx": 0,
+              "dy": 120,
+              "t": "wh"
+            }
+          ],
+          "result": {
+            "dx": 0,
+            "dy": 120,
+            "t": "wh"
+          }
+        },
+        {
+          "args": [
+            {
+              "dx": -40.5,
+              "dy": 0,
+              "t": "wh"
+            }
+          ],
+          "result": {
+            "dx": -40.5,
+            "dy": 0,
+            "t": "wh"
+          }
+        },
+        {
+          "args": [
+            {
+              "dx": 15000,
+              "dy": -15000,
+              "t": "wh"
+            }
+          ],
+          "result": {
+            "dx": 10000,
+            "dy": -10000,
+            "t": "wh"
+          }
+        },
+        {
+          "args": [
+            {
+              "dy": 120,
+              "t": "wh"
+            }
+          ],
+          "note": "dx and dy are both required",
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "code": "KeyA",
+              "key": "a",
+              "rep": false,
+              "t": "kd"
+            }
+          ],
+          "result": {
+            "code": "KeyA",
+            "key": "a",
+            "rep": false,
+            "t": "kd"
+          }
+        },
+        {
+          "args": [
+            {
+              "code": "KeyA",
+              "key": "A",
+              "locks": {
+                "caps": true,
+                "num": false
+              },
+              "rep": true,
+              "t": "kd"
+            }
+          ],
+          "result": {
+            "code": "KeyA",
+            "key": "A",
+            "locks": {
+              "caps": true,
+              "num": false
+            },
+            "rep": true,
+            "t": "kd"
+          }
+        },
+        {
+          "args": [
+            {
+              "code": "Numpad1",
+              "key": "1",
+              "locks": {
+                "caps": false
+              },
+              "t": "kd"
+            }
+          ],
+          "result": {
+            "code": "Numpad1",
+            "key": "1",
+            "locks": {
+              "caps": false
+            },
+            "rep": false,
+            "t": "kd"
+          }
+        },
+        {
+          "args": [
+            {
+              "code": "KeyA",
+              "key": "a",
+              "locks": {
+                "caps": "yes"
+              },
+              "t": "kd"
+            }
+          ],
+          "note": "malformed locks are dropped, the key stays",
+          "result": {
+            "code": "KeyA",
+            "key": "a",
+            "rep": false,
+            "t": "kd"
+          }
+        },
+        {
+          "args": [
+            {
+              "code": "KeyA",
+              "key": "a",
+              "rep": "yes",
+              "t": "kd"
+            }
+          ],
+          "result": {
+            "code": "KeyA",
+            "key": "a",
+            "rep": false,
+            "t": "kd"
+          }
+        },
+        {
+          "args": [
+            {
+              "code": "",
+              "key": "a",
+              "t": "kd"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "code": "Key-A",
+              "key": "a",
+              "t": "kd"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "code": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+              "key": "a",
+              "t": "kd"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "code": "KeyA",
+              "key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+              "t": "kd"
+            }
+          ],
+          "note": "an overlong key becomes \"\"",
+          "result": {
+            "code": "KeyA",
+            "key": "",
+            "rep": false,
+            "t": "kd"
+          }
+        },
+        {
+          "args": [
+            {
+              "code": "KeyA",
+              "t": "kd"
+            }
+          ],
+          "result": {
+            "code": "KeyA",
+            "key": "",
+            "rep": false,
+            "t": "kd"
+          }
+        },
+        {
+          "args": [
+            {
+              "code": "ShiftLeft",
+              "key": "Shift",
+              "t": "ku"
+            }
+          ],
+          "result": {
+            "code": "ShiftLeft",
+            "key": "Shift",
+            "rep": false,
+            "t": "ku"
+          }
+        },
+        {
+          "args": [
+            {
+              "code": "KeyA",
+              "key": "a",
+              "locks": {
+                "caps": true
+              },
+              "t": "ku"
+            }
+          ],
+          "result": {
+            "code": "KeyA",
+            "key": "a",
+            "rep": false,
+            "t": "ku"
+          }
+        },
+        {
+          "args": [
+            {
+              "t": "txt",
+              "text": "hello"
+            }
+          ],
+          "result": {
+            "t": "txt",
+            "text": "hello"
+          }
+        },
+        {
+          "args": [
+            {
+              "t": "txt",
+              "text": "\u0e2a\u0e27\u0e31\u0e2a\u0e14\u0e35"
+            }
+          ],
+          "result": {
+            "t": "txt",
+            "text": "\u0e2a\u0e27\u0e31\u0e2a\u0e14\u0e35"
+          }
+        },
+        {
+          "args": [
+            {
+              "t": "txt",
+              "text": "line1\nline2\ttab"
+            }
+          ],
+          "result": {
+            "t": "txt",
+            "text": "line1\nline2\ttab"
+          }
+        },
+        {
+          "args": [
+            {
+              "t": "txt",
+              "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ud83d\ude00"
+            }
+          ],
+          "note": "2000 UTF-16 units",
+          "result": {
+            "t": "txt",
+            "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ud83d\ude00"
+          }
+        },
+        {
+          "args": [
+            {
+              "t": "txt",
+              "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ud83d\ude00"
+            }
+          ],
+          "note": "2001 UTF-16 units (2000 code points)",
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "t": "txt",
+              "text": ""
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "t": "txt",
+              "text": 42
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "codes": [
+                "ControlLeft",
+                "AltLeft",
+                "Delete"
+              ],
+              "t": "combo"
+            }
+          ],
+          "result": {
+            "codes": [
+              "ControlLeft",
+              "AltLeft",
+              "Delete"
+            ],
+            "t": "combo"
+          }
+        },
+        {
+          "args": [
+            {
+              "codes": [
+                "ControlLeft",
+                "ShiftLeft",
+                "AltLeft",
+                "MetaLeft",
+                "KeyA",
+                "KeyB"
+              ],
+              "t": "combo"
+            }
+          ],
+          "result": {
+            "codes": [
+              "ControlLeft",
+              "ShiftLeft",
+              "AltLeft",
+              "MetaLeft",
+              "KeyA",
+              "KeyB"
+            ],
+            "t": "combo"
+          }
+        },
+        {
+          "args": [
+            {
+              "codes": [
+                "ControlLeft",
+                "ShiftLeft",
+                "AltLeft",
+                "MetaLeft",
+                "KeyA",
+                "KeyB",
+                "KeyC"
+              ],
+              "t": "combo"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "codes": [],
+              "t": "combo"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "codes": [
+                "KeyA",
+                5
+              ],
+              "t": "combo"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "codes": "KeyA",
+              "t": "combo"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "t": "release-all"
+            }
+          ],
+          "result": {
+            "t": "release-all"
+          }
+        },
+        {
+          "args": [
+            {
+              "extra": 1,
+              "t": "release-all"
+            }
+          ],
+          "result": {
+            "t": "release-all"
+          }
+        },
+        {
+          "args": [
+            {
+              "t": "unknown"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {}
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            null
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            "mm"
+          ],
+          "result": null
+        }
+      ]
+    }
+  },
+  "host": {
+    "buttonMax": 4,
+    "clickCountMax": 3,
+    "codeMaxLength": 32,
+    "comboMaxCodes": 6,
+    "keyMaxLength": 32,
+    "textMaxUnits": 2000,
+    "wheelMaxAbs": 10000
+  },
+  "stages": {
+    "injector": {
+      "buttonMax": 4,
+      "clickCountMax": 3,
+      "codeMaxLength": 32,
+      "comboMaxCodes": 6,
+      "keyMaxLength": 32,
+      "textMaxUnits": 2000,
+      "wheelMaxAbs": 20000
+    },
+    "ipc": {
+      "buttonMax": 4,
+      "clickCountMax": 10,
+      "codeMaxLength": 32,
+      "comboMaxCodes": 8,
+      "keyMaxLength": 64,
+      "textMaxUnits": 2000,
+      "wheelMaxAbs": 20000
+    },
+    "panel": {
+      "buttonMax": 4,
+      "clickCountMax": 3,
+      "codeMaxLength": 32,
+      "comboMaxCodes": 8,
+      "keyMaxLength": 32,
+      "textMaxUnits": 2000,
+      "wheelMaxAbs": 10000
+    }
+  }
+}

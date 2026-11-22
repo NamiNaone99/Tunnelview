@@ -25,6 +25,7 @@ does not come from a verified device on your tailnet.
 - [How the Tailscale-only guarantee works](#how-the-tailscale-only-guarantee-works)
 - [Requirements](#requirements)
 - [Installation](#installation)
+- [Updating](#updating)
 - [macOS permissions](#macos-permissions)
 - [Using Tunnelview](#using-tunnelview)
 - [Ports and firewalls](#ports-and-firewalls)
@@ -70,7 +71,9 @@ does not come from a verified device on your tailnet.
   showing who is connected. From it the host can change permissions, chat, send files or disconnect.
   This panel cannot be turned off.
 - **Device grid** built from your tailnet. It shows which devices run Tunnelview, whether they have an
-  unattended password and whether they are busy.
+  unattended password and whether they are busy or installing an update.
+- **Phone pairing** with a QR code. Each computer has its own ID, which a paired phone checks every
+  time it connects (see [Pair a phone](#pair-a-phone)).
 - **Tray / menu-bar icon** that shows the hosting state: ready, session active or off.
 
 ## How the Tailscale-only guarantee works
@@ -121,6 +124,13 @@ contract is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §1 and §4.
     and scripting back doors (`ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS`, `--inspect`) and refuse a
     modified `app.asar`. So no other program can borrow Tunnelview's screen-recording and
     accessibility permissions. `--dev` works only when running from source.
+11. **One connection leaves the tailnet: the update check.** Tunnelview's main process asks GitHub
+    over HTTPS for a signed update file once a day. The request goes only to `github.com` and
+    GitHub's download servers, and carries nothing about your computers or your tailnet (like any
+    web request, it shows GitHub your public IP address). The check is on by default; updates
+    install only when you click. You can switch the daily check off; see [Updating](#updating).
+    Tunnelview makes no other connection outside the tailnet, and the update check never accepts
+    connections.
 
 ## Requirements
 
@@ -251,18 +261,111 @@ permissions, because a rebuild has a new signature (see [macOS permissions](#mac
      ```
 3. If the macOS firewall is on, allow Tunnelview when it asks to *accept incoming network connections*.
 
-### Updating
+## Updating
 
-Tunnelview does not update itself. To hear about new versions (including security fixes), click
-**Watch → Custom → Releases** on the [GitHub page](https://github.com/NamiNaone99/Tunnelview). Install the same version on both
-computers.
+Tunnelview 0.3.0 and later update themselves on Windows and macOS, but only when you click. Keep
+both computers on the same version.
 
-- **Windows:** run the new installer; it replaces the old version and keeps your settings.
-- **macOS:** replace the app in Applications. If you built it yourself, run `git pull` and
-  `bash scripts/mac-install.sh` again in that folder (with Download ZIP: download the new ZIP and run
-  the script from the new folder). A new build has a new signature: macOS keeps the old Screen Recording and Accessibility
-  entries switched on, but they no longer work. Remove and re-add Tunnelview there (see
-  [macOS permissions](#macos-permissions)); `mac-install.sh` resets them for you.
+**How it works.**
+
+- **Checking.** Once a day, Tunnelview asks GitHub whether a newer release exists. **Settings ›
+  Updates** shows the result, and **Check now** asks right away. When GitHub cannot be reached it
+  tries again after 2 hours, then less often, and at least once a day.
+- **The only connection outside your tailnet.** This check is it: an HTTPS request (TCP 443) to
+  `github.com`, which GitHub redirects to its download servers (`release-assets.githubusercontent.com`
+  or `objects.githubusercontent.com`). Downloading an update goes the same way. It carries no
+  account, no cookies and nothing about your computers or your tailnet. Like any web request, it
+  shows GitHub your public IP address and the time, and the user agent
+  `Tunnelview-Updater/<version>` tells GitHub which version you run.
+- **Turning it off.** Switch off **Check for updates automatically** in Settings › Updates, and
+  Tunnelview never contacts GitHub by itself. **Check now** still works whenever you click it.
+  While someone is connected to this computer, this setting is locked like the security settings.
+  The check is **on by default**, also after an upgrade from 0.2.x, and the first one runs about a
+  minute after Tunnelview starts. To keep even that first request from going out, quit Tunnelview
+  and add `"autoUpdateCheck": false` to `settings.json` (Windows:
+  `%APPDATA%\Tunnelview\settings.json`; macOS: `~/Library/Application Support/Tunnelview/settings.json`)
+  before you start 0.3 for the first time. Do not start the old version again after that: 0.2.x
+  removes settings it does not know.
+- **Signed updates.** Every release carries a small signed file, `tunnelview-update.json`, which
+  lists the version and the size and SHA-256 checksum of each installer. Tunnelview accepts it only
+  if its Ed25519 signature checks out against the public key built into the app. It installs only a
+  download that matches it exactly, and never an older version or the same one again. An unsigned
+  or altered update file is refused, and a download that does not match it is deleted.
+- **Only on your click.** Nothing is downloaded or installed until you click: first **Download and
+  install**, which downloads and checks the update, then **Restart and install**, which asks you to
+  confirm. **Cancel download** stops a download that is running. You cannot install while someone
+  is connected to this computer or asking to connect, or while you are connected to another device.
+  Settings › Updates says why. The downloaded update is kept, so click **Restart and install** again
+  once the session ends; it does not install by itself. While it installs, nobody can connect to
+  this computer and you cannot connect to another device (they see that it is updating).
+
+**Windows.** Only a copy installed with the Tunnelview installer updates itself. Windows shows an
+administrator (UAC) prompt, because Tunnelview is installed for all users. The prompt says *Unknown
+publisher*, because release builds are not code-signed. After you approve it:
+
+- Tunnelview closes, and the installer runs silently and starts the new version.
+- It also closes Tunnelview for other users signed in to this computer.
+- Your settings, shortcuts and *Start at login* are kept.
+
+If you decline the prompt, nothing changes. Tunnelview can then show the downloaded installer in its
+folder, so that you can run it yourself.
+
+**macOS.** Before installing, Tunnelview checks the downloaded app: its bundle ID, version,
+minimum macOS version and processor type, and its code signature. Then it quits, replaces itself in
+its folder and opens again. The old app is kept next to it, hidden, until the new version has
+started once. A download that fails these checks is kept and not installed; get that version from
+the GitHub releases page instead. An update that needs a newer macOS than this Mac runs is not
+installed.
+
+- **Allow Screen Recording and Accessibility again after every update.** Release builds are ad-hoc
+  signed (there is no Apple Developer ID yet), so macOS treats each update as a new app. Tunnelview
+  removes the old entries and shows **Grant** on **This Desk**, and macOS asks for the Downloads
+  folder again (see [macOS permissions](#macos-permissions)). This step will go away once Tunnelview
+  is signed with an Apple Developer ID.
+- **Where Tunnelview must run from.** It can replace itself only when it runs from a folder your
+  account can write, and not from the disk image. On an administrator account that is
+  Applications. On a standard account, use the Applications folder in your home folder
+  (`~/Applications`), because Applications needs an administrator. It must also have been
+  installed by your account, and not be in a folder that other accounts can change (such as
+  `/Users/Shared`). Settings › Updates tells you before you download when this copy cannot replace
+  itself where it is; it can still download the update and show it in Finder.
+- **If macOS blocks the update** (System Settings › Privacy & Security › App Management),
+  Tunnelview says so. Allow Tunnelview there, then click **Check now** in Settings › Updates and
+  **Restart and install** (the download is kept). Or install the downloaded update by hand.
+- **Tunnelview open in another user account** on this Mac stops the update; quit it there first.
+- **Self-built copies.** A copy you built with `mac-install.sh` is replaced by the release build.
+
+**Upgrading from 0.2.x.** Versions before 0.3.0 cannot update themselves, so install 0.3.0 once by
+hand. On Windows, run the new installer: it replaces the old version and keeps your settings. On
+macOS, replace the app in Applications. Later versions then arrive inside the app.
+
+**Updating by hand** always works. To hear about new versions without the app, click **Watch →
+Custom → Releases** on the [GitHub page](https://github.com/NamiNaone99/Tunnelview).
+
+- **Windows:** run the new installer.
+- **macOS:** replace the app in Applications. If you built it yourself, run `git pull` and then
+  `bash scripts/mac-install.sh` again in that folder. If you used Download ZIP, download the new ZIP
+  and run the script from the new folder.
+- **New signature.** A new build has a new signature. macOS keeps the old Screen Recording and
+  Accessibility entries switched on, but they no longer work. Remove Tunnelview there and add it
+  again (see [macOS permissions](#macos-permissions)). `mac-install.sh` resets them for you.
+
+**Android.** The Android app does not update itself, because its network traffic stays on your
+tailnet. Get new versions from [GitHub Releases](https://github.com/NamiNaone99/Tunnelview/releases),
+or let a release-tracker app such as [Obtainium](https://github.com/ImranR98/Obtainium) follow
+`NamiNaone99/Tunnelview`.
+
+Before you install it for the first time, check that the APK's signing certificate has this
+SHA-256:
+
+```
+94:65:7B:AB:01:65:9C:AD:E7:15:00:8B:2C:6C:78:B9:4A:01:A0:42:F3:8B:B1:66:F2:F2:C9:39:70:76:9D:81
+```
+
+`apksigner verify --print-certs <file>.apk` prints it in lower case without colons:
+`94657bab01659cade715008b2c6c78b94a01a042f38bb166f2f2c93970769d81`. Android installs an update only
+when it is signed with the same certificate as the installed app, so the first install is the one
+to check.
 
 ## macOS permissions
 
@@ -293,10 +396,11 @@ this Mac fail with *no-access*.
 > Someone has to be at the Mac to click Allow.
 
 > **After every update or rebuild, re-grant the permissions.** Ad-hoc signed builds get a new code
-> signature each time, so macOS treats each one as a new app. The old entries stay switched on but
-> no longer work. Symptoms are a black screen or clicks that do nothing. To fix it, select Tunnelview
-> in both lists, remove it with **–**, add it again (or toggle it on), and relaunch. Alternatively,
-> run:
+> signature each time, so macOS treats each one as a new app. An in-app update removes the old
+> entries for you: click **Grant** on **This Desk** for each permission, then **Quit & Reopen**.
+> After an update by hand or a rebuild, the old entries stay switched on but no longer work.
+> Symptoms are a black screen or clicks that do nothing. To fix it, select Tunnelview in both lists,
+> remove it with **–**, add it again (or toggle it on), and relaunch. Alternatively, run:
 > ```sh
 > tccutil reset ScreenCapture io.github.naminaone99.tunnelview
 > tccutil reset Accessibility io.github.naminaone99.tunnelview
@@ -311,8 +415,8 @@ this Mac fail with *no-access*.
    whether incoming connections are ready.
 2. In **Remote Desk**, enter the other computer's **device name**, MagicDNS name or **Tailscale
    IP** (optionally followed by `:port`). You can also pick it from **Your tailnet** or **Recent**.
-   The device grid marks each device: *Password set*, *Busy*, *Not allowed*, *Update needed*,
-   *No answer* or *Not running*.
+   The device grid marks each device: *Password set*, *Busy*, *Updating*, *Not allowed*,
+   *Update needed*, *No answer* or *Not running*.
    Press **F5** to refresh it. If you type no port, Tunnelview uses the port that device answered on.
 3. Wait for the person at the other computer to accept, or enter the unattended password.
 
@@ -367,8 +471,29 @@ viewer that knows the password still gets in.
    allow*.
 
 While someone is connected to this computer, the security settings are **locked**: accept mode,
-who can connect, the allow list, auto-accept, default permissions, the password and the download
-folder. End the session to change them.
+who can connect, the allow list, auto-accept, default permissions, the password, the download
+folder and the automatic update check. **Reset identity…** and **Pair a phone** are refused too.
+End the session to change them.
+
+### Pair a phone
+
+A phone running the Tunnelview Android app (published on
+[GitHub Releases](https://github.com/NamiNaone99/Tunnelview/releases) together with the desktop
+release that supports it; see [Updating](#updating) › Android) pairs with each computer once:
+
+1. On the computer, open **This Desk** and click **Pair a phone**. A QR code appears, valid for
+   2 minutes.
+2. Scan it with the phone app. Before it pairs, the phone shows this computer's ID
+   (`TV-XXXX-XXXX-XXXX-XXXX-XXXX`), which the dialog shows too. Pair only if both match.
+3. Three wrong attempts end the code; make a new one if that was you.
+
+Pairing lets the phone recognise this computer every time it connects. It does **not** let anyone
+in: the password, *Who can connect* and the approval prompt still decide.
+
+**Settings › Security** shows *This computer's ID*. **Reset identity…** makes a new ID: every
+paired phone stops connecting until you pair it again (connections from computers are not
+affected). If Settings says *This computer can't prove its identity to phones right now*, see
+[Troubleshooting](#troubleshooting) before you reset it.
 
 ### Who can connect
 
@@ -444,6 +569,8 @@ caution as a browser download. The default codec and quality are in Settings →
   Tailscale addresses. Tunnelview never listens on LAN or internet addresses.
 - **Connecting without a port:** if you type no `:port`, Tunnelview uses the port the device answered
   on in the device grid, or 47800 if it was not probed.
+- **Outbound, outside the tailnet:** only the update check, TCP 443 to `github.com`,
+  `release-assets.githubusercontent.com` and `objects.githubusercontent.com` ([Updating](#updating)).
 - **Wi-Fi:** WebRTC also tries connectivity checks from your other network adapters. Those checks
   toward the other computer's Tailscale address would leave through your Wi-Fi router into your
   ISP's network instead of the Tailscale tunnel. They carry nothing secret and fail, but they show
@@ -507,7 +634,8 @@ For development runs (`npm start`), see
 | Clicks and keys do nothing on a Mac | **Accessibility** permission is missing or stale. Re-grant it. |
 | A file sent to a Mac is declined or fails with *no-access* | Tunnelview may not write to that Mac's download folder. On the Mac, allow Tunnelview under **System Settings → Privacy & Security → Files and Folders** (*Downloads Folder*), see [macOS permissions](#macos-permissions). |
 | A banner says the remote computer shows a secure screen or an administrator window | Windows blocks remote input into UAC prompts, the lock screen and windows that run as administrator. The person at the host has to handle that screen. |
-| *… is busy* | Someone is already connected to that host, or another device's request is waiting for approval there (a correct password, or a trusted or auto-accepted device, still gets in), or this device already has two requests open there. Try again in a moment. |
+| *… is busy* | Someone is already connected to that host, or another device's request is waiting for approval there (a correct password, or a trusted or auto-accepted device, still gets in), or this device already has two requests open there. Try again in a moment. A host older than 0.3 also says *busy* while it installs an update. |
+| *… is updating*, or the device grid shows *Updating* | Tunnelview on that computer is installing an update. On Windows it may be waiting for someone at that computer to approve the administrator (UAC) prompt: ask them to answer it. Connect again after Tunnelview restarts there. |
 | *Too many attempts* | This device tried to connect to that host too often (more than 20 times in a minute). Wait a minute, then connect again. This is not a password lockout. |
 | *Temporarily locked* | Too many wrong passwords from this device or your Tailscale account (tagged devices count together). Passwords are refused for 15 minutes. Trusted devices, auto-accepted devices and requests the person at the host accepts still work. |
 | *Passwords paused on …* | That host received many wrong passwords from several devices (30 in 15 minutes) and stopped accepting passwords from devices it has not let in recently, for 15 minutes. Wait, or ask the person there to accept your request. Trusted devices, the owner's own devices and accepted requests are not affected. |
@@ -515,6 +643,9 @@ For development runs (`npm start`), see
 | *Not allowed*, or the device grid shows *Not allowed* | The host's **Who can connect** setting excludes your user or device. A short device name there only matches devices of the host's own tailnet. |
 | *Tunnelview is not available there*, and the device shows *Not running* | Incoming connections are turned off on that computer (This Desk / Settings → Security), Tunnelview is not running there, or it listens on a different port. |
 | *Incompatible versions*, or the device grid shows *Update needed* | The two computers run Tunnelview versions that cannot talk to each other. Install the same release on both devices. |
+| Checking for updates fails with *Could not reach GitHub* or *The secure connection to GitHub could not be verified* | The update check connects straight to `github.com`, `release-assets.githubusercontent.com` and `objects.githubusercontent.com` over HTTPS (TCP 443); a firewall that filters by host must allow all three. It does not use a proxy set in the system, and it fails when a company proxy or security software inspects HTTPS. Install the new version by hand from the [Releases page](https://github.com/NamiNaone99/Tunnelview/releases/latest) ([Updating](#updating)). |
+| Mac: *macOS did not let Tunnelview replace itself* | macOS blocked the update from replacing the app. Allow Tunnelview under **System Settings › Privacy & Security › App Management**, then click **Check now** in Settings › Updates and **Restart and install** (the download is kept). Or install the downloaded update by hand. |
+| Settings › Security: *This computer can't prove its identity to phones right now* | Its ID key is `identity.json` in `%LOCALAPPDATA%\Tunnelview` on Windows (`~/Library/Application Support/Tunnelview` on macOS), with a copy in `identity.json.bak`. Restore one of them from the Recycle Bin / Trash, your antivirus quarantine or a backup; a file named `identity.json.prev-<number>` is an earlier valid key that you can copy to `identity.json`. Then click **Retry**. Do not restart Tunnelview while both files are missing: it would make a new ID. Use **Reset identity…** only as a last resort, because every paired phone must then pair again. |
 
 On macOS, if `tailscale` is not on your `PATH`, run the CLI that ships inside the app:
 `/Applications/Tailscale.app/Contents/MacOS/Tailscale status`.
@@ -591,7 +722,15 @@ npm run dist:mac -- --arm64 --x64         # on a Mac → dist/Tunnelview-<v>-mac
 
 - **macOS builds need a Mac** for dmg creation and code signing. Without one, use the GitHub Actions
   workflow ([`.github/workflows/build.yml`](.github/workflows/build.yml)). Run it manually
-  (*workflow_dispatch*) or push a `v*` tag. Tag builds are attached to a GitHub release.
+  (*workflow_dispatch*) or push a `v*` tag. Tag builds are attached to a GitHub release. Release
+  tags must be exactly `vX.Y.Z` and match `package.json`; a pre-release tag such as `v0.4.0-beta.1`
+  fails the version check (the updater only knows `X.Y.Z` versions), so use *workflow_dispatch*
+  for test builds.
+- **Release signing:** for a tag, the job `update-manifest` signs `tunnelview-update.json` with
+  `scripts/sign-update.js`, after the repository owner approves it in the `release` environment.
+  The release is published only with that file. Optional release notes come from
+  `.github/release-notes/v<version>.txt` (plain text, at most 4000 characters). The format and the
+  key handling are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §7 (`updater.js`).
 - **koffi native binaries are per-architecture.** npm installs only the one for the machine you
   build on. To package the other architecture, add its binary first. This is the same step CI runs:
   ```sh
@@ -616,13 +755,16 @@ npm run dist:mac -- --arm64 --x64         # on a Mac → dist/Tunnelview-<v>-mac
 
 ```
 src/main/        Electron main process: Tailscale CLI, host server, viewer client, auth, input
-                 injection (koffi → SendInput / CGEvent), capture, clipboard, files, tray, IPC
+                 injection (koffi → SendInput / CGEvent), capture, clipboard, files, tray, IPC,
+                 in-app updater (signed manifest from GitHub), this computer's identity key
+                 and phone pairing (identity.js, pairing.js, qr.js)
 src/preload/     contextBridge APIs, one per window type (the exact IPC surface)
 src/renderer/    main window, viewer, host session panel, approval prompt, shared UI and WebRTC code
 src/shared/      protocol constants shared by main and renderers
 build/           entitlements.mac.plist, installer.nsh (firewall rules), generated icons
 scripts/         make-icons.js, check.js, verify-fuses.js (packaged-build fuse check),
-                 mac-install.sh (build + install on a Mac)
+                 mac-install.sh (build + install on a Mac), sign-update.js (signs the update
+                 manifest in CI), make-mobile-fixtures.js (writes test/vectors for the phone app)
 test/            node --test unit tests
 docs/            ARCHITECTURE.md: the binding contract (security invariants, wire protocol,
                  data channels, IPC, module APIs, settings)

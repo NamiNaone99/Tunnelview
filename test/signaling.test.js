@@ -1,143 +1,29 @@
 'use strict';
 /*
  * node --test test/signaling.test.js
- * Integration: real HostServer + ViewerSession over 127.0.0.1. A fake tailscale object declares
- * 127.0.0.1 (and, for whois-path tests, 127.0.0.2/3) to be tailnet IPs; settings.port = 0.
+ * Integration: real HostServer + ViewerSession over 127.0.0.1. A fake tailscale object
+ * (test/support/fake-tailscale.js) declares 127.0.0.1 (and, for whois-path tests, 127.0.0.2/3) to
+ * be tailnet IPs; settings.port = 0.
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('http');
 const net = require('net');
-const { EventEmitter } = require('events');
 const WebSocket = require('ws');
 
 const PROTOCOL = require('../src/shared/protocol');
 const auth = require('../src/main/auth');
-const { normalizeIp } = require('../src/main/tailscale');
 const HostServer = require('../src/main/host-server');
 const ViewerSession = require('../src/main/viewer-client');
+const {
+  SELF_LOGIN, SELF_ID, FakeTailscale, FakeSettings, BOB, makeRemoteBob, makeSelfAgain, viewerTs, loopbackAliasWorks,
+} = require('./support/fake-tailscale');
 
 const FAST_KDF = { N: 16384, r: 8, p: 1, keylen: 32 };
 const PASSWORD = 'open sesame 42';
 const V = PROTOCOL.PROTOCOL_VERSION;
 const VH = { [PROTOCOL.PROTOCOL_HEADER]: String(V) };
 let STORED; // hashed once
-
-const SELF_LOGIN = 'alice@example.com';
-
-const SELF_ID = 'nSELFTEST';
-
-class FakeTailscale extends EventEmitter {
-  constructor({ selfIps = ['127.0.0.1'], tailnet = ['127.0.0.1'], whois = {}, peers = [], selfId = SELF_ID } = {}) {
-    super();
-    this.tailnet = new Set(tailnet);
-    this.whoisMap = whois;
-    this.whoisCalls = 0;
-    this.statusCalls = 0;
-    this.selfId = selfId;
-    this.peers = peers; // [{stableId, ips}] — the viewer only dials self/peer IPs
-    // When set, a ViewerSession sharing this fake (viewerFor) sees this as its own `self` (the
-    // host keeps using `last.self`): the viewer is then another node, e.g. Bob (makeRemoteBob).
-    this.viewerSelf = null;
-    this.last = this._status('running', selfIps);
-  }
-
-  _status(state, ips) {
-    return {
-      state,
-      message: state === 'running' ? '' : 'Tailscale is turned off.',
-      self: { id: '1', stableId: this.selfId, hostname: 'test-host', dnsName: 'test-host.example.ts.net', shortName: 'test-host', os: 'windows', ips, user: { login: SELF_LOGIN, displayName: 'Alice' }, tags: [] },
-      magicDnsSuffix: 'example.ts.net',
-      peers: state === 'running' ? this.peers : [],
-    };
-  }
-
-  setState(state, ips) {
-    this.last = this._status(state, ips);
-    this.emit('status', this.last);
-    this.emit('change', this.last);
-  }
-
-  async status() { this.statusCalls++; return this.last; }
-  isTailscaleIp(a) { return this.tailnet.has(normalizeIp(a)); }
-  normalizeIp(a) { return normalizeIp(a); }
-  async whois(ip) {
-    this.whoisCalls++;
-    const w = this.whoisMap[normalizeIp(ip)];
-    return w ? structuredClone(w) : null;
-  }
-}
-
-class FakeSettings extends EventEmitter {
-  constructor(overrides = {}) {
-    super();
-    this.s = {
-      version: 1,
-      hostEnabled: true,
-      port: 0,
-      acceptMode: 'ask',
-      allowFrom: 'tailnet',
-      allowList: [],
-      autoAcceptSameUser: false,
-      trustedNodes: [],
-      password: null,
-      defaultPermissions: { control: true, clipboard: true, files: true, audio: true },
-      promptTimeoutSec: 30,
-      ...overrides,
-    };
-  }
-
-  get() { return structuredClone(this.s); }
-  update(p) {
-    Object.assign(this.s, structuredClone(p));
-    // quiet: no 'change' → no host rebind (makeRemoteBob moves the self IPs off 127.0.0.1, and a
-    // rebind would then stop listening there)
-    if (!this.quiet) this.emit('change', this.get());
-    return this.get();
-  }
-}
-
-const BOB = {
-  node: { id: '5', stableId: 'nBOB0000001CNTRL', name: 'bobs-mac.example.ts.net', hostname: 'Bobs-Mac', os: 'macos', ips: ['127.0.0.2'], tags: [] },
-  user: { id: '1002', login: 'bob@example.com', displayName: 'Bob' },
-  isSelf: false,
-};
-
-/**
- * After start(): treat 127.0.0.1 as a whois-identified OTHER node (Bob by default) instead of self.
- * A ViewerSession sharing this fake then sees itself as that node (own IP 127.0.0.1 = its socket's
- * local address) and the host as its peer owning 127.0.0.1 — consistent with the host's whois, so
- * the node-ID proof binding matches. (The server stays bound to 127.0.0.1 — no 'change' event.)
- */
-function makeRemoteBob(ts, { node = {}, user = {} } = {}) {
-  ts.last.self.ips = ['127.0.0.9'];
-  const w = structuredClone(BOB);
-  Object.assign(w.node, { ips: ['127.0.0.1'] }, node);
-  Object.assign(w.user, user);
-  ts.whoisMap['127.0.0.1'] = w;
-  ts.viewerSelf = { id: '5', stableId: w.node.stableId, hostname: w.node.hostname, dnsName: w.node.name, os: w.node.os, ips: ['127.0.0.1'], user: { login: w.user.login, displayName: w.user.displayName }, tags: w.node.tags };
-  ts.last.peers.splice(0, ts.last.peers.length, { stableId: ts.last.self.stableId, ips: ['127.0.0.1'] });
-  return w;
-}
-
-/** Undo makeRemoteBob: 127.0.0.1 is self again (affects connections made from now on). */
-function makeSelfAgain(ts) {
-  ts.last.self.ips = ['127.0.0.1'];
-  ts.viewerSelf = null;
-  ts.last.peers.splice(0, ts.last.peers.length);
-}
-
-/** The viewer's own view of `tailscale status` (see FakeTailscale.viewerSelf). */
-function viewerTs(ts) {
-  return {
-    normalizeIp: (a) => ts.normalizeIp(a),
-    isTailscaleIp: (a) => ts.isTailscaleIp(a),
-    async status() {
-      const st = await ts.status(); // honours per-test overrides of ts.status
-      return st && st.state === 'running' && ts.viewerSelf ? { ...st, self: structuredClone(ts.viewerSelf) } : st;
-    },
-  };
-}
 
 function once(emitter, event, { timeout = 5000, filter = () => true } = {}) {
   return new Promise((resolve, reject) => {
@@ -154,9 +40,9 @@ function once(emitter, event, { timeout = 5000, filter = () => true } = {}) {
 
 const phase = (vs, p, timeout) => once(vs, 'status', { filter: (s) => s.phase === p, timeout });
 
-async function startHost(t, { settings = {}, ts = new FakeTailscale() } = {}) {
+async function startHost(t, { settings = {}, ts = new FakeTailscale(), busy } = {}) {
   const s = new FakeSettings(settings);
-  const host = new HostServer({ tailscale: ts, settings: s, auth, appVersion: '0.1.0-test', osName: 'windows' });
+  const host = new HostServer({ tailscale: ts, settings: s, auth, appVersion: '0.1.0-test', osName: 'windows', busy });
   await host.start();
   t.after(() => host.stop());
   const st = host.status();
@@ -194,17 +80,6 @@ async function waitFor(pred, timeout = 3000) {
     await new Promise((r) => setTimeout(r, 10));
   }
   assert.fail('condition not reached');
-}
-
-async function loopbackAliasWorks() {
-  // 127.0.0.2 as a *source* address works on Windows/Linux; macOS only configures 127.0.0.1.
-  return new Promise((resolve) => {
-    const srv = net.createServer((s) => s.destroy()).listen(0, '127.0.0.1', () => {
-      const c = net.connect({ port: srv.address().port, host: '127.0.0.1', localAddress: '127.0.0.2' });
-      c.on('connect', () => { c.destroy(); srv.close(); resolve(true); });
-      c.on('error', () => { srv.close(); resolve(false); });
-    });
-  });
 }
 
 test.before(async () => {
@@ -492,6 +367,71 @@ test('second viewer while busy (pending prompt, then active session) → denied:
   assert.equal((await once(c, 'closed')).reason, 'denied:busy');
   const info = await getJson(port, PROTOCOL.INFO_PATH);
   assert.equal(info.body.busy, true);
+  assert.equal(info.body.updating, false, 'busy with a session, not an update');
+  // No updating marker on a session's 'busy'.
+  const r = await rawRequest(port);
+  await waitFor(() => r.msgs.some((m) => m.t === 'denied'));
+  assert.deepEqual(r.msgs.find((m) => m.t === 'denied'), { t: 'denied', reason: 'busy' });
+  await closeRaw(r);
+});
+
+test('while main installs an update (deps.busy) every admission is denied busy, a prompt answered meanwhile too', async (t) => {
+  let updating = true;
+  const { host, ts, port } = await startHost(t, { settings: { password: STORED }, busy: () => updating });
+  const requests = [];
+  host.on('request', (r) => requests.push(r));
+  const sessions = [];
+  host.on('session-start', (s) => sessions.push(s));
+  // A correct password (no prompt) and a prompt request: both refused, no prompt shown. The
+  // viewer says the host is updating, not that someone else is connected.
+  const pw = viewerFor(t, ts, port, { password: PASSWORD });
+  pw.connect();
+  const pwClosed = await once(pw, 'closed');
+  assert.equal(pwClosed.reason, 'host-updating');
+  assert.match(pwClosed.message, /installing a Tunnelview update/);
+  const ask = viewerFor(t, ts, port);
+  ask.connect();
+  assert.equal((await once(ask, 'closed')).reason, 'host-updating');
+  assert.equal(requests.length, 0, 'no prompt while installing');
+  const info = (await getJson(port, PROTOCOL.INFO_PATH)).body;
+  assert.equal(info.busy, true);
+  assert.equal(info.updating, true, '/info says why it is busy');
+  // On the wire it is still reason 'busy' (a v0.2.0 viewer shows that) with the extra marker.
+  const r = await rawRequest(port);
+  await waitFor(() => r.msgs.some((m) => m.t === 'denied'));
+  assert.deepEqual(r.msgs.find((m) => m.t === 'denied'), { t: 'denied', reason: 'busy', updating: true });
+  await closeRaw(r);
+  // The install starts while a prompt is showing: accepting it does not start a session.
+  updating = false;
+  assert.equal((await getJson(port, PROTOCOL.INFO_PATH)).body.updating, false);
+  const late = viewerFor(t, ts, port);
+  late.connect();
+  await phase(late, 'waiting');
+  assert.equal(requests.length, 1);
+  updating = true;
+  requests[0].respond({ accept: true });
+  assert.equal((await once(late, 'closed')).reason, 'host-updating');
+  assert.equal(sessions.length, 0);
+  // main refusing the prompt with 'busy' while it installs (index.js onRequest) carries the marker too.
+  updating = false;
+  const refused = viewerFor(t, ts, port);
+  refused.connect();
+  await phase(refused, 'waiting');
+  updating = true;
+  requests[1].respond({ accept: false, reason: 'busy' });
+  assert.equal((await once(refused, 'closed')).reason, 'host-updating');
+  // Installed (or failed): sessions start again.
+  updating = false;
+  const ok = viewerFor(t, ts, port, { password: PASSWORD });
+  ok.connect();
+  assert.equal((await phase(ok, 'accepted')).via, 'password');
+});
+
+test('a throwing busy callback counts as not busy', async (t) => {
+  const { ts, port } = await startHost(t, { settings: { password: STORED }, busy: () => { throw new Error('boom'); } });
+  const vs = viewerFor(t, ts, port, { password: PASSWORD });
+  vs.connect();
+  assert.equal((await phase(vs, 'accepted')).via, 'password');
 });
 
 test('viewer disconnect while pending → request-cancelled', async (t) => {
@@ -649,7 +589,7 @@ test('GET /tunnelview/v1/info → JSON; other paths 404; non-IP Host 403', async
   const r = await getJson(port, PROTOCOL.INFO_PATH);
   assert.equal(r.status, 200);
   assert.match(r.type, /application\/json/);
-  assert.deepEqual(r.body, { app: 'Tunnelview', protocol: V, version: '0.1.0-test', hostname: 'test-host', os: 'windows', passwordSet: true, acceptMode: 'password-only', busy: false, enabled: true });
+  assert.deepEqual(r.body, { app: 'Tunnelview', protocol: V, version: '0.1.0-test', hostname: 'test-host', os: 'windows', passwordSet: true, acceptMode: 'password-only', busy: false, updating: false, enabled: true });
   assert.equal((await getJson(port, '/')).status, 404);
   assert.equal((await getJson(port, '/tunnelview/v1')).status, 404);
   assert.equal((await getJson(port, PROTOCOL.INFO_PATH, { Host: 'attacker.example' })).status, 403);

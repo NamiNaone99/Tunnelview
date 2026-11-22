@@ -2,7 +2,8 @@
 /*
  * Tunnelview main process entry — app lifecycle, single instance, command-line switches, security
  * hardening, AppState, and the wiring between the host server (incoming sessions), the prompt /
- * panel windows, the viewer windows (ipc.js) and the tray. Contract: docs/ARCHITECTURE.md.
+ * panel windows, the viewer windows (ipc.js), the tray and the in-app updater (updater.js).
+ * Contract: docs/ARCHITECTURE.md.
  *
  * Flags: --dev (unpackaged runs only: DevTools detached for every window), --hidden (start in the
  * tray; used by the Windows login item). Env: TUNNELVIEW_MAC_LOOPBACK=1 (experimental macOS
@@ -243,6 +244,8 @@ function main() {
   const auth = require('./auth');
   const hostServerMod = require('./host-server');
   const viewerClientMod = require('./viewer-client');
+  const { createIdentity } = require('./identity');
+  const { createUpdater } = require('./updater');
   const HostServer = typeof hostServerMod === 'function' ? hostServerMod : hostServerMod.HostServer;
   const ViewerSession = typeof viewerClientMod === 'function' ? viewerClientMod : viewerClientMod.ViewerSession;
   // Native input injection is optional at runtime (koffi / OS permission problems must not kill the app).
@@ -274,8 +277,13 @@ function main() {
   const FIREWALL_RECHECK_MS = 60000;
   const MAIN_RELOADS_PER_MIN = 3;
   const LOGIN_ITEMS_SETTINGS_URL = 'x-apple.systempreferences:com.apple.LoginItems-Settings.extension';
+  // Quit for an update: the Windows installer closes what is still running after about 2-5 s, so
+  // the graceful shutdown gets less time than a normal quit (4 s); a stalled quit exits anyway.
+  const UPDATE_QUIT_SHUTDOWN_MS = 1500;
+  const UPDATE_QUIT_EXIT_FALLBACK_MS = 10000;
 
   let host = null;
+  let identity = null;       // identity.js: this computer's Ed25519 key (main only, never sent to a renderer)
   let hostRunning = false;   // we called start() successfully and not stop()
   let hostStartError = null;
   let hostFirewallWarning = null;
@@ -286,6 +294,8 @@ function main() {
   let osTeardownDone = false;
   let tailscaleReady = null;
   let suppressLoginItemApply = false;
+  let updater = null;        // updater.js (null when it could not be created)
+  let updateQuitting = false; // quitting for the installer / swap helper
 
   /**
    * Host-side state: at most one pending prompt and one active session (§3). warmPanel = the
@@ -403,6 +413,28 @@ function main() {
     try { return ipc.listViewers().some((v) => !!(v && v.phase && v.phase !== 'closed')); } catch { return false; }
   }
 
+  /**
+   * Why an update cannot be installed right now (updater.js asks before it starts and again right
+   * before it hands over): someone controls or watches this computer, someone is asking to, or
+   * this computer is connected to (or connecting to) another device.
+   */
+  function updateBlocker() {
+    if (hostState.session && !hostState.session.ended) return 'INCOMING_SESSION';
+    if (hostState.prompt) return 'INCOMING_REQUEST';
+    if (viewerSessionActive()) return 'OUTGOING_SESSION';
+    return null;
+  }
+
+  /**
+   * The other direction of that gate: while an update installs (from its first check until the
+   * app quits, the Windows UAC prompt included, which may stay open for long), no new incoming
+   * session, prompt or outgoing session starts (HostServer `busy`, onRequest, ipc). Approving the
+   * prompt later would otherwise quit Tunnelview in the middle of that session.
+   */
+  function updateInstalling() {
+    try { return !!(updater && typeof updater.isInstalling === 'function' && updater.isInstalling()); } catch { return false; }
+  }
+
   /** The last outgoing viewer session ended: run a warm-up skipped meanwhile, at idle. */
   function noteViewerActivity() {
     const busy = viewerSessionActive();
@@ -422,7 +454,100 @@ function main() {
       const win = windows.getMain();
       if (win && !win.webContents.isLoading()) win.webContents.send('app:state', state);
       tray.update(state);
+      // Sessions and prompts decide UpdateState.blocked.
+      if (updater) { try { updater.sessionsChanged(); } catch (err) { console.error('[main] updater state failed:', err); } }
     }, 50);
+  }
+
+  /* ---------------------------------------------------------------- in-app updates */
+
+  function pushUpdateState(state) {
+    const win = windows.getMain();
+    if (win && !win.isDestroyed() && !win.webContents.isLoading()) win.webContents.send('update:state', ipc.sanitizeUpdateState(state));
+  }
+
+  /**
+   * The installer (Windows) or the swap helper (macOS) runs and waits for this process to exit.
+   * app.quit() runs the usual before-quit shutdown (bye to every peer, .part files removed) with a
+   * shorter cap, and isQuitting makes every window really close instead of hiding to the tray.
+   * Should the quit still stall, the process exits anyway.
+   */
+  function quitForUpdate() {
+    updateQuitting = true;
+    isQuitting = true;
+    app.quit();
+    const t = setTimeout(() => {
+      console.warn('[main] quitting for the update stalled; exiting');
+      app.exit(0);
+    }, UPDATE_QUIT_EXIT_FALLBACK_MS);
+    if (t && typeof t.unref === 'function') t.unref();
+  }
+
+  /**
+   * %LOCALAPPDATA%\Tunnelview on Windows (<home>\AppData\Local when LOCALAPPDATA is not an
+   * absolute path): per user AND per computer. userData (%APPDATA%) is the roaming profile, which
+   * folder redirection can put on a network share and which a roaming profile copies to every
+   * computer the user signs in to.
+   */
+  function localAppDir() {
+    const local = process.env.LOCALAPPDATA;
+    const base = typeof local === 'string' && path.isAbsolute(local) ? local : path.join(app.getPath('home'), 'AppData', 'Local');
+    return path.join(base, 'Tunnelview');
+  }
+
+  /**
+   * Where downloads and the staged installer live. Windows: %LOCALAPPDATA%\Tunnelview\updates,
+   * never the roaming profile (userData): the elevated installer must be read from a local disk,
+   * and 100+ MB must not roam. macOS: userData. A development run (not packaged) can never
+   * install, so it keeps to userData/updates on Windows too and never touches the installed
+   * app's folder (pending.json, a verified download, a download in progress).
+   */
+  function updatesDirFor() {
+    if (!IS_WIN || !app.isPackaged) return path.join(app.getPath('userData'), 'updates');
+    return path.join(localAppDir(), 'updates');
+  }
+
+  /**
+   * This computer's identity key. Windows: %LOCALAPPDATA%\Tunnelview\identity.json, never the
+   * roaming profile: a roaming profile would give every computer the user signs in to the same
+   * key, and a Reset identity… on one of them would silently replace the key of the others at the
+   * next profile sync (every phone paired with them then reports "not the computer you paired
+   * with"). It is also not copied to the profile server. macOS: userData/identity.json.
+   */
+  function identityFileFor() {
+    return path.join(IS_WIN ? localAppDir() : app.getPath('userData'), 'identity.json');
+  }
+
+  /** updater.js with the real OS behind it; its init() reads what a previous install left. */
+  function createAppUpdater() {
+    try {
+      const u = createUpdater({
+        appVersion: app.getVersion(),
+        isPackaged: app.isPackaged,
+        settings,
+        userData: app.getPath('userData'),
+        updatesDir: updatesDirFor(),
+        resourcesPath: process.resourcesPath,
+        execPath: process.execPath,
+        platform: process.platform,
+        arch: process.arch,
+        translated: () => app.runningUnderARM64Translation === true,
+        // macOS version for the update's LSMinimumSystemVersion check ('' elsewhere).
+        systemVersion: () => (IS_MAC && typeof process.getSystemVersion === 'function' ? process.getSystemVersion() : ''),
+        pid: process.pid,
+        getuid: typeof process.getuid === 'function' ? () => process.getuid() : null,
+        sessionBlocker: updateBlocker,
+        quit: quitForUpdate,
+        showItemInFolder: (file) => shell.showItemInFolder(file),
+      });
+      u.on('state', pushUpdateState);
+      const { justUpdated } = u.init();
+      if (justUpdated) console.log(`[main] updated in place from ${justUpdated.from || 'an older version'} to ${justUpdated.to}`);
+      return u;
+    } catch (err) {
+      console.error('[main] the updater is unavailable:', err && err.message);
+      return null;
+    }
   }
 
   /* ---------------------------------------------------------------- host server */
@@ -580,8 +705,9 @@ function main() {
 
   function onRequest(req) {
     if (!req || typeof req.respond !== 'function') return;
-    if (hostState.prompt) {
-      // host-server allows one pending prompt; refuse defensively if it ever sends two.
+    // host-server allows one pending prompt; refuse defensively if it ever sends two. While an
+    // update installs (HostServer refuses those itself too), no prompt is shown at all.
+    if (hostState.prompt || updateInstalling()) {
       try { req.respond({ accept: false, reason: PROTOCOL.DENY.BUSY }); } catch { /* ignore */ }
       return;
     }
@@ -776,6 +902,11 @@ function main() {
 
   async function onSessionStart(info) {
     if (!info || typeof info !== 'object' || info.id == null) return;
+    // A pairing code must not stay usable while someone else sees this desktop. host-server
+    // withdraws it before announcing the session; asking again is free and does not rely on that.
+    if (host && typeof host.cancelPairing === 'function') {
+      try { host.cancelPairing(null, 'session'); } catch (err) { console.error('[main] cancelPairing failed:', err); }
+    }
     const prev = hostState.session;
     if (prev && !prev.ended) finalizeSession(prev, 'replaced');
 
@@ -945,6 +1076,55 @@ function main() {
     try { if (powerSaveBlocker.isStarted(id)) powerSaveBlocker.stop(id); } catch { /* ignore */ }
   }
 
+  /* ---------------------------------------------------------------- identity + pairing */
+
+  /**
+   * This computer's identity key (identity.js; identityFileFor(): %LOCALAPPDATA%\Tunnelview on
+   * Windows, userData on macOS). A damaged file leaves it unavailable and untouched (Settings ›
+   * Security offers Retry / Reset identity…); it is never replaced behind the user's back. Only the
+   * state and the fingerprint are logged, never key bytes.
+   */
+  function loadIdentity() {
+    let id = null;
+    try {
+      id = createIdentity({ file: identityFileFor() });
+      id.load();
+    } catch (err) {
+      console.error('[main] identity could not be loaded:', err && err.message);
+    }
+    if (id && id.unavailable) {
+      console.warn(`[main] identity unavailable (${id.error || 'unknown'}): phones cannot verify this computer until Settings › Security › Retry or Reset identity…`);
+    } else if (id) {
+      console.log(`[main] identity loaded: ${id.fingerprint()}`);
+    }
+    return id;
+  }
+
+  /** host-server 'pairing' → the main window's open pairing dialog (pairing:status). */
+  function onPairingEvent(evt) {
+    const ev = ipc.sanitizePairingEvent(evt);
+    if (!ev) return;
+    console.log(`[main] pairing offer ${ev.offerId.slice(0, 8)}: ${ev.phase}${ev.reason ? ` (${ev.reason})` : ''}`);
+    const win = windows.getMain();
+    if (win && !win.isDestroyed() && !win.webContents.isLoading()) win.webContents.send('pairing:status', ev);
+  }
+
+  /**
+   * The pairing dialog lives in the main window's page, and only its onClose withdraws the offer.
+   * A renderer crash, a reload or navigation, or a closed window drops the page without it, so
+   * main withdraws the offer itself: a code is never usable while no dialog shows it (or reports
+   * what happens to it). Hiding the window to the tray keeps the page, the dialog and its live
+   * status, like minimising it, so that alone withdraws nothing.
+   */
+  function withdrawPairingOffer(why) {
+    if (!host || typeof host.cancelPairing !== 'function') return;
+    try {
+      if (host.cancelPairing(null, 'cancelled')) console.log(`[main] pairing offer withdrawn: main window ${why}`);
+    } catch (err) {
+      console.error('[main] cancelPairing failed:', err);
+    }
+  }
+
   function finalizeSession(sess, reason) {
     releaseDisplayAwake(sess);
     if (sess.ended) return;
@@ -1101,6 +1281,14 @@ function main() {
         win.hide();
       });
       win.webContents.on('did-finish-load', stateChanged);
+      win.webContents.on('render-process-gone', () => withdrawPairingOffer('renderer gone'));
+      win.webContents.on('did-start-navigation', (event, legacyUrl, legacyInPlace, legacyMainFrame) => {
+        // Electron ≥ 25 passes the details on the event; the positional arguments are deprecated.
+        const mainFrame = event && typeof event.isMainFrame === 'boolean' ? event.isMainFrame : legacyMainFrame === true;
+        const sameDocument = event && typeof event.isSameDocument === 'boolean' ? event.isSameDocument : legacyInPlace === true;
+        if (mainFrame && !sameDocument) withdrawPairingOffer('reloaded');
+      });
+      win.on('closed', () => withdrawPairingOffer('closed'));
       // A crashed main renderer would otherwise be reused as a blank window by ensureMainWindow.
       win.webContents.on('render-process-gone', (_e, details) => {
         if (isQuitting || (details && details.reason === 'clean-exit')) return;
@@ -1185,7 +1373,13 @@ function main() {
     const st = macLoginItemStatus();
     const s = settings.get();
     if (want) {
-      if (st === 'not-registered' && s.loginItemApplied) { adoptLoginItemOff({ loginItemApplied: false }); return; }
+      if (st === 'not-registered' && s.loginItemApplied) {
+        // The first start after an in-app update runs a replaced bundle (a new ad-hoc code
+        // identity), which may read as "not registered" although nobody removed the login item.
+        if (updater && updater.justUpdated) { applyLoginItem(true); return; }
+        adoptLoginItemOff({ loginItemApplied: false });
+        return;
+      }
       if (st === 'enabled' || st === 'requires-approval') {
         if (!s.loginItemApplied) settings.update({ loginItemApplied: true });
         if (st === 'requires-approval') hintLoginItemApproval();
@@ -1239,6 +1433,7 @@ function main() {
 
   async function shutdown() {
     try {
+      if (updater) updater.dispose(); // no new check; a running download stops (the installer / helper, if any, runs on)
       const p = hostState.prompt;
       if (p && !p.done) finishPrompt(p, { accept: false });
       destroyWarmPanel('shutdown');
@@ -1279,6 +1474,7 @@ function main() {
     osTeardownDone = true;
     isQuitting = true;
     try {
+      if (updater) updater.dispose();
       const p = hostState.prompt;
       if (p && !p.done) finishPrompt(p, { accept: false });
       destroyWarmPanel('shutdown');
@@ -1306,7 +1502,7 @@ function main() {
     e.preventDefault();
     if (shutdownStarted) return;
     shutdownStarted = true;
-    withTimeout(shutdown(), 4000).finally(() => {
+    withTimeout(shutdown(), updateQuitting ? UPDATE_QUIT_SHUTDOWN_MS : 4000).finally(() => {
       shutdownDone = true;
       app.quit();
     });
@@ -1429,13 +1625,20 @@ function main() {
       off(event, fn) { settings.removeListener(event, fn); return hostSettings; },
     };
 
+    // Before the host server exists, so its first hello can already be signed.
+    identity = loadIdentity();
+
+    // Before the login item is reconciled: the first start after an in-app update is special there.
+    updater = createAppUpdater();
+
     try {
-      host = new HostServer({ tailscale, settings: hostSettings, auth, appVersion: app.getVersion(), osName: OS_NAME });
+      host = new HostServer({ tailscale, settings: hostSettings, auth, appVersion: app.getVersion(), osName: OS_NAME, identity, busy: updateInstalling });
       host.on('request', (req) => { try { onRequest(req); } catch (err) { console.error('[main] request handling failed:', err); } });
       host.on('request-cancelled', onRequestCancelled);
       host.on('session-start', (s) => { onSessionStart(s).catch((err) => console.error('[main] session-start failed:', err)); });
       host.on('session-signal', onSessionSignal);
       host.on('session-end', onSessionEnd);
+      host.on('pairing', onPairingEvent);
       host.on('status', stateChanged);
       host.on('error', (err) => console.error('[main] host server error:', err && err.message));
     } catch (err) {
@@ -1457,6 +1660,8 @@ function main() {
       input,
       hostCtl,
       getHost: () => host,
+      identity,
+      updater,
       getState: buildState,
       stateChanged,
       notify,
@@ -1504,6 +1709,7 @@ function main() {
       if (keys.includes('downloadDir')) prepareReceiveDir();
       if (keys.includes('startAtLogin') && !suppressLoginItemApply) applyLoginItem(s.startAtLogin);
       if (keys.includes('theme')) nativeTheme.themeSource = s.theme;
+      if (updater && keys.includes('autoUpdateCheck')) updater.settingsChanged(keys);
       stateChanged();
     });
 
@@ -1520,6 +1726,9 @@ function main() {
     // Not unconditional any more: re-applying it on every launch overrode a user who disabled
     // Tunnelview in Task Manager → Startup apps. Later changes go through the settings 'change' handler.
     reconcileLoginItem();
+    // Daily update check (packaged builds, autoUpdateCheck on): the first one 60 s from now at the
+    // earliest, and not within 24 h of the last one (settings.lastUpdateCheckAt).
+    if (updater) updater.start();
     tailscaleReady.then(() => {
       syncHost();
       checkFirewall(); // background; never blocks startup
@@ -1529,6 +1738,10 @@ function main() {
 
     if (powerMonitor && typeof powerMonitor.on === 'function') {
       powerMonitor.on('shutdown', () => app.quit()); // macOS/Linux: allow a graceful bye
+      // macOS timers count awake time only: after a sleep the daily check would come days late.
+      const rescheduleUpdates = () => { if (updater) { try { updater.reschedule(); } catch (err) { console.error('[main] updater reschedule failed:', err); } } };
+      powerMonitor.on('resume', rescheduleUpdates);
+      powerMonitor.on('unlock-screen', rescheduleUpdates);
     }
     stateChanged();
   }).catch((err) => {

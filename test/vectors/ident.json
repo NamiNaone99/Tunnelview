@@ -1,0 +1,2231 @@
+{
+  "about": "hello.ident from src/main/pairing.js (protocol 2, optional field). The host signs signedText = context + hello.auth.nonce + \"|\" + (cnonce or \"\") + \"|\" + hostId + \"|\" + viewerId (UTF-8) with its Ed25519 identity key; the signature is standard base64 of 64 bytes, keys are raw 32 bytes in base64url without padding. keys: fixed test keys from 32-byte seeds (PKCS8 = the RFC 8410 prefix + seed). rfc8032: standard Ed25519 known answers the port must reproduce. functions.verifyIdent args = [pub (base64url), hello, expect?]; reasons in check order: no-ident, malformed, bad-signature, cnonce-mismatch, host-mismatch, viewer-mismatch. Not covered on purpose: small-order public keys (Ed25519 libraries differ there; a real host key never is one). Regenerate with node scripts/make-mobile-fixtures.js.",
+  "alg": "ed25519",
+  "clientNonceBytes": 32,
+  "clientNonceHeader": "x-tunnelview-client-nonce",
+  "context": "Tunnelview-hello-v1|",
+  "format": 1,
+  "functions": {
+    "identBytes": {
+      "about": "identBytes(nonce, cnonce, hostId, viewerId) -> the signed text (its UTF-8 bytes are what is signed). nonce: canonical base64 of 16..64 bytes; cnonce: null or canonical base64 of 32 bytes; IDs: /^[A-Za-z0-9_-]{1,64}$/. Errors, checked in argument order: BAD_NONCE, BAD_CNONCE, BAD_BINDING.",
+      "cases": [
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "result": "Tunnelview-hello-v1|EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=|QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=|nHOSTabc123CNTRL|nPHONEp1x2CNTRL"
+        },
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            null,
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "note": "no client nonce (desktop viewer): an empty field",
+          "result": "Tunnelview-hello-v1|EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=||nHOSTabc123CNTRL|nPHONEp1x2CNTRL"
+        },
+        {
+          "args": [
+            "kJGSk5SVlpeYmZqbnJ2enw==",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "12",
+            "7"
+          ],
+          "note": "16-byte nonce, numeric node IDs",
+          "result": "Tunnelview-hello-v1|kJGSk5SVlpeYmZqbnJ2enw==|QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=|12|7"
+        },
+        {
+          "args": [
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+Pw==",
+            "UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8=",
+            "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh",
+            "v-_9v-_9v-_9v-_9v-_9v-_9v-_9v-_9v-_9v-_9v-_9v-_9v-_9v-_9v-_9v-_9"
+          ],
+          "result": "Tunnelview-hello-v1|AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+Pw==|UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8=|hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh|v-_9v-_9v-_9v-_9v-_9v-_9v-_9v-_9v-_9v-_9v-_9v-_9v-_9v-_9v-_9v-_9"
+        },
+        {
+          "args": [
+            "",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_NONCE"
+        },
+        {
+          "args": [
+            "AAECAwQFBgcICQoLDA0O",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_NONCE",
+          "note": "nonce below 16 bytes"
+        },
+        {
+          "args": [
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0A=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_NONCE",
+          "note": "nonce above 64 bytes"
+        },
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi9=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_NONCE",
+          "note": "non-canonical nonce"
+        },
+        {
+          "args": [
+            "-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_s=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_NONCE",
+          "note": "base64url nonce"
+        },
+        {
+          "args": [
+            null,
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_NONCE"
+        },
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_CNONCE",
+          "note": "an empty string is not \"no client nonce\""
+        },
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHg==",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_CNONCE"
+        },
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8g",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_CNONCE"
+        },
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl9=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_CNONCE"
+        },
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_CNONCE"
+        },
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            42,
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_CNONCE"
+        },
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "a|b",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_BINDING",
+          "note": "\"|\" separates the fields"
+        },
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            ""
+          ],
+          "error": "BAD_BINDING"
+        },
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          ],
+          "error": "BAD_BINDING"
+        },
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            null,
+            null,
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_BINDING"
+        },
+        {
+          "args": [
+            "bad",
+            "bad",
+            "a|b",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_NONCE",
+          "note": "the nonce is checked first"
+        },
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "bad",
+            "a|b",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_CNONCE",
+          "note": "then the client nonce"
+        }
+      ]
+    },
+    "validCnonce": {
+      "about": "validCnonce(value) -> bool: the x-tunnelview-client-nonce header value and ident.cnonce: canonical standard base64 of exactly 32 bytes (44 characters, one \"=\"). The host answers HTTP 400 to a malformed header.",
+      "cases": [
+        {
+          "args": [
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8="
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            "//////////////////////////////////////////8="
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl9="
+          ],
+          "note": "non-zero padding bits",
+          "result": false
+        },
+        {
+          "args": [
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8"
+          ],
+          "note": "padding missing",
+          "result": false
+        },
+        {
+          "args": [
+            "-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_s="
+          ],
+          "note": "base64url",
+          "result": false
+        },
+        {
+          "args": [
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHg=="
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8g"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "AAECAwQFBgcICQoLDA0ODw=="
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            " QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8="
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=\n"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            ""
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            null
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            42
+          ],
+          "result": false
+        }
+      ]
+    },
+    "verifyIdent": {
+      "about": "verifyIdent(pub, hello, expect?) -> {ok:true, reason:null, hostId, viewerId, cnonce} or {ok:false, reason}. expect = what the viewer knows ({cnonce, hostId, viewerId}); a key that is present is compared exactly. Unknown ident fields are ignored; cnonce must be present (a string or null). A pub that is not 32 bytes is a caller bug: error BAD_KEY.",
+      "cases": [
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "a phone connection",
+          "result": {
+            "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "hostId": "nHOSTabc123CNTRL",
+            "ok": true,
+            "reason": null,
+            "viewerId": "nPHONEp1x2CNTRL"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            }
+          ],
+          "note": "nothing to compare",
+          "result": {
+            "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "hostId": "nHOSTabc123CNTRL",
+            "ok": true,
+            "reason": null,
+            "viewerId": "nPHONEp1x2CNTRL"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": null,
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "BY8Sa7QgYmVQK6ffjZRcDisQrbK2YMR9SyhvGWeX35f/jl+ufTyAfbcz9zLSWzEN93z+afCRJy8CJykNuZqCAg==",
+                "v": 1,
+                "viewerId": "nDESKTOPv1CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": null,
+              "hostId": "nHOSTabc123CNTRL"
+            }
+          ],
+          "note": "a desktop viewer: no client nonce",
+          "result": {
+            "cnonce": null,
+            "hostId": "nHOSTabc123CNTRL",
+            "ok": true,
+            "reason": null,
+            "viewerId": "nDESKTOPv1CNTRL"
+          }
+        },
+        {
+          "args": [
+            "F0VTtFbd38aQjsqxwQH-arIeK6oGF3lbfUOmNIKZP9U",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "kJGSk5SVlpeYmZqbnJ2enw==",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8=",
+                "hostId": "12",
+                "sig": "gWmbsyeQGwa35pRqI2jAePdvM+nOAfrygs1S59z7I3MKVJut9ah9SYUmLEat6/AKJ8ryY3oGXdbAoXFh32H8CQ==",
+                "v": 1,
+                "viewerId": "7"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8=",
+              "hostId": "12",
+              "viewerId": "7"
+            }
+          ],
+          "note": "numeric node IDs, 16-byte nonce",
+          "result": {
+            "cnonce": "UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8=",
+            "hostId": "12",
+            "ok": true,
+            "reason": null,
+            "viewerId": "7"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "ext": {
+                  "a": 1
+                },
+                "hostId": "nHOSTabc123CNTRL",
+                "note": "x",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "unknown ident fields are ignored",
+          "result": {
+            "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "hostId": "nHOSTabc123CNTRL",
+            "ok": true,
+            "reason": null,
+            "viewerId": "nPHONEp1x2CNTRL"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "no ident: a host older than 0.3, or a 0.3+ host whose key is unavailable right now (hello.version tells them apart)",
+          "result": {
+            "ok": false,
+            "reason": "no-ident"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": null,
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "result": {
+            "ok": false,
+            "reason": "no-ident"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            null,
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "hello",
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            [],
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": "signed",
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": [
+                {
+                  "alg": "ed25519",
+                  "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                  "hostId": "nHOSTabc123CNTRL",
+                  "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                  "v": 1,
+                  "viewerId": "nPHONEp1x2CNTRL"
+                }
+              ],
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 2,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": "1",
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed448",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "cnonce must be sent, as null when absent",
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "a|b",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHg==",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbj",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "signature too short",
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT-oRJzbjBg",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "base64url without padding",
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbj",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "63 bytes",
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBh==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "non-zero padding bits",
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "no hello.auth: no nonce",
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_s=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "result": {
+            "ok": false,
+            "reason": "malformed"
+          }
+        },
+        {
+          "args": [
+            "F0VTtFbd38aQjsqxwQH-arIeK6oGF3lbfUOmNIKZP9U",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "another computer's key",
+          "result": {
+            "ok": false,
+            "reason": "bad-signature"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWYGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "one bit of R flipped",
+          "result": {
+            "ok": false,
+            "reason": "bad-signature"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQrzrhu4hfYtcL0JfrfDrSm5mE1FOBIOCfGbT+oRJzbjFg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "S + L: the same signature modulo L; RFC 8032 requires S < L",
+          "result": {
+            "ok": false,
+            "reason": "bad-signature"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "the hello nonce differs from the signed one",
+          "result": {
+            "ok": false,
+            "reason": "bad-signature"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nphonep1x2cntrl"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "a signed field changed",
+          "result": {
+            "ok": false,
+            "reason": "bad-signature"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "a signed field changed",
+          "result": {
+            "ok": false,
+            "reason": "bad-signature"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": null,
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "the client nonce dropped",
+          "result": {
+            "ok": false,
+            "reason": "bad-signature"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "2YiB4aukzh4PFgNSI/QvJT0pi54TevJ+kiowVrYJWePNwOR1PDuMZ1hTxtzh0E1HTJMbQTXpSjP681tkZtVoAQ==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "authentic, but signed for another connection (replayed)",
+          "result": {
+            "ok": false,
+            "reason": "cnonce-mismatch"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nOTHERhost1CNTRL",
+                "sig": "feGfAl3DQZJrP/7JuHl6CPtYbW5zdeGKgfIlxlYbUgT/aeRyDt6nsi2TDU957YIn1g1eEKaX1M6U46nx30LRAg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "signed by the pinned key for another host ID",
+          "result": {
+            "ok": false,
+            "reason": "host-mismatch"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "tnTHbk5+tid6YwPWgd56fMNfClfOPNVdyy2HC5FAm15SJg5E6/4r7IPWGfET1EEEr0sZxZAZDCKAgxdl6kKRAA==",
+                "v": 1,
+                "viewerId": "nMALLORYm1CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "relay: a node M forwarded the phone's client nonce, so the host saw M as the viewer",
+          "result": {
+            "ok": false,
+            "reason": "viewer-mismatch"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "AbMNxCJQKY2F7RghB/INURM12QYsFrGuXlV9DMhCp/sGnO6aRZcApl7lrW0JR0oOMVAYaBzsMS9S6FGlPv8XBQ==",
+                "v": 1,
+                "viewerId": "nMALLORYm1CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "several mismatches: the first in check order wins",
+          "result": {
+            "ok": false,
+            "reason": "cnonce-mismatch"
+          }
+        },
+        {
+          "args": [
+            "F0VTtFbd38aQjsqxwQH-arIeK6oGF3lbfUOmNIKZP9U",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "AbMNxCJQKY2F7RghB/INURM12QYsFrGuXlV9DMhCp/sGnO6aRZcApl7lrW0JR0oOMVAYaBzsMS9S6FGlPv8XBQ==",
+                "v": 1,
+                "viewerId": "nMALLORYm1CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "a bad signature comes before any mismatch",
+          "result": {
+            "ok": false,
+            "reason": "bad-signature"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "extra": "ignored",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "note": "only cnonce, hostId and viewerId are compared",
+          "result": {
+            "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "hostId": "nHOSTabc123CNTRL",
+            "ok": true,
+            "reason": null,
+            "viewerId": "nPHONEp1x2CNTRL"
+          }
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbQ",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "error": "BAD_KEY"
+        },
+        {
+          "args": [
+            "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdcA",
+            {
+              "app": "Tunnelview",
+              "auth": {
+                "acceptMode": "ask",
+                "autoAccept": false,
+                "kdf": null,
+                "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+                "passwordLocked": false,
+                "passwordSet": false,
+                "salt": null
+              },
+              "host": {
+                "hostname": "office-pc",
+                "os": "windows",
+                "user": {
+                  "displayName": "Alice",
+                  "login": "alice@example.com"
+                }
+              },
+              "ident": {
+                "alg": "ed25519",
+                "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+                "hostId": "nHOSTabc123CNTRL",
+                "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+                "v": 1,
+                "viewerId": "nPHONEp1x2CNTRL"
+              },
+              "protocol": 2,
+              "t": "hello",
+              "version": "0.3.0"
+            },
+            {
+              "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+              "hostId": "nHOSTabc123CNTRL",
+              "viewerId": "nPHONEp1x2CNTRL"
+            }
+          ],
+          "error": "BAD_KEY"
+        }
+      ]
+    }
+  },
+  "keys": [
+    {
+      "name": "host",
+      "pkcs8": "MC4CAQAwBQYDK2VwBCIEICAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4/",
+      "pub": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+      "pubHex": "29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7",
+      "seedHex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+    },
+    {
+      "name": "other",
+      "pkcs8": "MC4CAQAwBQYDK2VwBCIEIGBhYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5/",
+      "pub": "F0VTtFbd38aQjsqxwQH-arIeK6oGF3lbfUOmNIKZP9U",
+      "pubHex": "174553b456dddfc6908ecab1c101fe6ab21e2baa0617795b7d43a63482993fd5",
+      "seedHex": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f"
+    }
+  ],
+  "rfc8032": [
+    {
+      "message": "",
+      "name": "RFC 8032 7.1 TEST 1",
+      "pub": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "seed": "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+      "sig": "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
+    },
+    {
+      "message": "72",
+      "name": "RFC 8032 7.1 TEST 2",
+      "pub": "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+      "seed": "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb",
+      "sig": "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
+    }
+  ],
+  "signatures": [
+    {
+      "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+      "hostId": "nHOSTabc123CNTRL",
+      "key": "host",
+      "name": "phone connection",
+      "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+      "sig": "DgVlbOWZGBXs3GRDwg1TcfpPyMiqzVxet3nlIvraQQoG2yVba5MbGOdshhTls0qkmE1FOBIOCfGbT+oRJzbjBg==",
+      "signedText": "Tunnelview-hello-v1|EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=|QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=|nHOSTabc123CNTRL|nPHONEp1x2CNTRL",
+      "viewerId": "nPHONEp1x2CNTRL"
+    },
+    {
+      "cnonce": null,
+      "hostId": "nHOSTabc123CNTRL",
+      "key": "host",
+      "name": "desktop viewer (no client nonce)",
+      "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+      "sig": "BY8Sa7QgYmVQK6ffjZRcDisQrbK2YMR9SyhvGWeX35f/jl+ufTyAfbcz9zLSWzEN93z+afCRJy8CJykNuZqCAg==",
+      "signedText": "Tunnelview-hello-v1|EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=||nHOSTabc123CNTRL|nDESKTOPv1CNTRL",
+      "viewerId": "nDESKTOPv1CNTRL"
+    },
+    {
+      "cnonce": "UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8=",
+      "hostId": "12",
+      "key": "other",
+      "name": "numeric node IDs (Headscale), 16-byte nonce",
+      "nonce": "kJGSk5SVlpeYmZqbnJ2enw==",
+      "sig": "gWmbsyeQGwa35pRqI2jAePdvM+nOAfrygs1S59z7I3MKVJut9ah9SYUmLEat6/AKJ8ryY3oGXdbAoXFh32H8CQ==",
+      "signedText": "Tunnelview-hello-v1|kJGSk5SVlpeYmZqbnJ2enw==|UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8=|12|7",
+      "viewerId": "7"
+    }
+  ],
+  "version": 1
+}

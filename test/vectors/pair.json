@@ -1,0 +1,373 @@
+{
+  "about": "Pair proofs from src/main/pairing.js: proof = base64(HMAC-SHA256(token, message)), message = context + nonce + \"|\" + cnonce + \"|\" + hostId + \"|\" + viewerId, where token is the 16 bytes from the link's \"t\", nonce = hello.auth.nonce, cnonce = the phone's client nonce (required), hostId = the link's / ident's host ID, viewerId = ident.viewerId (the phone as the host sees it). Token arguments are base64url without padding. Every refusal is answered {t:\"pair-result\", ok:false, reason:\"failed\"}; 3 wrong proofs burn the offer. Regenerate with node scripts/make-mobile-fixtures.js.",
+  "context": "Tunnelview-pair-v1|",
+  "failedReason": "failed",
+  "format": 1,
+  "functions": {
+    "pairMessage": {
+      "about": "pairMessage(nonce, cnonce, hostId, viewerId) -> the HMAC message. Errors in argument order: BAD_NONCE, BAD_CNONCE (also when it is null: pairing needs a client nonce), BAD_BINDING.",
+      "cases": [
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "result": "Tunnelview-pair-v1|EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=|QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=|nHOSTabc123CNTRL|nPHONEp1x2CNTRL"
+        },
+        {
+          "args": [
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+Pw==",
+            "UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8=",
+            "12",
+            "7"
+          ],
+          "result": "Tunnelview-pair-v1|AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+Pw==|UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8=|12|7"
+        },
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            null,
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_CNONCE",
+          "note": "no client nonce: pairing is refused"
+        },
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_CNONCE"
+        },
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHg==",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_CNONCE"
+        },
+        {
+          "args": [
+            "AAECAwQFBgcICQoLDA0O",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_NONCE"
+        },
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "a|b"
+          ],
+          "error": "BAD_BINDING"
+        },
+        {
+          "args": [
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_BINDING"
+        }
+      ]
+    },
+    "pairProof": {
+      "about": "pairProof(token, nonce, cnonce, hostId, viewerId) -> base64 proof (44 characters). Errors: BAD_TOKEN (not 16 bytes) first, then as pairMessage.",
+      "cases": [
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-fw",
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "result": "1aU1lwYHygt3ynhzrhuy6bLKke1HaZB+5R8q+czhmP0="
+        },
+        {
+          "args": [
+            "4OHi4-Tl5ufo6err7O3u7w",
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+Pw==",
+            "UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8=",
+            "12",
+            "7"
+          ],
+          "result": "lt8nuJuH1YEPDBwtLF0W4SRVXWHDTHMTE22Etti+ENw="
+        },
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-fw",
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nPHONEp1x2CNTRL",
+            "nHOSTabc123CNTRL"
+          ],
+          "note": "IDs swapped: another proof",
+          "result": "pq5114GJtGq8A5ra8Y7T+5Zj5dS7Y+rD9khgebslD8Y="
+        },
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-",
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_TOKEN"
+        },
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-f4A",
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_TOKEN"
+        },
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-",
+            "bad",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_TOKEN",
+          "note": "the token is checked first"
+        },
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-fw",
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            null,
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "error": "BAD_CNONCE"
+        }
+      ]
+    },
+    "verifyPairProof": {
+      "about": "verifyPairProof(token, proof, nonce, cnonce, hostId, viewerId) -> bool: the host side, in constant time; any malformed input is false (never an error). The host uses its own nonce, the connection's client nonce, its own ID and whois of the phone's address.",
+      "cases": [
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-fw",
+            "1aU1lwYHygt3ynhzrhuy6bLKke1HaZB+5R8q+czhmP0=",
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            "cXJzdHV2d3h5ent8fX5_gA",
+            "1aU1lwYHygt3ynhzrhuy6bLKke1HaZB+5R8q+czhmP0=",
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "note": "another offer's token",
+          "result": false
+        },
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-fw",
+            "1aU1lwYHygt3ynhzrhuy6bLKke1HaZB+5R8q+czhmP0=",
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nMALLORYm1CNTRL"
+          ],
+          "note": "relayed: the host sees the relay node as the viewer",
+          "result": false
+        },
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-fw",
+            "1aU1lwYHygt3ynhzrhuy6bLKke1HaZB+5R8q+czhmP0=",
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nPHONEp1x2CNTRL",
+            "nHOSTabc123CNTRL"
+          ],
+          "note": "IDs swapped",
+          "result": false
+        },
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-fw",
+            "1aU1lwYHygt3ynhzrhuy6bLKke1HaZB+5R8q+czhmP0=",
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "note": "another connection's client nonce",
+          "result": false
+        },
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-fw",
+            "1aU1lwYHygt3ynhzrhuy6bLKke1HaZB+5R8q+czhmP0=",
+            "oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "note": "another connection's hello nonce",
+          "result": false
+        },
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-fw",
+            "1aU1lwYHygt3ynhzrhuy6bLKke1HaZB+5R8q+czhmP0=",
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            null,
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "note": "no client nonce on this connection",
+          "result": false
+        },
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-fw",
+            "1aU1lwYHygt3ynhzrhuy6bLKke1HaZB+5R8q+czhmP1=",
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "note": "non-canonical proof encoding",
+          "result": false
+        },
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-fw",
+            "1aU1lwYHygt3ynhzrhuy6bLKke1HaZB+5R8q+czhmP0",
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "note": "padding missing",
+          "result": false
+        },
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-fw",
+            "1aU1lwYHygt3ynhzrhuy6bLKke1HaZB+5R8q+czhmP0=\n",
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-fw",
+            "1aU1lwYHygt3ynhzrhuy6bLKke1HaZB+5R8q+czhmA==",
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-fw",
+            "",
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-fw",
+            null,
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-fw",
+            42,
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "cHFyc3R1dnd4eXp7fH1-",
+            "1aU1lwYHygt3ynhzrhuy6bLKke1HaZB+5R8q+czhmP0=",
+            "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+            "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            "nHOSTabc123CNTRL",
+            "nPHONEp1x2CNTRL"
+          ],
+          "note": "a 15-byte token",
+          "result": false
+        }
+      ]
+    }
+  },
+  "maxFailures": 3,
+  "messages": {
+    "pair": "pair",
+    "pairResult": "pair-result"
+  },
+  "proofs": [
+    {
+      "cnonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+      "hostId": "nHOSTabc123CNTRL",
+      "message": "Tunnelview-pair-v1|EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=|QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=|nHOSTabc123CNTRL|nPHONEp1x2CNTRL",
+      "name": "a phone pairing",
+      "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8=",
+      "proof": "1aU1lwYHygt3ynhzrhuy6bLKke1HaZB+5R8q+czhmP0=",
+      "token": "cHFyc3R1dnd4eXp7fH1-fw",
+      "tokenHex": "707172737475767778797a7b7c7d7e7f",
+      "viewerId": "nPHONEp1x2CNTRL"
+    },
+    {
+      "cnonce": "UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8=",
+      "hostId": "12",
+      "message": "Tunnelview-pair-v1|AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+Pw==|UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8=|12|7",
+      "name": "numeric node IDs, 64-byte nonce",
+      "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+Pw==",
+      "proof": "lt8nuJuH1YEPDBwtLF0W4SRVXWHDTHMTE22Etti+ENw=",
+      "token": "4OHi4-Tl5ufo6err7O3u7w",
+      "tokenHex": "e0e1e2e3e4e5e6e7e8e9eaebecedeeef",
+      "viewerId": "7"
+    }
+  ],
+  "tokenBytes": 16,
+  "ttlMs": 120000
+}

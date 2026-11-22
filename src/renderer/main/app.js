@@ -5,13 +5,14 @@
 import { h, $, icon, applyTheme, toast } from '../shared/ui.js';
 import {
   api, store, subscribe, setState, setSettings, refreshState, refreshSettings, scheduleSettingsRefresh,
-  loadPeers, tsRunning, errMsg,
+  loadPeers, tsRunning, errMsg, refreshIdentity, hasUpdateApi, setUpdateState, refreshUpdateState,
 } from './store.js';
 import { mountDesk } from './desk.js';
 import { mountTsBanner, mountConnect, mountRecent } from './remote.js';
 import { mountDevices } from './devices.js';
 import { createSettingsView } from './settings-view.js';
 import { hasLayer } from './dialogs.js';
+import { mountUpdateBanner } from './updates.js';
 import { warmRtcWhileHidden } from './rtc-warmup.js';
 
 const PEER_REFRESH_MS = 30000;
@@ -38,6 +39,10 @@ async function boot() {
   const connect = mountConnect($('#connect'));
   mountRecent($('#recent'));
   const devices = mountDevices($('#devices'));
+  mountUpdateBanner($('#update-banner'), {
+    openSettings: (section, opts) => settingsView.open(section, opts),
+    afterDismiss: () => connect.focus(),
+  });
 
   // Theme follows settings.theme; platform drives a few CSS tweaks.
   subscribe('settings', () => applyTheme(store.settings.theme));
@@ -58,12 +63,16 @@ async function boot() {
     if (running && !prevRunning) firstPeerLoad(); // Tailscale just came up (or first state)
     prevRunning = running;
   });
+  // In-app updates (Settings › Updates and the banner): every change is pushed.
+  if (hasUpdateApi() && typeof api.onUpdateState === 'function') api.onUpdateState((raw) => setUpdateState(raw));
 
   const [st, se] = await Promise.allSettled([api.getState(), api.getSettings()]);
   if (se.status === 'fulfilled') setSettings(se.value);
   else toast(`Couldn't load settings: ${errMsg(se.reason)}`, { kind: 'danger', timeout: 8000 });
   if (st.status === 'fulfilled') setState(st.value);
   else toast(`Couldn't read the app state: ${errMsg(st.reason)}`, { kind: 'danger', timeout: 8000 });
+  refreshIdentity(); // This Desk's "Pair a phone" and Settings › Security show it
+  refreshUpdateState();
 
   // Peers auto-refresh (with Tunnelview probe) while the window is visible.
   setInterval(() => {
@@ -83,6 +92,8 @@ async function boot() {
     lastFocusRefresh = Date.now();
     refreshState();
     refreshSettings();
+    refreshIdentity();
+    refreshUpdateState(); // also keeps "Last checked … ago" current
   });
 
   // Keyboard shortcuts.

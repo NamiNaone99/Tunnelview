@@ -1,0 +1,1144 @@
+{
+  "about": "The pairing link from src/main/pairing.js: prefix + base64url without padding of the UTF-8 JSON object with exactly the keys v, id, n, a, p, k, t, x, in that order, written with no whitespace and no escapes (JSON.stringify). parseLink is strict: exactly one spelling of each link is accepted, the one encodeLink writes. Error codes name the first problem in check order: LINK_FORMAT, LINK_ENCODING, LINK_JSON, LINK_VERSION, LINK_FIELDS, LINK_ID, LINK_NAME, LINK_ADDRESS, LINK_PORT, LINK_KEY, LINK_TOKEN, LINK_EXPIRY, LINK_NONCANONICAL. a: 1-2 Tailscale addresses (isTailscaleAddress in addresses.json) in canonical text (dotted quad without leading zeros; RFC 5952 IPv6), at most one per family, IPv4 first. n: \"\" or lower-case DNS labels ([a-z0-9], inner \"-\", 1-63 each) joined by \".\", at most 253 characters, no trailing dot. x is not compared with the clock here. Regenerate with node scripts/make-mobile-fixtures.js.",
+  "format": 1,
+  "functions": {
+    "encodeLink": {
+      "about": "encodeLink(object) -> the link text. The object needs exactly the link keys (any order) and valid values; the same error codes as parseLink.",
+      "cases": [
+        {
+          "args": [
+            {
+              "a": [
+                "100.101.102.103",
+                "fd7a:115c:a1e0::1234:5678"
+              ],
+              "id": "nHOSTabc123CNTRL",
+              "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "n": "office-pc.tail1234.ts.net",
+              "p": 47800,
+              "t": "cHFyc3R1dnd4eXp7fH1-fw",
+              "v": 1,
+              "x": 1762520000
+            }
+          ],
+          "note": "a typical link",
+          "result": "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+        },
+        {
+          "args": [
+            {
+              "a": [
+                "100.64.0.1"
+              ],
+              "id": "nHOSTabc123CNTRL",
+              "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "n": "",
+              "p": 47800,
+              "t": "cHFyc3R1dnd4eXp7fH1-fw",
+              "v": 1,
+              "x": 1762520000
+            }
+          ],
+          "note": "IPv4 only, no MagicDNS name",
+          "result": "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoiIiwiYSI6WyIxMDAuNjQuMC4xIl0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+        },
+        {
+          "args": [
+            {
+              "a": [
+                "fd7a:115c:a1e0::1"
+              ],
+              "id": "nHOSTabc123CNTRL",
+              "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "n": "office-pc.tail1234.ts.net",
+              "p": 47800,
+              "t": "cHFyc3R1dnd4eXp7fH1-fw",
+              "v": 1,
+              "x": 1762520000
+            }
+          ],
+          "note": "IPv6 only",
+          "result": "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiZmQ3YToxMTVjOmExZTA6OjEiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+        },
+        {
+          "args": [
+            {
+              "a": [
+                "100.127.255.255",
+                "fd7a:115c:a1e0:ffff:ffff:ffff:ffff:ffff"
+              ],
+              "id": "nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "k": "F0VTtFbd38aQjsqxwQH-arIeK6oGF3lbfUOmNIKZP9U",
+              "n": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "p": 65535,
+              "t": "paanqKmqq6ytrq-wsbKztA",
+              "v": 1,
+              "x": 9007199254740991
+            }
+          ],
+          "note": "the longest: 253-character name, both families, 64-character id, port 65535, x = 2^53 - 1",
+          "result": "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJuIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhLmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYi5jY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2MuZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZCIsImEiOlsiMTAwLjEyNy4yNTUuMjU1IiwiZmQ3YToxMTVjOmExZTA6ZmZmZjpmZmZmOmZmZmY6ZmZmZjpmZmZmIl0sInAiOjY1NTM1LCJrIjoiRjBWVHRGYmQzOGFRanNxeHdRSC1hckllSzZvR0YzbGJmVU9tTklLWlA5VSIsInQiOiJwYWFucUttcXE2eXRycS13c2JLenRBIiwieCI6OTAwNzE5OTI1NDc0MDk5MX0"
+        },
+        {
+          "args": [
+            {
+              "a": [
+                "100.101.102.103",
+                "fd7a:115c:a1e0::1234:5678"
+              ],
+              "id": "12",
+              "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "n": "office-pc.tail1234.ts.net",
+              "p": 1024,
+              "t": "cHFyc3R1dnd4eXp7fH1-fw",
+              "v": 1,
+              "x": 1
+            }
+          ],
+          "note": "numeric node ID (Headscale), port 1024, x = 1",
+          "result": "tunnelview://pair/1/eyJ2IjoxLCJpZCI6IjEyIiwibiI6Im9mZmljZS1wYy50YWlsMTIzNC50cy5uZXQiLCJhIjpbIjEwMC4xMDEuMTAyLjEwMyIsImZkN2E6MTE1YzphMWUwOjoxMjM0OjU2NzgiXSwicCI6MTAyNCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjF9"
+        },
+        {
+          "args": [
+            {
+              "a": [
+                "100.101.102.103",
+                "fd7a:115c:a1e0::1234:5678"
+              ],
+              "id": "nHOSTabc123CNTRL",
+              "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "n": "xn--caf-dma.office-pc",
+              "p": 47800,
+              "t": "cHFyc3R1dnd4eXp7fH1-fw",
+              "v": 1,
+              "x": 1762520000
+            }
+          ],
+          "note": "a punycode label",
+          "result": "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoieG4tLWNhZi1kbWEub2ZmaWNlLXBjIiwiYSI6WyIxMDAuMTAxLjEwMi4xMDMiLCJmZDdhOjExNWM6YTFlMDo6MTIzNDo1Njc4Il0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+        },
+        {
+          "args": [
+            {
+              "a": [
+                "100.101.102.103",
+                "fd7a:115c:a1e0::1234:5678"
+              ],
+              "id": "nHOSTabc123CNTRL",
+              "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "n": "office-pc",
+              "p": 47800,
+              "t": "cHFyc3R1dnd4eXp7fH1-fw",
+              "v": 1,
+              "x": 1762520000
+            }
+          ],
+          "note": "one label",
+          "result": "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjIiwiYSI6WyIxMDAuMTAxLjEwMi4xMDMiLCJmZDdhOjExNWM6YTFlMDo6MTIzNDo1Njc4Il0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+        },
+        {
+          "args": [
+            {
+              "a": [
+                "100.101.102.103",
+                "fd7a:115c:a1e0::1234:5678"
+              ],
+              "id": "nHOSTabc123CNTRL",
+              "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "n": "office-pc.tail1234.ts.net",
+              "p": 47800,
+              "t": "cHFyc3R1dnd4eXp7fH1-fw",
+              "v": 1,
+              "x": 1762520000
+            }
+          ],
+          "note": "input key order does not matter; the output is canonical",
+          "result": "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+        },
+        {
+          "args": [
+            null
+          ],
+          "error": "LINK_JSON"
+        },
+        {
+          "args": [
+            []
+          ],
+          "error": "LINK_JSON"
+        },
+        {
+          "args": [
+            "x"
+          ],
+          "error": "LINK_JSON"
+        },
+        {
+          "args": [
+            {
+              "a": [
+                "100.101.102.103",
+                "fd7a:115c:a1e0::1234:5678"
+              ],
+              "id": "nHOSTabc123CNTRL",
+              "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "n": "office-pc.tail1234.ts.net",
+              "p": 47800,
+              "t": "cHFyc3R1dnd4eXp7fH1-fw",
+              "v": 2,
+              "x": 1762520000
+            }
+          ],
+          "error": "LINK_VERSION"
+        },
+        {
+          "args": [
+            {
+              "a": [
+                "100.101.102.103",
+                "fd7a:115c:a1e0::1234:5678"
+              ],
+              "id": "nHOSTabc123CNTRL",
+              "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "n": "office-pc.tail1234.ts.net",
+              "p": 47800,
+              "t": "cHFyc3R1dnd4eXp7fH1-fw",
+              "v": 1,
+              "x": 1762520000,
+              "z": 1
+            }
+          ],
+          "error": "LINK_FIELDS"
+        },
+        {
+          "args": [
+            {
+              "a": [
+                "fd7a:115c:a1e0::1",
+                "100.64.0.1"
+              ],
+              "id": "nHOSTabc123CNTRL",
+              "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "n": "office-pc.tail1234.ts.net",
+              "p": 47800,
+              "t": "cHFyc3R1dnd4eXp7fH1-fw",
+              "v": 1,
+              "x": 1762520000
+            }
+          ],
+          "error": "LINK_ADDRESS"
+        },
+        {
+          "args": [
+            {
+              "a": [
+                "100.101.102.103",
+                "fd7a:115c:a1e0::1234:5678"
+              ],
+              "id": "nHOSTabc123CNTRL",
+              "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "n": "Office.ts.net",
+              "p": 47800,
+              "t": "cHFyc3R1dnd4eXp7fH1-fw",
+              "v": 1,
+              "x": 1762520000
+            }
+          ],
+          "error": "LINK_NAME"
+        },
+        {
+          "args": [
+            {
+              "a": [
+                "100.101.102.103",
+                "fd7a:115c:a1e0::1234:5678"
+              ],
+              "id": "nHOSTabc123CNTRL",
+              "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "n": "office-pc.tail1234.ts.net",
+              "p": 80,
+              "t": "cHFyc3R1dnd4eXp7fH1-fw",
+              "v": 1,
+              "x": 1762520000
+            }
+          ],
+          "error": "LINK_PORT"
+        },
+        {
+          "args": [
+            {
+              "a": [
+                "100.101.102.103",
+                "fd7a:115c:a1e0::1234:5678"
+              ],
+              "id": "nHOSTabc123CNTRL",
+              "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "n": "office-pc.tail1234.ts.net",
+              "p": 47800,
+              "t": "cHFyc3R1dnd4eXp7fH1-fw",
+              "v": 1,
+              "x": 1.5
+            }
+          ],
+          "error": "LINK_EXPIRY"
+        }
+      ]
+    },
+    "parseLink": {
+      "about": "parseLink(text) -> {v, id, n, a, p, k, t, x}, or the error code of the first problem.",
+      "cases": [
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "note": "a typical link",
+          "result": {
+            "a": [
+              "100.101.102.103",
+              "fd7a:115c:a1e0::1234:5678"
+            ],
+            "id": "nHOSTabc123CNTRL",
+            "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "n": "office-pc.tail1234.ts.net",
+            "p": 47800,
+            "t": "cHFyc3R1dnd4eXp7fH1-fw",
+            "v": 1,
+            "x": 1762520000
+          }
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoiIiwiYSI6WyIxMDAuNjQuMC4xIl0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "note": "IPv4 only, no MagicDNS name",
+          "result": {
+            "a": [
+              "100.64.0.1"
+            ],
+            "id": "nHOSTabc123CNTRL",
+            "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "n": "",
+            "p": 47800,
+            "t": "cHFyc3R1dnd4eXp7fH1-fw",
+            "v": 1,
+            "x": 1762520000
+          }
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiZmQ3YToxMTVjOmExZTA6OjEiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "note": "IPv6 only",
+          "result": {
+            "a": [
+              "fd7a:115c:a1e0::1"
+            ],
+            "id": "nHOSTabc123CNTRL",
+            "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "n": "office-pc.tail1234.ts.net",
+            "p": 47800,
+            "t": "cHFyc3R1dnd4eXp7fH1-fw",
+            "v": 1,
+            "x": 1762520000
+          }
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJuIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhLmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYi5jY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2MuZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZCIsImEiOlsiMTAwLjEyNy4yNTUuMjU1IiwiZmQ3YToxMTVjOmExZTA6ZmZmZjpmZmZmOmZmZmY6ZmZmZjpmZmZmIl0sInAiOjY1NTM1LCJrIjoiRjBWVHRGYmQzOGFRanNxeHdRSC1hckllSzZvR0YzbGJmVU9tTklLWlA5VSIsInQiOiJwYWFucUttcXE2eXRycS13c2JLenRBIiwieCI6OTAwNzE5OTI1NDc0MDk5MX0"
+          ],
+          "note": "the longest: 253-character name, both families, 64-character id, port 65535, x = 2^53 - 1",
+          "result": {
+            "a": [
+              "100.127.255.255",
+              "fd7a:115c:a1e0:ffff:ffff:ffff:ffff:ffff"
+            ],
+            "id": "nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "k": "F0VTtFbd38aQjsqxwQH-arIeK6oGF3lbfUOmNIKZP9U",
+            "n": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "p": 65535,
+            "t": "paanqKmqq6ytrq-wsbKztA",
+            "v": 1,
+            "x": 9007199254740991
+          }
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6IjEyIiwibiI6Im9mZmljZS1wYy50YWlsMTIzNC50cy5uZXQiLCJhIjpbIjEwMC4xMDEuMTAyLjEwMyIsImZkN2E6MTE1YzphMWUwOjoxMjM0OjU2NzgiXSwicCI6MTAyNCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjF9"
+          ],
+          "note": "numeric node ID (Headscale), port 1024, x = 1",
+          "result": {
+            "a": [
+              "100.101.102.103",
+              "fd7a:115c:a1e0::1234:5678"
+            ],
+            "id": "12",
+            "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "n": "office-pc.tail1234.ts.net",
+            "p": 1024,
+            "t": "cHFyc3R1dnd4eXp7fH1-fw",
+            "v": 1,
+            "x": 1
+          }
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoieG4tLWNhZi1kbWEub2ZmaWNlLXBjIiwiYSI6WyIxMDAuMTAxLjEwMi4xMDMiLCJmZDdhOjExNWM6YTFlMDo6MTIzNDo1Njc4Il0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "note": "a punycode label",
+          "result": {
+            "a": [
+              "100.101.102.103",
+              "fd7a:115c:a1e0::1234:5678"
+            ],
+            "id": "nHOSTabc123CNTRL",
+            "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "n": "xn--caf-dma.office-pc",
+            "p": 47800,
+            "t": "cHFyc3R1dnd4eXp7fH1-fw",
+            "v": 1,
+            "x": 1762520000
+          }
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjIiwiYSI6WyIxMDAuMTAxLjEwMi4xMDMiLCJmZDdhOjExNWM6YTFlMDo6MTIzNDo1Njc4Il0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "note": "one label",
+          "result": {
+            "a": [
+              "100.101.102.103",
+              "fd7a:115c:a1e0::1234:5678"
+            ],
+            "id": "nHOSTabc123CNTRL",
+            "k": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "n": "office-pc",
+            "p": 47800,
+            "t": "cHFyc3R1dnd4eXp7fH1-fw",
+            "v": 1,
+            "x": 1762520000
+          }
+        },
+        {
+          "args": [
+            42
+          ],
+          "error": "LINK_FORMAT"
+        },
+        {
+          "args": [
+            null
+          ],
+          "error": "LINK_FORMAT"
+        },
+        {
+          "args": [
+            ""
+          ],
+          "error": "LINK_FORMAT"
+        },
+        {
+          "args": [
+            "tunnelview://pair/2/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_FORMAT",
+          "note": "another link version"
+        },
+        {
+          "args": [
+            "TUNNELVIEW://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_FORMAT",
+          "note": "the prefix is case-sensitive"
+        },
+        {
+          "args": [
+            "https://example.com/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_FORMAT"
+        },
+        {
+          "args": [
+            " tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_FORMAT",
+          "note": "leading whitespace"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1"
+          ],
+          "error": "LINK_FORMAT",
+          "note": "no \"/\" after the version"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          ],
+          "error": "LINK_FORMAT",
+          "note": "longer than 1024 characters"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/"
+          ],
+          "error": "LINK_ENCODING",
+          "note": "no payload"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9 "
+          ],
+          "error": "LINK_ENCODING",
+          "note": "trailing whitespace"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9\n"
+          ],
+          "error": "LINK_ENCODING"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9="
+          ],
+          "error": "LINK_ENCODING",
+          "note": "padding"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLC JpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_ENCODING",
+          "note": "whitespace inside"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjMS50YWlsMTIzNC50cy5uZXQiLCJhIjpbIjEwMC4xMDEuMTAyLjEwMyIsImZkN2E6MTE1YzphMWUwOjoxMjM0OjU2NzgiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ=="
+          ],
+          "error": "LINK_ENCODING",
+          "note": "standard base64 with \"=\" padding"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjMS50YWlsMTIzNC50cy5uZXQiLCJhIjpbIjEwMC4xMDEuMTAyLjEwMyIsImZkN2E6MTE1YzphMWUwOjoxMjM0OjU2NzgiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfR"
+          ],
+          "error": "LINK_ENCODING",
+          "note": "non-zero unused bits in the last character"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjMS50YWlsMTIzNC50cy5uZXQiLCJhIjpbIjEwMC4xMDEuMTAyLjEwMyIsImZkN2E6MTE1YzphMWUwOjoxMjM0OjU2NzgiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQAAA"
+          ],
+          "error": "LINK_ENCODING",
+          "note": "a length that leaves 6 bits over"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/WzEsMl0"
+          ],
+          "error": "LINK_JSON"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/bnVsbA"
+          ],
+          "error": "LINK_JSON"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/Ingi"
+          ],
+          "error": "LINK_JSON"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLA"
+          ],
+          "error": "LINK_JSON"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2Ijr_fQ"
+          ],
+          "error": "LINK_JSON",
+          "note": "not UTF-8"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/77u_eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_JSON",
+          "note": "a byte order mark"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoyLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_VERSION"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoiMSIsImlkIjoibkhPU1RhYmMxMjNDTlRSTCIsIm4iOiJvZmZpY2UtcGMudGFpbDEyMzQudHMubmV0IiwiYSI6WyIxMDAuMTAxLjEwMi4xMDMiLCJmZDdhOjExNWM6YTFlMDo6MTIzNDo1Njc4Il0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_VERSION"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjowLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_VERSION"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_VERSION"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDAsInoiOjF9"
+          ],
+          "error": "LINK_FIELDS",
+          "note": "an unknown key"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJfX3Byb3RvX18iOnt9LCJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_FIELDS",
+          "note": "a \"__proto__\" key is just an unknown key"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyJ9"
+          ],
+          "error": "LINK_FIELDS"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_FIELDS"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJhIjpbIjEwMC4xMDEuMTAyLjEwMyIsImZkN2E6MTE1YzphMWUwOjoxMjM0OjU2NzgiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_FIELDS"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6IiIsIm4iOiJvZmZpY2UtcGMudGFpbDEyMzQudHMubmV0IiwiYSI6WyIxMDAuMTAxLjEwMi4xMDMiLCJmZDdhOjExNWM6YTFlMDo6MTIzNDo1Njc4Il0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_ID"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6ImF8YiIsIm4iOiJvZmZpY2UtcGMudGFpbDEyMzQudHMubmV0IiwiYSI6WyIxMDAuMTAxLjEwMi4xMDMiLCJmZDdhOjExNWM6YTFlMDo6MTIzNDo1Njc4Il0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_ID"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Inh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4IiwibiI6Im9mZmljZS1wYy50YWlsMTIzNC50cy5uZXQiLCJhIjpbIjEwMC4xMDEuMTAyLjEwMyIsImZkN2E6MTE1YzphMWUwOjoxMjM0OjU2NzgiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_ID"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im4gSE9TVCIsIm4iOiJvZmZpY2UtcGMudGFpbDEyMzQudHMubmV0IiwiYSI6WyIxMDAuMTAxLjEwMi4xMDMiLCJmZDdhOjExNWM6YTFlMDo6MTIzNDo1Njc4Il0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_ID"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6NDIsIm4iOiJvZmZpY2UtcGMudGFpbDEyMzQudHMubmV0IiwiYSI6WyIxMDAuMTAxLjEwMi4xMDMiLCJmZDdhOjExNWM6YTFlMDo6MTIzNDo1Njc4Il0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_ID"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6IjEwMC4xMDEuMTAyLjEwMyIsIm4iOiJvZmZpY2UtcGMudGFpbDEyMzQudHMubmV0IiwiYSI6WyIxMDAuMTAxLjEwMi4xMDMiLCJmZDdhOjExNWM6YTFlMDo6MTIzNDo1Njc4Il0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_ID",
+          "note": "an address is not a node ID"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoiT2ZmaWNlLVBDLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_NAME",
+          "note": "upper case"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldC4iLCJhIjpbIjEwMC4xMDEuMTAyLjEwMyIsImZkN2E6MTE1YzphMWUwOjoxMjM0OjU2NzgiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_NAME",
+          "note": "trailing dot"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoiLm9mZmljZS1wYy50YWlsMTIzNC50cy5uZXQiLCJhIjpbIjEwMC4xMDEuMTAyLjEwMyIsImZkN2E6MTE1YzphMWUwOjoxMjM0OjU2NzgiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_NAME"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLi50cy5uZXQiLCJhIjpbIjEwMC4xMDEuMTAyLjEwMyIsImZkN2E6MTE1YzphMWUwOjoxMjM0OjU2NzgiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_NAME"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoiLW9mZmljZS50cy5uZXQiLCJhIjpbIjEwMC4xMDEuMTAyLjEwMyIsImZkN2E6MTE1YzphMWUwOjoxMjM0OjU2NzgiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_NAME"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLS50cy5uZXQiLCJhIjpbIjEwMC4xMDEuMTAyLjEwMyIsImZkN2E6MTE1YzphMWUwOjoxMjM0OjU2NzgiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_NAME"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlX3BjLnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_NAME"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYS50cy5uZXQiLCJhIjpbIjEwMC4xMDEuMTAyLjEwMyIsImZkN2E6MTE1YzphMWUwOjoxMjM0OjU2NzgiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_NAME"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhLmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYi5jY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2MuZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGUiLCJhIjpbIjEwMC4xMDEuMTAyLjEwMyIsImZkN2E6MTE1YzphMWUwOjoxMjM0OjU2NzgiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_NAME",
+          "note": "254 characters"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoiY2Fmw6kudHMubmV0IiwiYSI6WyIxMDAuMTAxLjEwMi4xMDMiLCJmZDdhOjExNWM6YTFlMDo6MTIzNDo1Njc4Il0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_NAME",
+          "note": "not ASCII"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlIHBjLnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_NAME"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjpudWxsLCJhIjpbIjEwMC4xMDEuMTAyLjEwMyIsImZkN2E6MTE1YzphMWUwOjoxMjM0OjU2NzgiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_NAME"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjo0MiwiYSI6WyIxMDAuMTAxLjEwMi4xMDMiLCJmZDdhOjExNWM6YTFlMDo6MTIzNDo1Njc4Il0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_NAME"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCIsImZkN2E6MTE1YzphMWUwOjo5Il0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_ADDRESS",
+          "note": "three addresses"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiMTAwLjEwMS4xMDIuMTA0Il0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_ADDRESS",
+          "note": "two IPv4"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiZmQ3YToxMTVjOmExZTA6OjEiLCJmZDdhOjExNWM6YTFlMDo6MiJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_ADDRESS",
+          "note": "two IPv6"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCIsIjEwMC4xMDEuMTAyLjEwMyJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_ADDRESS",
+          "note": "IPv4 must come first"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiMTAwLjEwMS4xMDIuMTAzIl0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_ADDRESS"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOltdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_ADDRESS"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOiIxMDAuMTAxLjEwMi4xMDMiLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_ADDRESS"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOls0Ml0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_ADDRESS"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOm51bGwsInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_ADDRESS"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTkyLjE2OC4xLjIwIl0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_ADDRESS",
+          "note": "not a Tailscale address"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEyOC4wLjEiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_ADDRESS",
+          "note": "outside 100.64.0.0/10"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiZmU4MDo6MSJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_ADDRESS"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTI3LjAuMC4xIl0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_ADDRESS"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiRkQ3QToxMTVDOkExRTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_ADDRESS",
+          "note": "canonical text only: lower case"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6MDowOjA6MTIzNDo1Njc4Il0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_ADDRESS",
+          "note": "canonical text only: zeros compressed"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjA2NC4wLjEiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_ADDRESS",
+          "note": "leading zero"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiOjpmZmZmOjEwMC4xMDEuMTAyLjEwMyJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_ADDRESS",
+          "note": "IPv4-mapped"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiW2ZkN2E6MTE1YzphMWUwOjoxXSJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_ADDRESS"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiZmQ3YToxMTVjOmExZTA6OjEldXR1bjMiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_ADDRESS"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzOjQ3ODAwIl0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_ADDRESS"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiIDEwMC4xMDEuMTAyLjEwMyJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_ADDRESS"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsib2ZmaWNlLXBjIl0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_ADDRESS"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjoxMDIzLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_PORT"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo2NTUzNiwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_PORT"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjowLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_PORT"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjotMSwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_PORT"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMC41LCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_PORT"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjoiNDc4MDAiLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_PORT"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjpudWxsLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_PORT"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjp0cnVlLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_PORT"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diUSIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_KEY",
+          "note": "31 bytes"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGNBIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_KEY",
+          "note": "33 bytes"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGM9IiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_KEY",
+          "note": "padding"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMEwvaExJbDVTOGt5S1diZGM9IiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_KEY",
+          "note": "standard base64"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGQiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_KEY",
+          "note": "non-zero unused bits"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IjI5YWNiYWUxNDFiY2NhZjBiMjJlMWE5NGQzNGQwYmM3MzYxZTUyNmQwYmZlMTJjODk3OTRiYzkzMjI5NjZkZDciLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_KEY",
+          "note": "hex"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6bnVsbCwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_KEY"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS0iLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_TOKEN"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mNEEiLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_TOKEN"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdz09IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_TOKEN"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1meCIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_TOKEN"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0Ijo0MiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_TOKEN"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjB9"
+          ],
+          "error": "LINK_EXPIRY"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOi0xfQ"
+          ],
+          "error": "LINK_EXPIRY"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjEuNX0"
+          ],
+          "error": "LINK_EXPIRY"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOiIxNzYyNTIwMDAwIn0"
+          ],
+          "error": "LINK_EXPIRY"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOm51bGx9"
+          ],
+          "error": "LINK_EXPIRY"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjkwMDcxOTkyNTQ3NDA5OTJ9"
+          ],
+          "error": "LINK_EXPIRY",
+          "note": "not a safe integer"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6ImF8YiIsIm4iOiJvZmZpY2UtcGMudGFpbDEyMzQudHMubmV0IiwiYSI6WyIxMDAuMTAxLjEwMi4xMDMiLCJmZDdhOjExNWM6YTFlMDo6MTIzNDo1Njc4Il0sInAiOjEsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_ID",
+          "note": "fields are checked in key order"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjoxLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMCwieiI6MX0"
+          ],
+          "error": "LINK_FIELDS",
+          "note": "the key set before any field"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/ewogInYiOiAxLAogImlkIjogIm5IT1NUYWJjMTIzQ05UUkwiLAogIm4iOiAib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsCiAiYSI6IFsKICAiMTAwLjEwMS4xMDIuMTAzIiwKICAiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCIKIF0sCiAicCI6IDQ3ODAwLAogImsiOiAiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsCiAidCI6ICJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwKICJ4IjogMTc2MjUyMDAwMAp9"
+          ],
+          "error": "LINK_NONCANONICAL",
+          "note": "whitespace inside the JSON"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/IHsidiI6MSwiaWQiOiJuSE9TVGFiYzEyM0NOVFJMIiwibiI6Im9mZmljZS1wYy50YWlsMTIzNC50cy5uZXQiLCJhIjpbIjEwMC4xMDEuMTAyLjEwMyIsImZkN2E6MTE1YzphMWUwOjoxMjM0OjU2NzgiXSwicCI6NDc4MDAsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_NONCANONICAL",
+          "note": "whitespace before the JSON"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9Cg"
+          ],
+          "error": "LINK_NONCANONICAL",
+          "note": "whitespace after the JSON"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJhIjpbIjEwMC4xMDEuMTAyLjEwMyIsImZkN2E6MTE1YzphMWUwOjoxMjM0OjU2NzgiXSwiaWQiOiJuSE9TVGFiYzEyM0NOVFJMIiwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsInAiOjQ3ODAwLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsInYiOjEsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_NONCANONICAL",
+          "note": "keys in another order"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjoxLCJwIjo0NzgwMCwiayI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJ0IjoiY0hGeWMzUjFkbmQ0ZVhwN2ZIMS1mdyIsIngiOjE3NjI1MjAwMDB9"
+          ],
+          "error": "LINK_NONCANONICAL",
+          "note": "a duplicate key"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlXHUwMDJkcGMudGFpbDEyMzQudHMubmV0IiwiYSI6WyIxMDAuMTAxLjEwMi4xMDMiLCJmZDdhOjExNWM6YTFlMDo6MTIzNDo1Njc4Il0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_NONCANONICAL",
+          "note": "an escaped character"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0Ljc4ZTQsImsiOiJLYXk2NFVHOHl2Q3lMaHFVMDAwTHh6WWVVbTBMX2hMSWw1UzhreUtXYmRjIiwidCI6ImNIRnljM1IxZG5kNGVYcDdmSDEtZnciLCJ4IjoxNzYyNTIwMDAwfQ"
+          ],
+          "error": "LINK_NONCANONICAL",
+          "note": "a number in exponent form"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5IT1NUYWJjMTIzQ05UUkwiLCJuIjoib2ZmaWNlLXBjLnRhaWwxMjM0LnRzLm5ldCIsImEiOlsiMTAwLjEwMS4xMDIuMTAzIiwiZmQ3YToxMTVjOmExZTA6OjEyMzQ6NTY3OCJdLCJwIjo0NzgwMC4wLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_NONCANONICAL",
+          "note": "a number with a fraction part"
+        },
+        {
+          "args": [
+            "tunnelview://pair/1/eyJ2IjoxLjAsImlkIjoibkhPU1RhYmMxMjNDTlRSTCIsIm4iOiJvZmZpY2UtcGMudGFpbDEyMzQudHMubmV0IiwiYSI6WyIxMDAuMTAxLjEwMi4xMDMiLCJmZDdhOjExNWM6YTFlMDo6MTIzNDo1Njc4Il0sInAiOjQ3ODAwLCJrIjoiS2F5NjRVRzh5dkN5TGhxVTAwMEx4elllVW0wTF9oTElsNVM4a3lLV2JkYyIsInQiOiJjSEZ5YzNSMWRuZDRlWHA3ZkgxLWZ3IiwieCI6MTc2MjUyMDAwMH0"
+          ],
+          "error": "LINK_NONCANONICAL"
+        }
+      ]
+    }
+  },
+  "keys": [
+    "v",
+    "id",
+    "n",
+    "a",
+    "p",
+    "k",
+    "t",
+    "x"
+  ],
+  "maxLength": 1024,
+  "prefix": "tunnelview://pair/1/"
+}

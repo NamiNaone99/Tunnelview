@@ -1,0 +1,627 @@
+{
+  "about": "Tailscale address and ICE candidate filters from src/renderer/shared/rtc.js. protocol: the constants they derive from (TS_IPV6_PREFIX = the first 48 bits). Regenerate with node scripts/make-mobile-fixtures.js.",
+  "format": 1,
+  "functions": {
+    "candidateAddress": {
+      "about": "candidateAddress(line) -> the 5th field of \"candidate:<foundation> <component> <transport> <priority> <address> <port> typ <type> ...\", or null. An \"a=\" prefix is allowed; fields split on any whitespace run; at most 2048 characters.",
+      "cases": [
+        {
+          "args": [
+            "candidate:1 1 udp 2122260223 100.101.102.103 47810 typ host generation 0 ufrag abc"
+          ],
+          "result": "100.101.102.103"
+        },
+        {
+          "args": [
+            "a=candidate:1 1 udp 2122260223 100.101.102.103 47810 typ host"
+          ],
+          "result": "100.101.102.103"
+        },
+        {
+          "args": [
+            "candidate:1 1 udp 2122260223 fd7a:115c:a1e0::1234 47810 typ host generation 0"
+          ],
+          "result": "fd7a:115c:a1e0::1234"
+        },
+        {
+          "args": [
+            "candidate:1 1 udp 2122260223 3f2a1c4e-aaaa-bbbb-cccc-0123456789ab.local 47810 typ host generation 0"
+          ],
+          "result": "3f2a1c4e-aaaa-bbbb-cccc-0123456789ab.local"
+        },
+        {
+          "args": [
+            "candidate:5 1 udp 1686052607 203.0.113.9 47814 typ srflx raddr 0.0.0.0 rport 0"
+          ],
+          "result": "203.0.113.9"
+        },
+        {
+          "args": [
+            "candidate:1 1 tcp 1518280447 100.64.0.1 9 typ host tcptype active generation 0"
+          ],
+          "result": "100.64.0.1"
+        },
+        {
+          "args": [
+            "  candidate:1 1 udp 1 100.64.0.1 47801 typ host  "
+          ],
+          "result": "100.64.0.1"
+        },
+        {
+          "args": [
+            "candidate:1  1 udp 1 100.64.0.1 47801 typ host"
+          ],
+          "result": "100.64.0.1"
+        },
+        {
+          "args": [
+            "candidate:1\t1\tudp\t1\t100.64.0.1\t47801\ttyp\thost"
+          ],
+          "result": "100.64.0.1"
+        },
+        {
+          "args": [
+            "candidate: 1 udp 1 100.64.0.1 47801 typ host"
+          ],
+          "note": "empty foundation: the fields still line up",
+          "result": "100.64.0.1"
+        },
+        {
+          "args": [
+            "candidate:1 1 udp 1 100.64.0.1 47801 host"
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            "candidate:1 1 udp 1 100.64.0.1 47801 typ"
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            "candidate:1 1 udp 1 100.64.0.1 47801 TYP host"
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            "A=candidate:1 1 udp 1 100.64.0.1 47801 typ host"
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            "candidate:1 1 udp 2122260223 100.64.0.1 47801 typ host generation 0 ufrag uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu"
+          ],
+          "result": "100.64.0.1"
+        },
+        {
+          "args": [
+            "candidate:1 1 udp 2122260223 100.64.0.1 47801 typ host generation 0 ufrag uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu"
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            ""
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            "foo"
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            "a=candidate"
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            null
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            42
+          ],
+          "result": null
+        }
+      ]
+    },
+    "isAllowedCandidate": {
+      "about": "isAllowedCandidate(init) -> bool. null, a missing or empty candidate (end of candidates) -> true; otherwise candidateAddress must be a Tailscale IP.",
+      "cases": [
+        {
+          "args": [
+            null
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {}
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "candidate": ""
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "candidate": null
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "candidate": "candidate:1 1 udp 2122260223 100.101.102.103 47810 typ host generation 0",
+              "sdpMLineIndex": 0,
+              "sdpMid": "0",
+              "usernameFragment": "abcd"
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "candidate": "candidate:1 1 udp 2122260223 fd7a:115c:a1e0::1234 47810 typ host generation 0",
+              "sdpMLineIndex": 0,
+              "sdpMid": "0",
+              "usernameFragment": "abcd"
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "candidate": "a=candidate:1 1 udp 2122260223 100.64.0.1 47810 typ host generation 0",
+              "sdpMLineIndex": 0,
+              "sdpMid": "0",
+              "usernameFragment": "abcd"
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "candidate": "candidate:1 1 udp 2122260223 ::ffff:100.64.0.1 47810 typ host generation 0",
+              "sdpMLineIndex": 0,
+              "sdpMid": "0",
+              "usernameFragment": "abcd"
+            }
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            {
+              "candidate": "candidate:1 1 udp 2122260223 192.168.1.20 47810 typ host generation 0",
+              "sdpMLineIndex": 0,
+              "sdpMid": "0",
+              "usernameFragment": "abcd"
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "candidate": "candidate:1 1 udp 2122260223 3f2a1c4e-aaaa-bbbb-cccc-0123456789ab.local 47810 typ host generation 0",
+              "sdpMLineIndex": 0,
+              "sdpMid": "0",
+              "usernameFragment": "abcd"
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "candidate": "candidate:5 1 udp 1686052607 203.0.113.9 47814 typ srflx raddr 0.0.0.0 rport 0",
+              "sdpMLineIndex": 0,
+              "sdpMid": "0",
+              "usernameFragment": "abcd"
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "candidate": "candidate:1 1 udp 2122260223 100.64.0.01 47810 typ host generation 0",
+              "sdpMLineIndex": 0,
+              "sdpMid": "0",
+              "usernameFragment": "abcd"
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "candidate": "candidate:1 1 udp 2122260223 127.0.0.1 47810 typ host generation 0",
+              "sdpMLineIndex": 0,
+              "sdpMid": "0",
+              "usernameFragment": "abcd"
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "candidate": "candidate:1 1 udp 1 100.64.0.1 47801 host",
+              "sdpMLineIndex": 0,
+              "sdpMid": "0",
+              "usernameFragment": "abcd"
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            {
+              "candidate": 5
+            }
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "candidate:1 1 udp 2122260223 100.64.0.1 47810 typ host generation 0"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            42
+          ],
+          "result": false
+        }
+      ]
+    },
+    "isTailscaleAddress": {
+      "about": "isTailscaleAddress(addr) -> bool: inside 100.64.0.0/10 or fd7a:115c:a1e0::/48. Brackets, a zone id, surrounding spaces and IPv4-mapped IPv6 are accepted; names never are.",
+      "cases": [
+        {
+          "args": [
+            "100.64.0.0"
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            "100.64.0.1"
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            "100.100.100.100"
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            "100.127.255.255"
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            "100.63.255.255"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "100.128.0.0"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "10.0.0.1"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "192.168.1.20"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "127.0.0.1"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "0.0.0.0"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "8.8.8.8"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "100.64.0.01"
+          ],
+          "note": "leading zero (octal ambiguity)",
+          "result": false
+        },
+        {
+          "args": [
+            "100.64.0"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "100.64.0.1.5"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "100.64.0.256"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "100.64.0.-1"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "100.64.0.1:47800"
+          ],
+          "note": "a port is not part of an address",
+          "result": false
+        },
+        {
+          "args": [
+            "fd7a:115c:a1e0::"
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            "fd7a:115c:a1e0::1"
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            "fd7a:115c:a1e0:ab12:4843:cd96:6258:b240"
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            "fd7a:115c:a1e0:0:0:0:0:1"
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            "FD7A:115C:A1E0::1"
+          ],
+          "note": "hex digits in either case",
+          "result": true
+        },
+        {
+          "args": [
+            "fd7a:115c:a1e0::0.0.0.1"
+          ],
+          "note": "embedded dotted IPv4 tail",
+          "result": true
+        },
+        {
+          "args": [
+            "[fd7a:115c:a1e0::1]"
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            "fd7a:115c:a1e0::1%utun3"
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            "[fd7a:115c:a1e0::1%eth0]"
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            "100.64.0.1%eth0"
+          ],
+          "note": "a zone id is stripped from IPv4 too",
+          "result": true
+        },
+        {
+          "args": [
+            "[100.64.0.1]"
+          ],
+          "note": "brackets around IPv4 are stripped",
+          "result": true
+        },
+        {
+          "args": [
+            " 100.64.0.1 "
+          ],
+          "note": "surrounding spaces are trimmed",
+          "result": true
+        },
+        {
+          "args": [
+            "                                                            100.64.0.1"
+          ],
+          "note": "longer than 64 characters before trimming",
+          "result": false
+        },
+        {
+          "args": [
+            "::ffff:100.64.0.1"
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            "::ffff:6440:1"
+          ],
+          "result": true
+        },
+        {
+          "args": [
+            "::ffff:10.0.0.1"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "::ffff:100.128.0.1"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "64:ff9b::100.64.0.1"
+          ],
+          "note": "NAT64 is not IPv4-mapped",
+          "result": false
+        },
+        {
+          "args": [
+            "fd7a:115c:a1e1::1"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "fd7a:115c:a1e::1"
+          ],
+          "note": "a1e is 0a1e",
+          "result": false
+        },
+        {
+          "args": [
+            "fd7a::115c::1"
+          ],
+          "note": "two \"::\"",
+          "result": false
+        },
+        {
+          "args": [
+            "fd7a:115c:a1e0:0:0:0:0:0:1"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "fd7a:115c:a1e0::12345"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "fd7a:115c:a1e0:::1"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "fe80::1"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "::1"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "::"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "[fd7a:115c:a1e0::1"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "[]"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            ""
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "abc.local"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            "redacted-ip.invalid"
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            null
+          ],
+          "result": false
+        },
+        {
+          "args": [
+            42
+          ],
+          "result": false
+        }
+      ]
+    }
+  },
+  "protocol": {
+    "TS_IPV4_CIDR": "100.64.0.0/10",
+    "TS_IPV6_PREFIX": "fd7a:115c:a1e0:"
+  }
+}

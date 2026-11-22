@@ -1,0 +1,945 @@
+{
+  "about": "Golden QR symbols and reference tables from two independent encoders, for test/qr.test.js. Made once by a scratch script outside the repository with python-qrcode 8.2 (every symbol: QRCode(version, error_correction, mask_pattern, border=0) over byte-mode data) and segno 1.6.6 (version and error-level choice with boost_error=True; the matrices of symbols with no pad codewords, because segno 1.6.6 inserts an extra 0x00 codeword before the pad codewords, which ISO/IEC 18004 7.4.10 does not; tables). Every symbol matched src/main/vendor/qrcodegen.js before it was written. inputs[]: the text (encoded as UTF-8 bytes in byte mode), the version and error level all three encoders choose for it at level M, encodeMask = the mask qr.encode picks on its own, padCodewords = pad codewords after the data. symbols[]: inputs[input] rendered with this mask (the encodeMask one, or forced in every encoder); bits uses the src/main/qr.js format: base64 of the size*size modules, row-major, MSB first, 1 = dark. Tables from segno: formatInfo[level][mask] (15 bits after the 0x5412 mask), versionInfo[version] (18 bits), alignment[version] (center coordinates), byteCapacityM[version - 1] (bytes at level M in byte mode), rs (Reed-Solomon ECC codewords for the data, computed from segno's GF(256) tables and generator polynomials), rsGeneratorExponents10 (the degree-10 generator: exponents of alpha after the leading 1).",
+  "alignment": {
+    "2": [
+      6,
+      18
+    ],
+    "3": [
+      6,
+      22
+    ],
+    "4": [
+      6,
+      26
+    ],
+    "5": [
+      6,
+      30
+    ],
+    "6": [
+      6,
+      34
+    ],
+    "7": [
+      6,
+      22,
+      38
+    ],
+    "8": [
+      6,
+      24,
+      42
+    ],
+    "9": [
+      6,
+      26,
+      46
+    ],
+    "10": [
+      6,
+      28,
+      50
+    ],
+    "11": [
+      6,
+      30,
+      54
+    ],
+    "12": [
+      6,
+      32,
+      58
+    ],
+    "13": [
+      6,
+      34,
+      62
+    ],
+    "14": [
+      6,
+      26,
+      46,
+      66
+    ],
+    "15": [
+      6,
+      26,
+      48,
+      70
+    ],
+    "16": [
+      6,
+      26,
+      50,
+      74
+    ],
+    "17": [
+      6,
+      30,
+      54,
+      78
+    ],
+    "18": [
+      6,
+      30,
+      56,
+      82
+    ],
+    "19": [
+      6,
+      30,
+      58,
+      86
+    ],
+    "20": [
+      6,
+      34,
+      62,
+      90
+    ],
+    "21": [
+      6,
+      28,
+      50,
+      72,
+      94
+    ],
+    "22": [
+      6,
+      26,
+      50,
+      74,
+      98
+    ],
+    "23": [
+      6,
+      30,
+      54,
+      78,
+      102
+    ],
+    "24": [
+      6,
+      28,
+      54,
+      80,
+      106
+    ],
+    "25": [
+      6,
+      32,
+      58,
+      84,
+      110
+    ],
+    "26": [
+      6,
+      30,
+      58,
+      86,
+      114
+    ],
+    "27": [
+      6,
+      34,
+      62,
+      90,
+      118
+    ],
+    "28": [
+      6,
+      26,
+      50,
+      74,
+      98,
+      122
+    ],
+    "29": [
+      6,
+      30,
+      54,
+      78,
+      102,
+      126
+    ],
+    "30": [
+      6,
+      26,
+      52,
+      78,
+      104,
+      130
+    ],
+    "31": [
+      6,
+      30,
+      56,
+      82,
+      108,
+      134
+    ],
+    "32": [
+      6,
+      34,
+      60,
+      86,
+      112,
+      138
+    ],
+    "33": [
+      6,
+      30,
+      58,
+      86,
+      114,
+      142
+    ],
+    "34": [
+      6,
+      34,
+      62,
+      90,
+      118,
+      146
+    ],
+    "35": [
+      6,
+      30,
+      54,
+      78,
+      102,
+      126,
+      150
+    ],
+    "36": [
+      6,
+      24,
+      50,
+      76,
+      102,
+      128,
+      154
+    ],
+    "37": [
+      6,
+      28,
+      54,
+      80,
+      106,
+      132,
+      158
+    ],
+    "38": [
+      6,
+      32,
+      58,
+      84,
+      110,
+      136,
+      162
+    ],
+    "39": [
+      6,
+      26,
+      54,
+      82,
+      110,
+      138,
+      166
+    ],
+    "40": [
+      6,
+      30,
+      58,
+      86,
+      114,
+      142,
+      170
+    ]
+  },
+  "byteCapacityM": [
+    14,
+    26,
+    42,
+    62,
+    84,
+    106,
+    122,
+    152,
+    180,
+    213,
+    251,
+    287,
+    331,
+    362,
+    412,
+    450,
+    504,
+    560,
+    624,
+    666,
+    711,
+    779,
+    857,
+    911,
+    997,
+    1059,
+    1125,
+    1190,
+    1264,
+    1370,
+    1452,
+    1538,
+    1628,
+    1722,
+    1809,
+    1911,
+    1989,
+    2099,
+    2213,
+    2331
+  ],
+  "formatInfo": {
+    "H": [
+      5769,
+      5054,
+      7399,
+      6608,
+      1890,
+      597,
+      3340,
+      2107
+    ],
+    "L": [
+      30660,
+      29427,
+      32170,
+      30877,
+      26159,
+      25368,
+      27713,
+      26998
+    ],
+    "M": [
+      21522,
+      20773,
+      24188,
+      23371,
+      17913,
+      16590,
+      20375,
+      19104
+    ],
+    "Q": [
+      13663,
+      12392,
+      16177,
+      14854,
+      9396,
+      8579,
+      11994,
+      11245
+    ]
+  },
+  "inputs": [
+    {
+      "ecc": "Q",
+      "encodeMask": 7,
+      "name": "HELLO WORLD in byte mode (fills version 1-Q exactly)",
+      "padCodewords": 0,
+      "text": "HELLO WORLD",
+      "version": 1
+    },
+    {
+      "ecc": "H",
+      "encodeMask": 6,
+      "name": "one byte",
+      "padCodewords": 6,
+      "text": "a",
+      "version": 1
+    },
+    {
+      "ecc": "M",
+      "encodeMask": 2,
+      "name": "Thai and an emoji (multi-byte UTF-8)",
+      "padCodewords": 8,
+      "text": "\u0e2a\u0e27\u0e31\u0e2a\u0e14\u0e35 Tunnelview \ud83d\udd11",
+      "version": 3
+    },
+    {
+      "ecc": "M",
+      "encodeMask": 0,
+      "name": "14 bytes: the most version 1-M holds",
+      "padCodewords": 0,
+      "text": "5]kAI%U_'%w%?O",
+      "version": 1
+    },
+    {
+      "ecc": "Q",
+      "encodeMask": 0,
+      "name": "15 bytes: version 2",
+      "padCodewords": 5,
+      "text": "D?-{?1;%Koa]a9w",
+      "version": 2
+    },
+    {
+      "ecc": "M",
+      "encodeMask": 6,
+      "name": "122 bytes: the most version 7-M holds (version information appears)",
+      "padCodewords": 0,
+      "text": "9=OSASc9Kk)o_ga{{Ow#+y)/%/oCASs7C-+W[K%5;m!wo/gK;Ewsug?YKWKemg'#?eyQqYkwU))#UQGG]MgG?U)'qgO5%}keW3gg[+Koq=}GiymWOQi)'1+GEi",
+      "version": 7
+    },
+    {
+      "ecc": "M",
+      "encodeMask": 2,
+      "name": "180 bytes: the most version 9-M holds (8-bit length field)",
+      "padCodewords": 0,
+      "text": "H]-MuY7O;SecmWA-G!-Y3?C)7M)Gwuaey'E7Wy3y=3o[+=+u?3s'-1Y_'g;3]Eiui/;c-=')O]maUe[Ows51];3k%ka}Su=OMC-k55%;y9?;[9dWK=k'KKY31gY[cg1K3-)/G-aCwe7c=aQoES7Wa#/9As/1;#?5-);Y{y#om=cqAmEI!eEU",
+      "version": 9
+    },
+    {
+      "ecc": "M",
+      "encodeMask": 6,
+      "name": "181 bytes: version 10 (16-bit length field)",
+      "padCodewords": 32,
+      "text": "=777}['[1+M//ySq[)]C9;75!_7O='K1qGO'aok_A!_5YekmEM_OYWS_Y?5%)_%/'E;UW#AW-?euQq}%7#g59KA3u#'amiOY]?y[OwiE9u'u%[[ye!Ck5!si]uKS75IyoO'3'+EC/eY!_o5yalq{+)Wq7/I5EsiOc/}i7S1E-sS!#CIm_31#o",
+      "version": 10
+    },
+    {
+      "ecc": "M",
+      "encodeMask": 2,
+      "name": "a typical pairing link",
+      "padCodewords": 21,
+      "text": "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5YeVoxMjM0NUNOVFJMIiwibiI6Im9mZmljZS1wYy50YWlsMTIzNC50cy5uZXQiLCJhIjpbIjEwMC4xMDEuMTAyLjEwMyIsImZkN2E6MTE1YzphMWUwOjoxMjM0OjU2NzgiXSwicCI6NDc4MDAsImsiOiJpb2pqM1hRSjhaWDlVdHN0UExwZGNzcG5DYjhkbEJJYjgzU0lBYlFQYjF3IiwidCI6IkFBRUNBd1FGQmdjSUNRb0xEQTBPRHciLCJ4IjoxNzYyNTIwMDAwfQ",
+      "version": 13
+    },
+    {
+      "ecc": "M",
+      "encodeMask": 1,
+      "name": "the worst-case pairing link (253-character name, both address families, 64-character id)",
+      "padCodewords": 4,
+      "text": "tunnelview://pair/1/eyJ2IjoxLCJpZCI6Im5BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJuIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhLmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYi5jY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2MuZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZCIsImEiOlsiMTAwLjEyNy4yNTUuMjU1IiwiZmQ3YToxMTVjOmExZTA6ZmZmZjpmZmZmOmZmZmY6ZmZmZjpmZmZmIl0sInAiOjY1NTM1LCJrIjoiZ1RsM0RxaDlGMTlXbzFSbXcweC16TXVOaXBHMDdqZWlYZllQVzRfSnM1USIsInQiOiJwYVdscGFXbHBhV2xwYVdscGFXbHBRIiwieCI6OTAwNzE5OTI1NDc0MDk5MX0",
+      "version": 21
+    },
+    {
+      "ecc": "M",
+      "encodeMask": 4,
+      "name": "997 bytes: the most version 25-M holds",
+      "padCodewords": 0,
+      "text": "Lk!YO_3C7mG_C5}}{yQICo3!QIq{KIOw/Ik?!OKUAW+WA?%e393qU71?S=_{-AoAgywYK{Wy-{kUm3])'9;/;Me7?Y5-Mg'[qmGgSN1]}'c1IqKg#[eaqKA[QK+uA%!Oc5)1c=w+wqa3I'uw7Ki7[=75+oki{C_yKeauKg-w_]UQ)a5E);_YQ}-au-q3}1k?U-7wA-MS?Ss7;?i{W}M!I#G9cuco+i1om7Gy}as}7/g?;-!ou)Q1ySyU!U{k9o1K}+%k{UaCwW=9k?[GE9E?eQc9]YaWC1gU{WQ1/]W=qwK1c')II!Q}%{!oyIGiKUc5/amuyK'==o/[qE]e]u?#QIKEy/gSWI59o9]iy1m[dk3E}Y]UAIE'qI'71)c#{Aau;Au{c%=![U?A#ys[531Y-E=?{A]gy)Eo}[;/sWUs_A!m7#g{aqe]U[kWo=_w-eck]i=A}Ku55?m%a[A[YE!;mE}iSWw1Ogoca3'!GSy7#OOw=cGcc{AG'3iKaugsIS=_-yOkM=_q+%YYAqC51WG)wKC-Q{[yuMeU)mg}ouEoQe[w[[%#wiq{WS'oe'ea';a-=g+OIy3]GiEAo)1gy{C[S9y]3=a)e_cmQgy-Wcniy+GQ{#Ae'_+a%[gu_w?eo;}/Wkuu%7IGWo'yq5o7Q]i1m%[Ca;'i%i]}-gIS%{1%QE5w#?#So]!!17qGw5wW3e'a9uc5u1?M5y-o}#A=w!}m-)ak{amI3's)K!y;yM]CAeOAQo-9Q!'YSOKQeO'C}OOyWmWum;iE;eMWOu{}?1_ESE1-Qo{Ga5;WGe[aG?cSSs9y5#}+o1q?3W7sKY-%?=]=Y1Ai{%9QQy_U!{Eq}eCEesq[E['sOI)kMSi9+_U{9imQimo{y5sKKAH91WOAYYsWeCu/Q']o![E9U/M9M-k+KmOOm=#+%=m5ga'e7U+k?gQMO#awO=KgE?ec5%+eYWc/)9}a3;==/EMU{=9e%+cECc?K#eUKW]5G5'?oU",
+      "version": 25
+    }
+  ],
+  "rs": [
+    {
+      "data": [
+        32,
+        91,
+        11,
+        120,
+        209,
+        114,
+        220,
+        77,
+        67,
+        64,
+        236,
+        17,
+        236,
+        17,
+        236,
+        17
+      ],
+      "ecc": [
+        196,
+        35,
+        39,
+        119,
+        235,
+        215,
+        231,
+        226,
+        93,
+        23
+      ]
+    },
+    {
+      "data": [
+        11,
+        48,
+        85,
+        122,
+        159,
+        196,
+        233,
+        14,
+        51,
+        88,
+        125,
+        162,
+        199,
+        236,
+        17,
+        54,
+        91,
+        128,
+        165
+      ],
+      "ecc": [
+        121,
+        95,
+        174,
+        31,
+        199,
+        60,
+        2
+      ]
+    },
+    {
+      "data": [
+        3,
+        104,
+        205,
+        50,
+        151,
+        252,
+        97,
+        198,
+        43,
+        144,
+        245,
+        90,
+        191,
+        36,
+        137,
+        238,
+        83,
+        184,
+        29,
+        130,
+        231,
+        76,
+        177,
+        22,
+        123,
+        224,
+        69,
+        170,
+        15,
+        116,
+        217,
+        62,
+        163,
+        8,
+        109,
+        210,
+        55,
+        156,
+        1,
+        102,
+        203,
+        48,
+        149
+      ],
+      "ecc": [
+        240,
+        49,
+        132,
+        21,
+        55,
+        72,
+        117,
+        87,
+        114,
+        53,
+        118,
+        147,
+        14,
+        96,
+        208,
+        142,
+        235,
+        3,
+        148,
+        106,
+        98,
+        92,
+        68,
+        46,
+        125,
+        54
+      ]
+    }
+  ],
+  "rsGeneratorExponents10": [
+    251,
+    67,
+    46,
+    61,
+    118,
+    70,
+    64,
+    94,
+    32,
+    45
+  ],
+  "sources": [
+    {
+      "encoder": "qrcode 8.2",
+      "file": "qrcode-8.2-py3-none-any.whl",
+      "sha256": "16e64e0716c14960108e85d853062c9e8bba5ca8252c0b4d0231b9df4060ff4f"
+    },
+    {
+      "encoder": "segno 1.6.6",
+      "file": "segno-1.6.6-py3-none-any.whl",
+      "sha256": "28c7d081ed0cf935e0411293a465efd4d500704072cdb039778a2ab8736190c7"
+    }
+  ],
+  "symbols": [
+    {
+      "bits": "/pP8FxBuoLt1ZdusrsEhB/qv4BMAawr54hiAn3870SWregB2G/sG8E8huuql0Z2uqqsFIS/js4A=",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 0,
+      "mask": 0,
+      "size": 21
+    },
+    {
+      "bits": "/kP8EZBulLt1xduhrsFJB/qv4BkAYltDSLIVyiuRe4D+LwBcs/hTsEWLuj/10zcuv/8Fi4/m5oA=",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 0,
+      "mask": 1,
+      "size": 21
+    },
+    {
+      "bits": "/vP8E9BumLt0VduqrsFtB/qv4AAAf2mPyvsOp5yx6cYlQoB4I/qI0Fyvuokt1X4uskkFGc/liwA=",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 0,
+      "mask": 2,
+      "size": 21
+    },
+    {
+      "bits": "/nP8FRBuort0VdunLsEZB/qv4AsAdgA3yvsjkUcDMqYlQoBVl/k+EFyvulJF1hOuskkFrx/jUAA=",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 0,
+      "mask": 3,
+      "size": 21
+    },
+    {
+      "bits": "/jP8EdButrt0JduursFNB/qv4AcASq2kRMPtqaWpmAE5MwBbr/hrUEuzus4100bunHEFaA/h+oA=",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 0,
+      "mask": 4,
+      "size": 21
+    },
+    {
+      "bits": "/sP8FdBumLt0lduirsENB/qv4AgAQ+weDedOp5yRa8D+LwBYo/qI0EDeugkt03Yun/8Fm8/liwA=",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 0,
+      "mask": 5,
+      "size": 21
+    },
+    {
+      "bits": "/kP8FdBukLt1ldurrsEVB/qv4BgAXs7WDedHgw6JCkD+LwBbr/gakFDeuptl1vAun/8Fl//nwgA=",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 0,
+      "mask": 6,
+      "size": 21
+    },
+    {
+      "bits": "/pP8EhBupLt1ZdumrsFpB/qv4BcAV59p4hiS1lty9bWregBkU/tP0F8huk411Q/uiqsFaA/ilwA=",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 0,
+      "mask": 7,
+      "size": 21
+    },
+    {
+      "bits": "/kv8EZBuprt1hdunLsEdB/qv4A8AG1BmZd5dqFKaDyn5f4B7G/uBkEEHurKt1hwumHcE6r/kmgA=",
+      "checkedBy": [
+        "qrcode 8.2"
+      ],
+      "input": 1,
+      "mask": 6,
+      "size": 21
+    },
+    {
+      "bits": "/m97/BA+EG6tTrt1NqXbqBuuwWgFB/qqr+AZUQC+cEvk7vv45OPhA1EqWHa+POeC/IUdKGEaZ5x0hmIZxz5Ge4Jpg6o/WIkZ636s+wBInE/44GowX2EXurHf9de0Ee6ik8UEqjtv6vbOAA==",
+      "checkedBy": [
+        "qrcode 8.2"
+      ],
+      "input": 2,
+      "mask": 2,
+      "size": 29
+    },
+    {
+      "bits": "/nv8FJBujrt0ZduqrsE5B/qv4AEAqjCXppE0l39gmAWxGYBUN/i3MEyDutm10s6uq7sEUC/pw4A=",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 3,
+      "mask": 0,
+      "size": 21
+    },
+    {
+      "bits": "/ry/wUnQbrmrt1fl26ui7BFhB/qq/gG9AGtTr+rpscOjFaaRFx4jhtEspzZtGPKJrgq/Uf2AbEW/o+twR7GbrM/V0eDq65O7Bcta/nvlgA==",
+      "checkedBy": [
+        "qrcode 8.2"
+      ],
+      "input": 4,
+      "mask": 0,
+      "size": 25
+    },
+    {
+      "bits": "/i0cf0v8FoRacJBulrHdRLt0EyFEtdutK/+/rsEoTGNhB/qqqqqv4A1hG78AqlX/zMCSD7OOQABWimunh7Jq0QgHMQYrDwX/SgYNgABoRZ6Vl09/cbqQlLzYTlJ9f8+Y7sOERAHqu7OnV/o6PEll+Bf/Q/3N+exPFEQMVKqca4LroxQDHT8Rj9Yv3t+ooxLwQlJviWAVgdMDw9Kx/7qiE/3cKAJE3sAJL25qgQI9PaSoIsDoXv0T3cHZi458RBPC6pDPXfbxiRKRyAm8+v7c+QBQFEREV/gPqgxrcErBHr8RusdP/u/t03pmQO1upHBg5/8EaLcfUa/rc9/v0YA=",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 5,
+      "mask": 0,
+      "size": 45
+    },
+    {
+      "bits": "/vhJKgv8EC7w2pBuo+SIFLt0uYvuNdugfvrrrsFC5EnBB/qqqqqv4AfLERUAowCvmZEopRkk6qrD3z7y0ubAe6Ktm6N+WlCqHyynKqrC7MvAwhoqOxA6PhZyGwcoKprKRGku7qt/7ubyAq6QluPPUrL6FviY/MRlvG6kfevJKteq6R6pF5Ub34N/i4/6Cbha6Pj63DVA1IepaXgbVR/3RqiJfSjudGqjhjs/1Fdodw4CiGpCC6hGiJSLISTW7rlCv8WaCKLzI7g7Yqmpr/uJ/AB6vG7sf/ta61kqMEBrFBUbuhIfq7+90dDM6kfusSU1sqsEwh21+w/uJoq6hIA=",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 5,
+      "mask": 1,
+      "size": 45
+    },
+    {
+      "bits": "/k6SR4v8EmfUSJBurlJTdLt1K8LKtdurE/wzrsFmdEDhB/qqqqqv4B7vE1wAvjZ/9CPkJ1AAeOPYsogpv1Hg6euJCeWlN+ZxcuSDuOPmfX0br6zxSRkerF9WdrHzRywWxiAKfOJkg1ApbxmwBKrrwPT5e/5D+QxBLGeEbGsSa2FrmxeNFd0fv7Wv5j+mi/F+erHhsYObuTCJ+zE/x1ksKx5SEODK5iOHF43kueGzBQcmGiNmZh6d5SJXo23yfPBC0nNBZRTzsfEf8Omywv1S+YBeLGfMb/mBqu/rUFlPFl0fuqTPxg/l15noeA7uvJPu3x0EUFSRaU/tSzxh6QA=",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 5,
+      "mask": 2,
+      "size": 45
+    },
+    {
+      "bits": "/s6SR4v8FLy5/pBulT/lpLt1K8LKtdumpf9frsEQrG1BB/qqqqqv4BWDFYcAt1vPr0pcJ1AAeOP1hFNECYpSMoY/0oWlN+Zxcr7uDjiLyhitdMFHiRkerF9Wwmqe8fd4DU28p4/kg1ApbxjZsnGGdin/oPv1+gxBLGeEbqp/67oqIRo7HrEZv7Wv5j+jLSoTzGqX6u4tYlyJ+zE/x1JhncU/pgx8PU4xz43kueGzE5xLrPgLv3MrPk/no23yfPBC5Kgs087xapypK4mywv1S+YBznHykW/o3a4JrkFlPFl0fun+v8N+N1PReo2NuvJPu3x0E5o/835/rkFHXMgA=",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 5,
+      "mask": 3,
+      "size": 45
+    },
+    {
+      "bits": "/omONkv8EF83xpBugGqw9Lt1WgXWtduvYvsvrsFF/HgBB/qqqqqv4BnzEpsAi/FvhefPqWjj9ts7vLDKMWj4mCyVeCK5RiFtA1xgNtsF8034IZQS2J4C3ZhKB3bvNusNSBjp8tqHjWjK4SCodW33sTP9Cvlf+LRipF9kYmvx61mqCxCRFBsTz/K/l/+9Bcmd9IkCv7t4NwmRivYjtp4wWtlOYVgpaBtkmb0HN9lQlIA6a+R6F9mBlOVMLVUR8siC3Eui6yzzwDYDgSmus/pO+AB9pF8sY/tiKtcq0E5TF5sTuuPft8/90aEL9jYukqsNUSUEIZONGI/pOvt9mIA=",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 5,
+      "mask": 4,
+      "size": 45
+    },
+    {
+      "bits": "/nhJKgv8FG/0ypBurlJTdLt17N67NdujE/wzrsEG9EjBB/qqqqqv4BbPEVQAgrZ/9CZ14Exxv/+Ysogpv1HAa+Opi+N+WlCqH2yjOuvG/X0br6zxTgVva0MndrHzRywWRCgq/up/7ubyAq+QhqLLQvT5e/5D+RRw7Hv0aGsSa2FrmR+tF9Uf34N/i4/+Cfle+LnhsYObuTD4PC1OAEksKx5SEOjqZCunljs/1FdoZw8GmCtGZh6d5SJWZHGDu+wC0nNBZRTzM/k/cumpr/uJ/AB+rG/sb/mBqu/rUEU/EUEeuiTPxg/l0ZHI+gbukSU1sqsE0lyx60/tSzxh6QA=",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 5,
+      "mask": 5,
+      "size": 45
+    },
+    {
+      "bits": "/vhJKgv8FF83xpBup3bBNLt07N67NduqN/57rsEelE7BB/qqqqqv4AYNHWQAn5LvvQS94Exxv/+Rlhpgm8PYCmWx6mN+WlCqH1xgNtsF8FmJ5ohjDgVva0MnUiO6Y75eJa4yn2x/7ubyAq9TipIITsD7MvrR+BRw7Hv0aOtba/MquRm1FlMX34N/i4/9Bcmd9Ikz+KcJ8BT4PC1OAEtlD4wbNG7yBa2/9js/1Fdoaz/FlBuFLzoPrAbGZHGDu+wC9uEIQYbzUn8nE2mpr/uJ/AB9pF8sY/sT68trEFU/EUEeuraP4p+t1BfQm4DukSU1sqsE3mxy53/vAhjzoAA=",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 5,
+      "mask": 6,
+      "size": 45
+    },
+    {
+      "bits": "/i0cf0v8E6DIOJBukiOUZLt0EyFEtdunYvsvrsFhbHEhB/qqqqqv4AnzEpsAlse/6FUCD7OOQABEw081zpYj9ZpOFZYrDwX/SiKfyST6DQzcs902UbqQlLzYB3bvNusJylHNYJOqu7OnV/qodW33sTX+Z/+E/WxPFEQMVaoOKqZr5xZLGa0Yj9Yv3t+q6jZiC3bmrfJcpUEDw9Kx/74wWtlOYRAN+lJAC25qgQI9NIA6a+R6em9a+VORi458RBPCo7RdFNLwrYDY7Jm8+v7c+QBCXGDUX/hGqp4qUFrBHr8RumPft8/91+gvZH8uhHBg5/8EIZONGI/qV02m9QA=",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 5,
+      "mask": 7,
+      "size": 45
+    },
+    {
+      "bits": "/nT3j5ij/BDw/jC7kG6wFjN/ZLt1hGpoPNXbqWNv8UYuwV/BRUCxB/qqqqqqr+ASzDGaEAC+eHX9D0PnAXNWfKOOB5Nv3O++eWJRc5mFJK8/n1fh9Y/mDuUdiFrxfN/JExtrhbMiEM+PGP52SSUeScBC4TZ44wkbulpQ6zf5imhTG88fEKjjnmD1v4YfWuvscsoviuGKvuuEgJVYlhegP8HJ/i1P/EfUJH7FRyq7IqqYxrCx/sMdQFEZ+ZdP0eX6GusXmcgxWwpOWcAsVx0QYCicGsJqcVxGP29j4FIcuuGPntETFm6FcQFkUIvnVpthWAxixMLa0giVjlnU2pZhpNVlR5mWPPiR+Say8YYtSamMIwv+g873inkUTtw8wVbhhA2TkTzhD9LU/ABjx0XOHHf55CKnx2tQWDYxmJ8YupGM/j9vhdSX7DiD0G6gnO4ogH8EkMaVhTOv7OHsQuX2AA==",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 6,
+      "mask": 2,
+      "size": 53
+    },
+    {
+      "bits": "/sUuribrP8F/l8KxKpBurujtR0HLt0fg7aubpduurLvgq5LsE5sjHXNRB/qqqqqqqv4AvndHN9EAn5Z4vjjyS5jUScvd/diUrrEbBmOALJ5QwXuDjH+lRug4PZvkbdSnUD4t42mZRgZYrnRS2qVKwXiPorSFYLwb5+YZS+2Q22tezq8hEwSM6ZY4dncJo0psvhbj5DCX6Prm26G3om+oIe/KQI/r9UUuFjqO7titS6qJCSB8m9tLsFvX4ZzfwPP/jRosXEihEf2pfQq/0zqhRkEnHk18e79sif+zH+r4AlTKtmeVaplIvgridTKo2Y+/2+al3IpCt2x6Fwo5DxR/Acv5JDj5qrFfTugtMtsgFWkIX7mlrTDDbWFY9/C+wxMKLo85HpZ9TtyU/b305y+BkvcaIr3eXzq+yl2jvAdKrUBYhYHUw9erSph+4aUzVavza7HfSek2AmTPfri7/IBbndFJtMW/sKdKj0VrUFHoZFnL0fusyo/6db+N1eO++Yy8Uumlu64T6qcE5fEtJQ93/p1JSjvT/AA=",
+      "checkedBy": [
+        "qrcode 8.2"
+      ],
+      "input": 7,
+      "mask": 6,
+      "size": 57
+    },
+    {
+      "bits": "/nFxHcfr/7v8FnkWHz5KIhBumOkZk4LlSLt0fXiguIwAFduqS5fv5ydursEHgd/G41dxB/qqqqqqqqqv4A3KrBHIP6sAqmiZ1vn5+YiVAye6O8oITAqPgQRprpivB/ewRo9YCxN9exK94TLqH/2YGrS6s9JwwkgAfCu8tCn7Em/baRqkpEKtKyXCE0YvE4/t/ampKW9RHmwMxAWMo1rv07Ch8/dRR/P0DjUWdjeqO5jqd5z9HDyI35DIwADIAt9cPBnlF09keCi/kovr3ijDTnuuBs/YnafBIFtCIIhEoAe9l7ea5uw7eH76ErKUK+YVTDruN077eznueZaBe+JIDMLAJInc2NPhz7L3Jp0K6sPxmqy4n82c7P25vY/IRTVXbEyAiMTKsByYquIGhr6Ri9PZGzZF8TH8x2rv2ZH5/E4SUkBgQcwJP0qe2KBPjN9u/6ZxlODAb/9Atml1d/P9ic8k5T/4vUAgREPypcC2Dtts55+idh+8YH1bFTA+vC7vmYu6mFr25GH61AAgBOl9u16w7jV5f7dSyBC+j/Gol8tfS6P7maDITqaJHIAMAEBjhSefk4g9j+ap7AOahRX5PDax0Pv/Dev4clTPkgJpxAAEPYy9xeFIN4Ae4QzAYtLC7i2QA3tpRiD5m6mlQnS8JUAMAMAr9M4igjwaqe8C89GnzP6exTmv6LJv/rye/ABktCLGAMLEV/jZX2KyJcOrsEZuRdHIirMYuoRSqv/J+7/F0tPkHEAGiBqutP9IwrPOrnsEOxKyFFuFQS/rE624mp/9nYA=",
+      "checkedBy": [
+        "qrcode 8.2"
+      ],
+      "input": 8,
+      "mask": 0,
+      "size": 69
+    },
+    {
+      "bits": "/qQkSJK+qvv8ENO8tZTgiBBurbxMxtewGLt019IKEiaqldunHsK/snI6rsFtK3VESf3RB/qqqqqqqqqv4AdgBrFilQEAoz3Mg/ysrNkvqY0QkWCi5qAa1FE8+836UqMa7CXyobnX0bfotGe/SqjNT54QGXjaaOKq1X7p4XyuRzqOI7AODugHgY9oRhN6Rtq4qPz7g8X7tMambq8Z9g+6huX0pqP77VlepJ+83JL/bs2/IsmoSRYidTpiaqpiq4oJaUywQhoxMoIVOCFBdIJpGy77U5qNyPKTivHoiiLuCq0owuLPs7luLSpQuBg+gUy/5p+7YhuuLmy7LLwr0UjipmhqjdyJjYa0mueibDegQGlbMAYSz5jJufjs6N+ax5/9xGYqIkZepUnN67dT0qoxIXlzEZzvUZT5kj+/jMSs+WS4+OrK62ajlh/LjfUa2Yo7tQzbPkpqxVXq4zwgIqao3Jp2T5VSF+qK7uln8JXjW445sssI3LUWytfxv5Vr6Xu6zN7vzXBcTstQfqqKrbwo7gvlu2AsNR34YroUJVsCwp4KHvauzPWa5Awjtiqmqur20HLKxt1o2rIDRqkwL79TlpPkha6qWL6tJ35lOKjDbqqulNnokLQdYtVLq6ZqyHhoRIc6Vi48E3Wszvz36N4Wj+qmqmqroZt312lP/LsAWXsNZlQ0b5m6vec/q+nL+QBOHohEqmhsf/uMCjancJbq8EzE73FiIBkSulEH//qcru+V0HlOtuqsIrAuoaodl+ab+y8EkbgYvvEv64/uRvjtz8qoyIA=",
+      "checkedBy": [
+        "qrcode 8.2"
+      ],
+      "input": 8,
+      "mask": 1,
+      "size": 69
+    },
+    {
+      "bits": "/hL/JSRlx3v8EpqYJ93EGhBuoAqXq2FreLt1RZsugG+OFdusc3Rv38TirsFJuTxE27TxB/qqqqqqqqqv4B5ElPFGB0gAvgsX7vp3wWvjK8Q0AymGdOkBuefnlnshPxQ6fmzWM/DzQ/Ez2dFkJx4WIlY0izH++quORMgyjMp1KoxVUbkqnKEjE8ZMK6WhK2xjxUonAYzfJo+C/OYCm7lh61MvyxTbfxB6NtaYTtQkA3tkT39zJN4G53NG+ONGOjzSBPprL6zqQIsxqmhl5stNdpggPixWpURPCLjMGGvKmOQzr1QU3g+1QJ1wKlEaEwWbdNlgD611Q9pgQXQPQwHGNCFOHGpS4DBv91F5Hj6E0iB/ok82r64S1P43hW/GRdbZVG8OsEdGqP8WqgGIvr0RszBXE9XL0dL6/4lv4XJ3/KycaqPueS+HB6kQ4EPBtDzgxwX/rANOVxzOjor7TxBzsSyqzdx2haOufKB8nSM4Njji33woTvwyWJ7VLdOwhM1hoWg0oLh43IJ07OOuPArzg70+1tb3RxTc8PMwtxImryjRc0B1oUNGZkUHJGOCOKPtvcQRq2uztwUj1OAUvfZ3BNU/6BhxNQh2SrZBquHn/OOKBW8z/QLGD2OQ2a9OWjFM1s4eO5jnfsN3o0orapcyHaOCOCOrzC2sut+UkQ0AyzIp9B0Q/dmh0FHvxl8Q/IBqjMFEOCFMb/lXZ4K8HSArkFXgfTFGslEWuufckvxHw1/N1jBqJKOIsPkurBzG+lBAlpkEA/E8LLgLec/tK042onxzpQA=",
+      "checkedBy": [
+        "qrcode 8.2"
+      ],
+      "input": 8,
+      "mask": 2,
+      "size": 69
+    },
+    {
+      "bits": "/pL/JSRlx3v8FEH1kQaprBBum2chcAzdqLt1RZsugG+OFduhxa8P6R+OrsE/YlHGANlRB/qqqqqqqqqv4BUpIjErsZMAt2ahNf/BGgJbK8Q0AymGdOksjzyKIKBMic+IpQFg6J1FmJEz2dFkJx4WIgxZPeqTTHDj862EV6fD8eHjkbkqnKEjE8ZMn37MnbcOc5FJyuFp/eI0J4uCm7lh61MvyxWyycsXgA31+Amy2BbSlBLF/94G53NG+ONGOO+/siEGmXeH+6aHcQXTPab7dpggPixWpURKrmOhrrCnLj9F9DmiBWIDm/FwKlEaEwWbdNItuXYY9QEN95i5mGxw70z4xGpS4DBv91F5CKXpZPsSFJRbf8OkD/uBXg/2RdbZVG8OsEdqviR7KtrlCqaxaF3hGLh9EbL6/4lv4XJ3/Pbx3HiDz/TqsMymOy53b1FWBwX/rANOVxzOOlGW+cseB/fEBrHAXs4Yp838nSM4Njji331B+Cdf7kW4mw4mX6DXegWCe7h43IJ07OOuPtmeNWZTYA2a/DlqK56GbH+QryjRc0B1oUNDwJ5qkrjvjnib5qmncAYFbGkj1OAUvfZ3BN5yXsMcg9Mb/Fr3cYxRJ4483W8z/QLGD2OQzzQj7OohYBVz4vVRpa7BeCebapcyHaOCOCOr+vbBDAT5J9cCEF+fL3CmJrmh0FHvxl8Q/IBHOhpFjvokW/rhvO6qxk2rUFXgfTFGslEWujyxJP8qdY+l1V3c/84+a5SurBzG+lBAlpkEtSpRmmNmzx/r8COAeRHFfgA=",
+      "checkedBy": [
+        "qrcode 8.2"
+      ],
+      "input": 8,
+      "mask": 3,
+      "size": 69
+    },
+    {
+      "bits": "/tXjVON5trv8EKJ7qeUnlBBujjJ0JVmI+Lt1NFwy8aiSFduoArN/rgP+rsFqNwTHVYwRB/qqqqqqqqqv4BlY5TFado8Ai8wLn/1rsK/IpfzXjRFl+tHit98EGEPCsS0iD6vKQjfvMjYvqBZ4VtkKU+7XBQkddJNtyvjRAvKWpLS2wD427WY/YgFQWmK9Wqt/tI08j7Q8qLdhct7hlYGCZWvMRS3DDtdmRxGEPxM4crx4PrhvVWblaUuldtultAwxisKIoZQJ0Qwt2695lwxRB188T+tK1INUhoAvllMpFtzQoWz3UDdWzqRoW5YGYsKHBR58fmppMh18MMzszTkluhmtklqxbgiMeWmaj7mYo+dj04gq3+kOpfkr9K/dx+463FftPkempsf1KjlrMqQRwvdLEhLXsRX+jk5/kLVr/RR/5JsN9xdkiZnzbnsiOgQDVoLj3cRSJtvS/03nPtdvwOuxQ+SVC5tN8pifkxvbuAABUUUwPzsuKVnJXBSs9Qp90K8o0QCbUrqXYttNsjoQDYXdWO4U1pPAgTQsxtU63u/NAodp0IRd6H3kqlthtpsOs/zyJVNQOTw7pScIzDFrdRIjmd9tRM9qOw6iJNkEcttpi1/QczolgVtzSChSK/ZQpwkCSl/7DwRr0o0w5K/Rk5ththtrwhVPNOd3HzUAuvU1hdoMjBm9oZb/t5gM/QBJAvnHthmsY/u06bq/kxjqEEL8DPFaw5cauqDA4/tbsp/V0AiJqptrPsHugiQldGijGKEEcjYgXX8XCA/pWokq07tv1IA=",
+      "checkedBy": [
+        "qrcode 8.2"
+      ],
+      "input": 8,
+      "mask": 4,
+      "size": 69
+    },
+    {
+      "bits": "/iQkSJK+qvv8FJK4pdXkmBBuoAqXq2FreLt1godfR3P/ldukc3Rv38TirsEpOzREWbzRB/qqqqqqqqqv4BZkFvFmhUAAgosX7vp3wW5y7NhFxDX3s/VBuefnlnshPxQa/GT2sfjTwffotGe/SqjNT94UCTneeKOuxMgyjMp1KoxVVqVbW71S1No9K6WhK2xjxUong4T/pIeifu4Z9g+6huX0pqL7/RhatN64zNQkA3tkT39zJMJ3IG83P/83/jzSBPprL6zqQoMRKGBFZMNtGy77U5qNyPKXirDsmmPqGuwzr1QU3g+1QJ0B7U1r1Bnqs8lgD611Q9pgQXwvwQnmtilundyJjYa0mueifDakUChfIEcWr64S1P43hW/HxsqolHN/d0cGqP8WqgGIvr0xMTh3Ed3rUdT5kj+/jMSs+SS86KvO+yenh6kQ4EPBtDzgwBmOax8/kAC/jor7TxBzsSyqT9RWB6uO/qhn8JXjW445ssoIzPQS2pb1r9OwhM1hoWg0oKQJG54FK//f+Arzg70+1tb3RRz8cvsQNRoGwp4KHvauzPWe5E0npmuiuqvtvcQRq2uztwVSE/xleuoGw8U/6BhxNQh2Sr5hKOnHfuuqhNnokLQdYtVLu6du2DlsVMY+O5jnfsN3o0oqrYtD2r/z/z/rzC2sut+UkQ0ASToJdhUwf9m6vec/q+nL+QBKDslEuilsb/lXZ4K8HSArkEmRujE3dU0XumfckvxHw1/N0DhKpquoMvEugaodl+ab+y8EgfkcrrAr+8/tK042onxzpQA=",
+      "checkedBy": [
+        "qrcode 8.2"
+      ],
+      "input": 8,
+      "mask": 5,
+      "size": 69
+    },
+    {
+      "bits": "/qQkSJK+qvv8FKJ7qeUnlBBuqS4F4kX5OLt0godfR3P/ldutV+Yv+1aqrsExWrJEODrRB/qqqqqqqqqv4AanGtGliXAAn6+Fp/7liEy67NhFxDX3s/VInXWusuloG4YCneLu0H7LoHfotGe/SqjNT+7XBQkddJNtyeygxe7nY6jHFqVbW71S1No9DzfoD/4q4dhv4gLnxQG6H2gZ9g+6huX0pqI48SiZuO57wOC2Sl/2BlvhbcJ3IG83P/83/q6bIGgiCz6jYwUJSeZdBUV1Gy77U5qNyPKUhoAvllMpFtzh5nCGlysnCbkB7U1r1Bnqs8spKz88Z0gpZfo3oI/+1692/dyJjYa0mueicAZnXBicLHfV74qAnfqlzE/XxsqolHN/d0cOrG1fqpPBmq8xUL5vEFvzMVT5kj+/jMSs+RR/5JsN9xdkio2CqWdT/RhygBmOax8/kAC/qhiya4I6lb7iLlJOZi2Wny5n8JXjW445ssrLwMTR1qY2o+cizenz6Eym6aQJG54FK//f+Ji6py938kS+ZJrkE30IVJwewp4KHvauzPWd6H3kqlthtps/9OCD4k8h/iFSE/xleuoGw8d2zIo4EZo/bjh5SW/fH22y5NnokLQdYtVLt5et1AmvWPb9crx1N+fl6m66rYtD2r/z/z/r6L/lnk3dtZ8AKLwRF5MoHlm6vec/q+nL+QBJAvnHthmsY/vFLqauVASr0FmRujE3dU0XuvWVtv4O58+F1b5Sxy2wU3cugaodl+ab+y8EjcnfooDo9//vYmqk61jh7AA=",
+      "checkedBy": [
+        "qrcode 8.2"
+      ],
+      "input": 8,
+      "mask": 6,
+      "size": 69
+    },
+    {
+      "bits": "/nFxHcfr/7v8E12EVhrYahBunHtQtxCsaLt0fXiguIwAFdugArN/rgP+rsFOpU3Hx8UxB/qqqqqqqqqv4AlY5TFado8AlvrQ8vuw3R0FAye6O8oITAqdyCD757w9TtP5Yh0RL4E0X4K94TLqH/2YGpAo+vbii2ySNLn1kLuyNv2SSRqkpEKtKyXCWmK9Wqt/tI04Df0YOv5F4JfMo1rv07Ch8/fDDtdmRxGEPxXjHwqjUw60OLyI35DIwADIA/vOdT13Xmv2PLr2thmi+rqKTnuuBs/YnafDaX/QaazW6SM0syXTwn5yXOz6ErKUK+YVTD58fmppMh18MITIX3ABKFCJAInc2NPhz7L3L7mYo+dj04gqv9/VyP/wmR+ARTVXbEyAiMTauTgK68aUzrrRr0GRH6QM0aH8x2rv2ZH5/GqAG2TyCOibd9jX/DIGqE0n36ZxlODAb/9A/03nPtdvwOu1wa2xmdJpYNGypcC2Dtts558wPzsuKVnJXBJ3mLymvRnzvNr25GH61AAgBc3v8noipxHrOyUb7IL3q2Phl8tfS6P7maDKB4IbVaSeSWTqobXWtxp0q3Sp7AOahRX5PDIjmd9tRM9qO0aGtpAg4JJNGYy9xeFIN4Ae6ChSK/ZQpwkCJ+kgYrKwvzvtQnS8JUAMAMArveqwyxiI4MsD10Pu6GzX4amv6LJv/rye/AB2/QZESeZUX/iQe/K7AVHqkFZuRdHIirMYuiDA4/tbsp/V1kGtONJPrIjulP9IwrPOrnsEcjYgXX8XCA/qNz/xvg20uQA=",
+      "checkedBy": [
+        "qrcode 8.2"
+      ],
+      "input": 8,
+      "mask": 7,
+      "size": 69
+    },
+    {
+      "bits": "/qAHDNlYjTVQMbNz/BEOrcAu6qamju7qEG68S7+2Vru7KjNiNLt0Nt1X3mtZfJEsmuXbodMP7pU//MS+w96uwUhsMaQmxuphFiZpB/qqqqqqqqqqqqqqr+AMsUxYchHOqkaiYQCjB5s/VLH84zvjN+kramlpU+boFlGv12lVuNnABDvczs7qjPqpMnJMhR7e6KYiauLqqaU5wVtbZMjVcjEOrNUqorAuVhapw2Rz3dRUPYMUcZrMrKy26ozqrwvBwN+WkuIiJuolmdeW0qby89jVIvItz80Jl5ZM6XokbqpWaMMKsD9UNyqoz4rMrq8z8SL65ATngmzu4iqJirJwcJvsrnLrLWUi1HAr7a9LF5VNVC6FcFAs3O7yCMqKrPKKipKqtFTaAPaQZiKsqmGR1/uPZLi10ItzKyhOCCCVn/TYiadmJlfKbIPvkh+A677Oyvzor/IR8LlH7e8S4qxmBrGoqdCWp8bK9mrrVNCt9H6NEY4iR6lXFiVsUf8wKPzP++qs/8rO/x8qC+JpOtsqplqqYYkeWs2LXBeuu0rsjVr+xNkCPJ6iEXrsVqEWKpyHFyK8ou6r9Oytw9DyIa/k6ZoipKYmhrfr/klv7rK0zctMjrT6wheSYBVaqFZq1VpZ3JwWpv7sTq78Ks6NKCFYdWwrGSqmWmpgqt7iDgyWNa2xQun0ytmg/cgHMupNKqVVb0SVkQDT0Kz87Kt+6+rTaR0VxbIpqmJnpi6ahG32za9dMr1JW0L7sfiAlZi+ybcmE7qleKkaA0neCKyO6PS6zos/PvCk84pZJoZa6mjpH/13f/at/ddL7zRvicVD+xGvbGXWsRObxvatRMrYiurq/azqqrMRSZDEMCcaYuRmopGg+U2T9CzPnV4+zoz7BG+RjWJhymmegbNaikgfvz70q0+snWzuvDgPEEcA6kQupLoC7Xs63kW13o08Ck86NLaVb4vaLCbpkTGqrJumloMJqCLLvKirvoisy4JoemNWLZpKJWSmHrN1OEFYVRNs3rKIkK7alD9wrhVp32aHaBqIDbbscuaryM6dTMi/K6rO7fZqdwKsFmKhSaMojYxhZCT0yL7L8rPrelK2tVc1UQpFbaQiyzy7p0qqqKwursyjue+285IjmmJp7iojkbcW7800YyCMEnYrT6CeEsB7+cta7qGzaho/Vyv9UKvq75/syL+rEY+8VkpRrqzGokUaisxmKjKwrHIqrvy6sUSEDxiXZGhIEedtxj/j+b/tTr6sqv7Kr+LpaakObqRSYqFmJhKnf9/xtNdVEQLIlK/WaCa59y1hJkOMp57tmwiMn7Ucq66K2q3szq0NRXNoYmqgbm6mKZiz3L38HIxXahPm/5K2BqaIeOZSUXcChlM7Ca8BDgVPuqzvos6uy/E2H0LWrRIipWaqeb/lD2tQNoqvdU5yLdaKd9G1eLxoXiVlE2+SSGZ3KyqursrG7qyvIgMBngmiqmIiHqIpmt63NJ7unFTtddNFOLHDp43ohGIPZeImQSgmjX0RgM6SvOm6zuizaarVJypqWuaHoqpboKNpd+COb70qv1MV/oB+z9FXuMRF5RTSZFv74DqpOr6uqsrorKowQW5cdmYxYiJGhicZuldKv+qT/C7T6tVfvdJs239xFppkW/Ztei6kHoVr5sqs7OrIiqcEr36vpiKuKqZiSEqP7PAuUwq09yLM1MyygA==",
+      "checkedBy": [
+        "qrcode 8.2"
+      ],
+      "input": 9,
+      "mask": 1,
+      "size": 101
+    },
+    {
+      "bits": "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",
+      "checkedBy": [
+        "qrcode 8.2",
+        "segno 1.6.6"
+      ],
+      "input": 10,
+      "mask": 4,
+      "size": 117
+    }
+  ],
+  "versionInfo": {
+    "7": 31892,
+    "8": 34236,
+    "9": 39577,
+    "10": 42195,
+    "11": 48118,
+    "12": 51042,
+    "13": 55367,
+    "14": 58893,
+    "15": 63784,
+    "16": 68472,
+    "17": 70749,
+    "18": 76311,
+    "19": 79154,
+    "20": 84390,
+    "21": 87683,
+    "22": 92361,
+    "23": 96236,
+    "24": 102084,
+    "25": 102881,
+    "26": 110507,
+    "27": 110734,
+    "28": 117786,
+    "29": 119615,
+    "30": 126325,
+    "31": 127568,
+    "32": 133589,
+    "33": 136944,
+    "34": 141498,
+    "35": 145311,
+    "36": 150283,
+    "37": 152622,
+    "38": 158308,
+    "39": 161089,
+    "40": 167017
+  }
+}

@@ -11,6 +11,7 @@
  *
  * Phases: idle → connecting → hello → (auth-required | waiting) → accepted → closed.
  * Closed reasons: unreachable | not-tunnelview | timeout | protocol | denied:<reason> | host-ended |
+ *                 host-updating (denied 'busy' with updating:true: the host installs an update) |
  *                 network | not-tailnet (target is not a tailnet device) | not-tailnet-route (the
  *                 socket did not run over our own Tailscale IP) | rate-limited (HTTP 429: too many
  *                 connection attempts from this device) | local (we closed it).
@@ -80,6 +81,7 @@ const TEXT = {
   tsDown: 'Tailscale is not running on this device.',
   noBinding: 'Could not determine the Tailscale device IDs of this connection; the password was not used.',
   hostEnded: 'The remote side ended the session.',
+  hostUpdating: 'The remote device is installing a Tunnelview update. Connect again after it restarts.',
   local: 'Disconnected.',
   unsafeKdf: 'The remote device requested unsafe password parameters; the password was not sent.',
 };
@@ -351,6 +353,8 @@ class ViewerSession extends EventEmitter {
       case MSG.ACCEPTED: return this._onAccepted(msg);
       case MSG.DENIED: {
         const reason = DENY_SET.has(msg.reason) ? msg.reason : DENY.PROTOCOL;
+        // 'busy' + updating:true: the host is installing a Tunnelview update, not in another session.
+        if (reason === DENY.BUSY && msg.updating === true) return this._fail('host-updating', TEXT.hostUpdating);
         const wait = reason === DENY.TRY_LATER ? retryText(msg.retryAfterSec) : '';
         return this._fail(`denied:${reason}`, DENY_TEXT[reason] + wait);
       }

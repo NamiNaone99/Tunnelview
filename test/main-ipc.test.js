@@ -175,7 +175,7 @@ const files = {
 const captureFake = {}; // filled per test
 let quitCalls = 0;
 const inputFacade = { available: true, reason: null, blocked: 'elevated-window', handle() {}, releaseAll() {} };
-ipc.register({
+const ctx = {
   settings,
   tailscale: ts,
   auth: fakeAuth,
@@ -194,7 +194,8 @@ ipc.register({
   quit: () => { quitCalls++; },
   appVersion: '0.0.0-test',
   osName: 'windows',
-});
+};
+ipc.register(ctx);
 
 const mainWin = addEntry('main');
 const invoke = (ch, win, ...args) => handlers.get(ch)({ sender: { id: win.webContents.id } }, ...args);
@@ -443,6 +444,44 @@ test('denied:locked forgets the password only when a proof was sent; rate-limite
   assert.equal((await scenario({ reason: 'denied:locked', proofSent: 0 })).next, null);
 });
 
+/* ------------------------------------------------------------------ an update being installed */
+
+test('while an update installs no outgoing session starts: connect → UPDATING, reconnect → closed "updating"', async () => {
+  ts.state = 'running';
+  ts.peers = [PEER];
+  const { win, vs } = await openViewer();
+  vs.emit('closed', { reason: 'network', message: 'lost' });
+  let installing = true;
+  ctx.updater = { isInstalling: () => installing };
+  try {
+    const viewers = createdViewers.length;
+    const sessions = FakeViewerSession.instances.length;
+    const r = await invoke('session:connect', mainWin, { target: '100.100.1.3' });
+    assert.equal(r.ok, false);
+    assert.equal(r.code, 'UPDATING');
+    assert.match(r.error, /installing an update/);
+    assert.equal(createdViewers.length, viewers, 'no viewer window');
+    assert.deepEqual(await invoke('viewer:reconnect', win), { ok: false });
+    assert.equal(FakeViewerSession.instances.length, sessions, 'no ViewerSession constructed');
+    const st = lastStatus(win);
+    assert.equal(st.phase, 'closed');
+    assert.equal(st.reason, 'updating');
+    assert.match(st.message, /Connect again after it restarts/);
+    // A throwing isInstalling() never blocks connecting for good.
+    ctx.updater = { isInstalling: () => { throw new Error('boom'); } };
+    assert.deepEqual(await invoke('viewer:reconnect', win), { ok: true });
+    assert.equal(FakeViewerSession.instances.length, sessions + 1);
+    // Done installing (it failed, or was cancelled at the UAC prompt): connecting works again.
+    ctx.updater = { isInstalling: () => installing };
+    installing = false;
+    FakeViewerSession.instances[sessions].emit('closed', { reason: 'network' });
+    assert.deepEqual(await invoke('viewer:reconnect', win), { ok: true });
+  } finally {
+    delete ctx.updater;
+    closeAll();
+  }
+});
+
 /* ------------------------------------------------------------------ ux-8: one window per device */
 
 test('connecting to a device with an open viewer focuses it instead of opening another', async () => {
@@ -498,9 +537,11 @@ test('fetchInfo distinguishes ok / not-allowed / incompatible / error / refused 
     if (mode === '403') { res.writeHead(403); res.end(); return; }
     if (mode === '503') { res.writeHead(503); res.end(); return; }
     if (mode === 'other') { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"hello":1}'); return; }
-    const body = mode === 'ok'
-      ? { app: PROTOCOL.APP_ID, protocol: PROTOCOL.PROTOCOL_VERSION, version: '1.0', os: 'macos', passwordSet: true, acceptMode: 'ask', busy: false }
-      : { app: PROTOCOL.APP_ID, protocol: PROTOCOL.PROTOCOL_VERSION + 1 };
+    const info = { app: PROTOCOL.APP_ID, protocol: PROTOCOL.PROTOCOL_VERSION, version: '1.0', os: 'macos', passwordSet: true, acceptMode: 'ask', busy: false };
+    const body = mode === 'ok' ? info
+      : mode === 'updating' ? { ...info, busy: true, updating: true }
+        : mode === 'stray-updating' ? { ...info, busy: false, updating: true }
+          : { app: PROTOCOL.APP_ID, protocol: PROTOCOL.PROTOCOL_VERSION + 1 };
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(body));
   });
@@ -510,6 +551,12 @@ test('fetchInfo distinguishes ok / not-allowed / incompatible / error / refused 
     const ok = await ipc.fetchInfo('127.0.0.1', port);
     assert.equal(ok.status, 'ok');
     assert.equal(ok.info.passwordSet, true);
+    assert.equal(ok.info.updating, false);
+    // busy because it installs an update (the device grid says "Updating", not "Busy").
+    mode = 'updating';
+    assert.deepEqual((await ipc.fetchInfo('127.0.0.1', port)).info, { version: '1.0', os: 'macos', passwordSet: true, acceptMode: 'ask', busy: true, updating: true });
+    mode = 'stray-updating';
+    assert.equal((await ipc.fetchInfo('127.0.0.1', port)).info.updating, false, 'only together with busy');
     mode = 'newer';
     assert.equal((await ipc.fetchInfo('127.0.0.1', port)).status, 'incompatible');
     mode = '426';

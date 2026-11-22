@@ -189,6 +189,7 @@ test('describeClose covers every contract reason with specific text', async () =
     ...Object.values(P.DENY).map((d) => `denied:${d}`),
     'denied:try-later', 'denied:suspended', // net's new DENY.TRY_LATER / DENY.SUSPENDED, even before protocol.js has them
     'rate-limited', 'not-tailnet-route', // viewer-client: HTTP 429; local address not a Tailscale IP
+    'host-updating', // viewer-client: denied busy with updating:true (COMPAT-2)
   ];
   for (const r of reasons) {
     const d = describeClose(r, ctx);
@@ -202,6 +203,13 @@ test('describeClose covers every contract reason with specific text', async () =
   }
   assert.match(describeClose('denied:rejected', ctx).message, /Nong/);
   assert.match(describeClose('denied:busy', ctx).title, /office-pc/);
+  // An update being installed there is not "another session": the user is told to wait for it.
+  const updating = describeClose('host-updating', ctx);
+  assert.equal(updating.title, 'office-pc is updating');
+  assert.match(updating.message, /installing a Tunnelview update/);
+  assert.match(updating.message, /administrator prompt/);
+  assert.equal(updating.detail, '', 'the message says it all');
+  assert.doesNotMatch(describeClose('denied:busy', ctx).message, /update/);
   assert.equal(describeClose('denied:new-reason', ctx).title, 'Request denied');
   assert.notEqual(describeClose('network', { ...ctx, hadVideo: false }).message, describeClose('network', ctx).message);
   assert.ok(describeClose(undefined, {}).message.includes('the remote device'));

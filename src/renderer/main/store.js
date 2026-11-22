@@ -17,7 +17,7 @@ export const PROTO = window.TunnelviewProtocol || Object.freeze({
 /* ---------------------------------------------------------------- event bus */
 
 const bus = new EventTarget();
-/** subscribe('state'|'settings'|'peers', fn) → unsubscribe */
+/** subscribe('state'|'settings'|'peers'|'identity'|'update', fn) → unsubscribe */
 export function subscribe(type, fn) {
   const l = () => { try { fn(); } catch (err) { console.error(`[Tunnelview] ${type} listener failed`, err); } };
   bus.addEventListener(type, l);
@@ -164,6 +164,8 @@ export function normSettings(raw) {
       })).filter((r) => r.stableId || r.ip || r.hostname)
       : [],
     theme: oneOf(s.theme, ['system', 'dark', 'light'], 'system'),
+    autoUpdateCheck: s.autoUpdateCheck !== false,
+    lastUpdateCheckAt: Number.isFinite(s.lastUpdateCheckAt) && s.lastUpdateCheckAt > 0 ? s.lastUpdateCheckAt : null,
   };
 }
 
@@ -194,6 +196,7 @@ function normTunnelview(a) {
     passwordSet: !!a.passwordSet,
     acceptMode: str(a.acceptMode, 32),
     busy: !!a.busy,
+    updating: !!a.busy && a.updating === true, // busy because it installs a Tunnelview update
     port: Number.isInteger(a.port) && a.port > 0 && a.port <= 65535 ? a.port : null, // where it answered
   };
 }
@@ -236,9 +239,205 @@ export function peerTarget(p) {
 
 /* ---------------------------------------------------------------- store */
 
+/* ---------------------------------------------------------------- identity + pairing a phone */
+
+const FINGERPRINT_RE = /^TV(-[A-Z2-7]{4}){5}$/;
+const ERROR_CODE_RE = /^[A-Z][A-Z0-9_]{0,31}$/;
+const PAIRING_PHASES = new Set(['paired', 'attempt-failed', 'expired', 'cancelled', 'failed']);
+const B64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/** IdentityInfo → {available, fingerprint, wasReset, error}; null when main did not say. */
+export function normIdentity(raw) {
+  if (!isObj(raw)) return null;
+  const fingerprint = typeof raw.fingerprint === 'string' && FINGERPRINT_RE.test(raw.fingerprint) ? raw.fingerprint : null;
+  const available = raw.available === true && !!fingerprint;
+  return {
+    available,
+    fingerprint: available ? fingerprint : null,
+    wasReset: raw.wasReset === true,
+    error: available ? null : (typeof raw.error === 'string' && ERROR_CODE_RE.test(raw.error) ? raw.error : 'UNKNOWN'),
+  };
+}
+
+/** A QR symbol from main: size modules per side (21…177), bits = base64 of size² bits. */
+function normQr(q) {
+  if (!isObj(q) || !Number.isInteger(q.size) || q.size < 21 || q.size > 177 || (q.size - 17) % 4 !== 0) return null;
+  const bytes = Math.ceil((q.size * q.size) / 8);
+  if (typeof q.bits !== 'string' || q.bits.length !== Math.ceil(bytes / 3) * 4 || !B64_RE.test(q.bits)) return null;
+  return { size: q.size, bits: q.bits };
+}
+
+/** pairing:start success → a displayable offer, or null. */
+export function normPairingOffer(raw) {
+  if (!isObj(raw) || raw.ok !== true) return null;
+  const offerId = rawStr(raw.offerId, 64);
+  const link = rawStr(raw.link, 1024);
+  const qr = normQr(raw.qr);
+  const host = isObj(raw.host) ? raw.host : {};
+  if (!offerId || !link.startsWith('tunnelview://pair/') || !qr || !Number.isFinite(raw.expiresAt)) return null;
+  if (typeof raw.fingerprint !== 'string' || !FINGERPRINT_RE.test(raw.fingerprint)) return null;
+  return {
+    offerId,
+    link,
+    qr,
+    expiresAt: raw.expiresAt,
+    fingerprint: raw.fingerprint,
+    host: { name: trimDot(str(host.name, 253)), ips: strArr(host.ips, 2, 64), port: int(host.port, PROTO.DEFAULT_PORT) },
+  };
+}
+
+/** pairing:status → {offerId, phase, reason, peer|null}, or null. */
+export function normPairingStatus(raw) {
+  if (!isObj(raw) || !rawStr(raw.offerId, 64) || !PAIRING_PHASES.has(raw.phase)) return null;
+  const p = isObj(raw.peer) ? raw.peer : null;
+  return {
+    offerId: raw.offerId,
+    phase: raw.phase,
+    reason: typeof raw.reason === 'string' ? str(raw.reason, 64) : '',
+    peer: p ? { name: str(p.name, 253), login: str(p.login, 128), os: normOs(p.os) } : null,
+  };
+}
+
+export const PAIRING_ERRORS = {
+  SESSION_ACTIVE: 'Not available while someone is connected to this computer.',
+  HOSTING_OFF: 'Turn on incoming connections to pair a phone.',
+  TS_DOWN: 'Start Tailscale to pair a phone.',
+  NO_IDENTITY: 'This computer can’t prove its identity to phones right now. See Settings › Security.',
+};
+
+export const canPair = () => !!api && typeof api.startPairing === 'function';
+export const hasIdentityApi = () => !!api && typeof api.getIdentity === 'function';
+
+/**
+ * Why "Pair a phone" cannot start right now: {code, text}, or null when it can. Main decides
+ * again on pairing:start; this only keeps the button honest.
+ */
+export function pairingBlocker(state = store.state, identity = store.identity) {
+  const st = state || normState(null);
+  if (st.host.session) return { code: 'SESSION_ACTIVE', text: 'Not available during a session.' };
+  if (!st.host.enabled) return { code: 'HOSTING_OFF', text: PAIRING_ERRORS.HOSTING_OFF };
+  if (st.tailscale.state === 'unknown') return { code: 'TS_DOWN', text: 'Checking Tailscale…' };
+  if (st.tailscale.state !== 'running') return { code: 'TS_DOWN', text: PAIRING_ERRORS.TS_DOWN };
+  if (!st.host.listening) return { code: 'HOSTING_OFF', text: 'Incoming connections aren’t listening yet.' };
+  if (identity && !identity.available) return { code: 'NO_IDENTITY', text: PAIRING_ERRORS.NO_IDENTITY };
+  return null;
+}
+
+/* ---------------------------------------------------------------- in-app updates */
+
+const UPDATE_STATUSES = new Set(['idle', 'checking', 'up-to-date', 'available', 'downloading', 'ready', 'installing', 'error']);
+const UPDATE_PHASES = new Set(['preparing', 'waiting-for-approval', 'quitting']);
+const UPDATE_BLOCKERS = new Set(['INCOMING_SESSION', 'INCOMING_REQUEST', 'OUTGOING_SESSION', 'SESSION_ACTIVE']);
+const UPDATE_VERSION_RE = /^\d{1,9}\.\d{1,9}\.\d{1,9}$/;
+const UPDATE_NOTES_MAX = 4000;
+// Release notes stay multi-line plain text: \n and \t survive; every other control character,
+// zero-width / bidi control and line / paragraph separator goes. The signed manifest and main
+// already refuse them; this is defense in depth (safeText() does the same for one-line strings,
+// but it would also remove the line breaks).
+// eslint-disable-next-line no-control-regex
+const NOTES_UNSAFE_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b\u200c\u200e\u200f\u061c\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]/g;
+const nonNeg = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
+
+/** Release notes → bounded multi-line plain text (for textContent only, never markup). */
+export function cleanNotes(v) {
+  if (typeof v !== 'string') return '';
+  return v.slice(0, UPDATE_NOTES_MAX)
+    .replace(/[\ud800-\udbff]$/, '') // a surrogate pair cut in half by the cap
+    .replace(NOTES_UNSAFE_RE, '')
+    .replace(/^(?:[ \t]*\n)+/, '')
+    .trimEnd();
+}
+
+/** UpdateState (src/preload/main.js) → a checked copy with every key; null when main sent nothing usable. */
+export function normUpdateState(raw) {
+  if (!isObj(raw)) return null;
+  const status = UPDATE_STATUSES.has(raw.status) ? raw.status : 'idle';
+  const l = isObj(raw.latest) && typeof raw.latest.version === 'string' && UPDATE_VERSION_RE.test(raw.latest.version) ? raw.latest : null;
+  const p = status === 'downloading' && isObj(raw.progress) ? raw.progress : null;
+  const e = isObj(raw.error) && typeof raw.error.code === 'string' && ERROR_CODE_RE.test(raw.error.code) ? raw.error : null;
+  const j = isObj(raw.justUpdated) && typeof raw.justUpdated.to === 'string' && UPDATE_VERSION_RE.test(raw.justUpdated.to) ? raw.justUpdated : null;
+  const b = isObj(raw.installBlocked) && typeof raw.installBlocked.code === 'string' && ERROR_CODE_RE.test(raw.installBlocked.code) ? raw.installBlocked : null;
+  return {
+    status,
+    phase: status === 'installing' && UPDATE_PHASES.has(raw.phase) ? raw.phase : null,
+    currentVersion: str(raw.currentVersion, 64),
+    platform: raw.platform === 'windows' || raw.platform === 'macos' ? raw.platform : 'other',
+    supported: raw.supported === true,
+    installBlocked: b ? { code: b.code, message: str(b.message, 500) || 'This copy of Tunnelview cannot replace itself where it is.' } : null,
+    autoCheck: raw.autoCheck === true,
+    lastCheckAt: nonNeg(raw.lastCheckAt) || null,
+    latest: l ? {
+      version: l.version,
+      date: typeof l.date === 'string' && l.date.length <= 32 && Number.isFinite(Date.parse(l.date)) ? l.date : '',
+      notes: cleanNotes(l.notes),
+      size: Math.floor(nonNeg(l.size) || 0),
+    } : null,
+    downloaded: raw.downloaded === true && !!l,
+    progress: p ? {
+      received: nonNeg(p.received) || 0,
+      total: nonNeg(p.total) || 0,
+      percent: Math.min(100, Math.floor(nonNeg(p.percent) || 0)),
+    } : null,
+    error: e ? { code: e.code, message: str(e.message, 500) || 'The update failed.' } : null,
+    blocked: UPDATE_BLOCKERS.has(raw.blocked) ? raw.blocked : null,
+    justUpdated: j ? { from: typeof j.from === 'string' && UPDATE_VERSION_RE.test(j.from) ? j.from : '', to: j.to } : null,
+  };
+}
+
+/** UpdateResult → {ok:true} | {ok:false, code, message}. */
+export function normUpdateResult(r) {
+  if (isObj(r) && r.ok === true) return { ok: true };
+  const code = isObj(r) && typeof r.code === 'string' && ERROR_CODE_RE.test(r.code) ? r.code : 'UNKNOWN';
+  return { ok: false, code, message: (isObj(r) && str(r.message, 500)) || 'The update failed.' };
+}
+
+export const hasUpdateApi = () => !!api && typeof api.getUpdateState === 'function';
+
+export function setUpdateState(raw) {
+  const next = normUpdateState(raw);
+  if (next) store.update = next;
+  emit('update'); // also when unchanged: controls snap back to what main reports
+}
+
+export async function refreshUpdateState() {
+  if (!hasUpdateApi()) return;
+  try {
+    setUpdateState(await api.getUpdateState());
+  } catch (err) {
+    console.error('[Tunnelview] getUpdateState failed', err);
+    emit('update');
+  }
+}
+
+/** A click this window is still waiting on (check / download / install), so it is not sent twice. */
+export function setUpdateOp(name, on) {
+  if (!Object.prototype.hasOwnProperty.call(store.updateOps, name)) return;
+  store.updateOps[name] = !!on;
+  emit('update');
+}
+
+/**
+ * Call an update:* preload function that answers with an UpdateResult. Never throws: a missing
+ * function is NOT_SUPPORTED, a rejected invoke is UNKNOWN with main's message.
+ * @returns {Promise<{ok:true}|{ok:false, code:string, message:string}>}
+ */
+export async function updateAction(name, ...args) {
+  if (!api || typeof api[name] !== 'function') {
+    return { ok: false, code: 'NOT_SUPPORTED', message: 'This copy of Tunnelview cannot update itself. Get the new version from the GitHub releases page.' };
+  }
+  try {
+    return normUpdateResult(await api[name](...args));
+  } catch (err) {
+    return { ok: false, code: 'UNKNOWN', message: errMsg(err) || 'The update failed.' };
+  }
+}
+
 export const store = {
   state: normState(null),
   settings: normSettings(null),
+  identity: null, // normIdentity(): this computer's identity for phones; null until loaded
+  update: null, // normUpdateState(): in-app updates; null until main answered (or no updater API)
+  updateOps: { check: false, download: false, install: false }, // clicks still waiting for main
   // Raw PublicSettings as returned by main. Used when writing arrays of objects back
   // (e.g. trustedNodes) so we never send display-normalized copies to the validator.
   rawSettings: null,
@@ -280,7 +479,8 @@ export const tsRunning = () => store.state.tailscale.state === 'running';
 /**
  * While someone is connected to this computer, main refuses changes to security settings
  * (accept mode, who can connect, allow list, auto-accept, default permissions, password,
- * download folder) so the remote controller can't weaken them. Views disable those controls.
+ * download folder, the daily update check) so the remote controller can't weaken them. Views
+ * disable those controls.
  */
 export const securityLocked = (state = store.state) => !!(state && state.host && state.host.session);
 
@@ -308,6 +508,58 @@ export async function refreshTailscale() {
 export async function refreshSettings() {
   if (!api) return;
   try { setSettings(await api.getSettings()); } catch (err) { console.error('[Tunnelview] getSettings failed', err); }
+}
+
+export async function refreshIdentity() {
+  if (!hasIdentityApi()) return;
+  try {
+    store.identity = normIdentity(await api.getIdentity());
+    emit('identity');
+  } catch (err) {
+    console.error('[Tunnelview] getIdentity failed', err);
+  }
+}
+
+const IDENTITY_ERRORS = {
+  SESSION_ACTIVE: 'Disconnect the remote session to change security settings.',
+  WRITE_FAILED: 'Couldn’t save a new identity. This computer keeps its current one.',
+};
+
+/**
+ * Settings › Security › Reset identity… (after the user confirmed). Every paired phone has to pair
+ * again afterwards. @returns {Promise<boolean>} whether a new identity is in use
+ */
+export async function resetIdentity() {
+  if (!api || typeof api.resetIdentity !== 'function') return false;
+  let res;
+  try {
+    res = await api.resetIdentity();
+  } catch (err) {
+    res = { ok: false, message: errMsg(err) };
+  }
+  // The answer carries IdentityInfo (its `error` is the key's error code); a failed call does not,
+  // and must not make the key look unavailable.
+  const next = res && typeof res.available === 'boolean' ? normIdentity(res) : null;
+  if (next) {
+    store.identity = next;
+    emit('identity');
+  }
+  if (res && res.ok === true) return true;
+  const code = res && typeof res.code === 'string' ? res.code : '';
+  toast(IDENTITY_ERRORS[code] || (res && res.message ? safeText(res.message, 220) : 'Couldn’t reset the identity.'), { kind: 'danger', timeout: 7000 });
+  return false;
+}
+
+/** Settings › Security › Retry: load the identity file again. @returns {Promise<boolean>} available now */
+export async function retryIdentity() {
+  if (!api || typeof api.retryIdentity !== 'function') return false;
+  try {
+    store.identity = normIdentity(await api.retryIdentity());
+  } catch (err) {
+    toast(`Couldn't load the identity: ${errMsg(err)}`, { kind: 'danger' });
+  }
+  emit('identity');
+  return !!(store.identity && store.identity.available);
 }
 
 let settingsRefreshTimer = 0;

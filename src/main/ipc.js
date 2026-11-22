@@ -5,7 +5,9 @@
  *
  *   ipc.register(ctx)          ctx = { settings, tailscale, auth, ViewerSession, windows, capture,
  *                                      clipboard, files, permissions, input, hostCtl, getHost,
- *                                      getState, stateChanged, notify, quit, appVersion, osName }
+ *                                      identity, updater, getState, stateChanged, notify, quit,
+ *                                      appVersion, osName }   identity: identity.js instance or null;
+ *                                      updater: updater.js instance or null
  *                              hostCtl = { isActivePanel(wcId), getPermissions(), sessionActive(),
  *                                          panelReady(entry), isWarmPanel(wcId), warmPanelReady(entry),
  *                                          setPermissions(p), endSession(reason), promptInit(entry),
@@ -13,6 +15,8 @@
  *   ipc.listViewers()          → AppState.viewers
  *   ipc.closeAllViewers(reason)
  *   ipc.sanitizeSignal(msg)    → shared with index.js for host-side signals
+ *   ipc.sanitizePairingEvent(evt) → index.js: host-server 'pairing' → pairing:status (or null)
+ *   ipc.sanitizeUpdateState(s) → index.js: updater 'state' → update:state (a rebuilt plain object)
  *
  * Trust boundary rules:
  *   - every handler checks that the sender is the MAIN FRAME of a registered window of the
@@ -25,6 +29,13 @@
  *   - security settings (accept mode, allow policy, auto-accept, default permissions, download
  *     folder, password) are locked while an incoming session is active: a remote controller
  *     drives the host's real mouse/keyboard and must not be able to plant unattended access;
+ *     so is resetting this computer's identity, and no pairing offer can be started meanwhile;
+ *     so is autoUpdateCheck (switching update checks off must not be a remote decision), and
+ *     update:install refuses during an incoming OR outgoing session (updater.js); while an
+ *     update installs, no outgoing session starts (connect → code UPDATING, reconnect →
+ *     closed reason 'updating');
+ *   - the identity key never reaches a renderer: the main window sees its fingerprint, and the
+ *     pairing link it has to show (public key + one offer's token);
  *   - every outgoing dial (first connect AND reconnect) re-resolves the target against the
  *     current `tailscale status` (§1.4); the viewer shows Tailscale-verified names, never the
  *     host's self-reported hostname/owner.
@@ -36,6 +47,8 @@ const os = require('os');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
 const PROTOCOL = require('../shared/protocol');
+const pairing = require('./pairing');
+const qr = require('./qr');
 
 let electron = null;
 const E = () => electron || (electron = require('electron'));
@@ -43,6 +56,9 @@ const E = () => electron || (electron = require('electron'));
 const TAILSCALE_ADMIN_URL = 'https://login.tailscale.com/admin/machines';
 const TAILSCALE_DOWNLOAD_URL = 'https://tailscale.com/download';
 const CONNECT_CODES = ['NOT_TAILNET', 'NOT_FOUND', 'TS_DOWN', 'SELF_HOST_DISABLED', 'AMBIGUOUS'];
+// While an update installs (updater.isInstalling()), no outgoing session starts: approving the
+// Windows UAC prompt, or the macOS hand-over, quits Tunnelview right after.
+const UPDATING_MESSAGE = 'Tunnelview is installing an update on this computer. Connect again after it restarts.';
 const VIEWER_PHASES = ['connecting', 'hello', 'auth-required', 'waiting', 'accepted', 'closed'];
 const OS_NAMES = ['windows', 'macos', 'linux', 'ios', 'android', 'other'];
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -62,8 +78,10 @@ const VIEWER_RELOADS_PER_MIN = 3;
 const PROBE_RANK = { ok: 6, 'not-allowed': 5, incompatible: 4, timeout: 3, refused: 2, error: 1 };
 const PROBE_FOUND = new Set(['ok', 'not-allowed']); // Tunnelview listens on that port
 // Settings a remote controller must not change while an incoming session is active (security-6).
-const LOCKED_SETTING_KEYS = ['acceptMode', 'allowFrom', 'allowList', 'autoAcceptSameUser', 'defaultPermissions', 'downloadDir'];
+const LOCKED_SETTING_KEYS = ['acceptMode', 'allowFrom', 'allowList', 'autoAcceptSameUser', 'defaultPermissions', 'downloadDir', 'autoUpdateCheck'];
 const SETTINGS_LOCKED_MESSAGE = 'Disconnect the remote session to change security settings.';
+// Settings keys a renderer never writes through settings:update.
+const RENDERER_READONLY_SETTINGS = ['password', 'version', 'loginItemApplied', 'lastUpdateCheckAt'];
 // Closed reasons after which a remembered password is known to be wrong / useless (ipc-5).
 // 'denied:locked' counts only when this connection actually sent a password proof (proofSent:
 // true, or unknown): a viewer that saw hello.auth.passwordLocked sends none, and a lock caused by
@@ -71,6 +89,16 @@ const SETTINGS_LOCKED_MESSAGE = 'Disconnect the remote session to change securit
 // remembered password. 'rate-limited' (HTTP 429) is not a password denial either.
 const PASSWORD_DENIALS = ['denied:bad-password', 'denied:password-required'];
 const LOCKED_DENIAL = 'denied:locked';
+// pairing:start refusals (host-server startPairing codes) and pairing:status phases.
+const PAIRING_CODES = ['SESSION_ACTIVE', 'HOSTING_OFF', 'TS_DOWN', 'NO_IDENTITY'];
+const PAIRING_PHASES = ['paired', 'attempt-failed', 'expired', 'cancelled', 'failed'];
+// update:* (updater.js): what the main window may see of the updater.
+const UPDATE_STATUSES = ['idle', 'checking', 'up-to-date', 'available', 'downloading', 'ready', 'installing', 'error'];
+const UPDATE_PHASES = ['preparing', 'waiting-for-approval', 'quitting'];
+const UPDATE_BLOCKERS = ['INCOMING_SESSION', 'INCOMING_REQUEST', 'OUTGOING_SESSION', 'SESSION_ACTIVE'];
+const UPDATE_NOTES_MAX = 4000;
+const RELEASES_URL = 'https://github.com/NamiNaone99/Tunnelview/releases/latest';
+const NO_UPDATER = { ok: false, code: 'NOT_SUPPORTED', message: 'This copy of Tunnelview cannot update itself. Get the new version from the GitHub releases page.' };
 
 let ctx = null;
 const viewers = new Map();        // webContents.id → viewer record
@@ -89,6 +117,7 @@ const finite = (v) => typeof v === 'number' && Number.isFinite(v);
 const unit = (v) => (finite(v) && v >= -0.01 && v <= 1.01 ? Math.min(1, Math.max(0, v)) : null);
 const CODE_RE = /^[A-Za-z0-9]{1,32}$/;
 const REASON_RE = /^[a-z0-9][a-z0-9:_-]{0,63}$/;
+const ERROR_CODE_RE = /^[A-Z][A-Z0-9_]{0,31}$/;
 
 function osName(v) { return OS_NAMES.includes(v) ? v : 'other'; }
 
@@ -404,6 +433,7 @@ async function connect(opts) {
     if (!isStr(opts.password, 256, 1)) return { ok: false, error: 'Invalid password.' };
     password = opts.password;
   }
+  if (updateInstalling()) return { ok: false, code: 'UPDATING', error: UPDATING_MESSAGE };
   let target;
   try {
     target = await resolveTarget(raw);
@@ -459,6 +489,8 @@ function parseInfo(j) {
     passwordSet: j.passwordSet === true,
     acceptMode: j.acceptMode === 'password-only' ? 'password-only' : 'ask',
     busy: j.busy === true,
+    // busy because it installs a Tunnelview update (0.3+ hosts), not because of another session.
+    updating: j.busy === true && j.updating === true,
   };
 }
 
@@ -831,6 +863,12 @@ async function resolveViewerTarget(rec) {
 async function startViewerSession(rec) {
   dropSession(rec, 'viewer-reconnect');
   const gen = ++rec.gen;
+  if (updateInstalling()) {
+    rec.phase = 'closed';
+    sendTo(rec, 'viewer:status', { phase: 'closed', reason: 'updating', message: UPDATING_MESSAGE });
+    ctx.stateChanged();
+    return false;
+  }
   rec.crashed = false;
   rec.phase = 'connecting';
   rec.permissions = null;
@@ -950,6 +988,12 @@ function hostSessionActive() {
   return !!(h && h.getPermissions && h.getPermissions());
 }
 
+/** An update is being installed (updater.js): no new outgoing session (UPDATING_MESSAGE). */
+function updateInstalling() {
+  const u = ctx && ctx.updater;
+  try { return !!(u && typeof u.isInstalling === 'function' && u.isInstalling()); } catch { return false; }
+}
+
 /** Does a settings partial change one of the locked security settings? */
 function touchesLockedSettings(partial, cur) {
   return LOCKED_SETTING_KEYS.some((k) => {
@@ -961,6 +1005,134 @@ function touchesLockedSettings(partial, cur) {
     if (k === 'downloadDir') return (v === '' ? null : v) !== cur.downloadDir;
     return JSON.stringify(v) !== JSON.stringify(cur[k]);
   });
+}
+
+/* ================================================================== pairing a phone + identity */
+
+/**
+ * host-server 'pairing' event → pairing:status for the main window. The peer is whoever tried, as
+ * Tailscale whois knows it (display only); tokens, nonces and proofs never reach this point.
+ * @returns {{offerId, phase, reason?, peer?:{name, login, os}} | null}
+ */
+function sanitizePairingEvent(evt) {
+  if (!isObj(evt) || !isStr(evt.offerId, 64, 1) || !PAIRING_PHASES.includes(evt.phase)) return null;
+  const out = { offerId: evt.offerId, phase: evt.phase };
+  if (isStr(evt.reason, 64) && REASON_RE.test(evt.reason)) out.reason = evt.reason;
+  if (isObj(evt.peer) && (evt.phase === 'paired' || evt.phase === 'attempt-failed')) {
+    out.peer = { name: clean(evt.peer.name, 255), login: clean(evt.peer.login, 255), os: osName(evt.peer.os) };
+  }
+  return out;
+}
+
+/** What the main window may know about this computer's identity: never key bytes. */
+function identityInfo() {
+  const id = ctx.identity;
+  if (!id) return { available: false, fingerprint: null, wasReset: false, error: 'NOT_LOADED' };
+  const available = !id.unavailable;
+  const out = { available, fingerprint: available ? id.fingerprint() : null, wasReset: !!id.wasReset };
+  if (!available) out.error = typeof id.error === 'string' && ERROR_CODE_RE.test(id.error) ? id.error : 'UNKNOWN';
+  return out;
+}
+
+/* ================================================================== in-app updates */
+
+const SEMVER_RE = /^\d{1,9}\.\d{1,9}\.\d{1,9}$/;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+// Release notes stay multi-line plain text: every control character except \n and \t goes, and
+// bidi / separator characters too (the manifest already refuses them; this is defense in depth).
+const NOTES_CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]/g;
+const nonNeg = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
+
+function cleanNotes(v) {
+  return typeof v === 'string' ? v.slice(0, UPDATE_NOTES_MAX).replace(NOTES_CONTROL_RE, '') : '';
+}
+
+/** updater.getState() → the UpdateState the main window receives (src/preload/main.js), field by field. */
+function sanitizeUpdateState(s) {
+  const o = isObj(s) ? s : {};
+  const status = UPDATE_STATUSES.includes(o.status) ? o.status : 'idle';
+  const l = isObj(o.latest) && isStr(o.latest.version, 32) && SEMVER_RE.test(o.latest.version) ? o.latest : null;
+  const p = status === 'downloading' && isObj(o.progress) ? o.progress : null;
+  const e = isObj(o.error) && isStr(o.error.code, 32) && ERROR_CODE_RE.test(o.error.code) ? o.error : null;
+  const j = isObj(o.justUpdated) && isStr(o.justUpdated.to, 32) && SEMVER_RE.test(o.justUpdated.to) ? o.justUpdated : null;
+  const b = isObj(o.installBlocked) && isStr(o.installBlocked.code, 32) && ERROR_CODE_RE.test(o.installBlocked.code) ? o.installBlocked : null;
+  return {
+    status,
+    phase: status === 'installing' && UPDATE_PHASES.includes(o.phase) ? o.phase : null,
+    currentVersion: clean(o.currentVersion, 64),
+    platform: o.platform === 'windows' || o.platform === 'macos' ? o.platform : 'other',
+    supported: o.supported === true,
+    installBlocked: b ? { code: b.code, message: clean(b.message, 500) } : null,
+    autoCheck: o.autoCheck === true,
+    lastCheckAt: nonNeg(o.lastCheckAt),
+    latest: l ? {
+      version: l.version,
+      date: isStr(l.date, 32) && ISO_DATE_RE.test(l.date) ? l.date : '',
+      notes: cleanNotes(l.notes),
+      size: nonNeg(l.size) || 0,
+    } : null,
+    downloaded: o.downloaded === true,
+    progress: p ? {
+      received: nonNeg(p.received) || 0,
+      total: nonNeg(p.total) || 0,
+      percent: Math.min(100, Math.floor(nonNeg(p.percent) || 0)),
+    } : null,
+    error: e ? { code: e.code, message: clean(e.message, 500) } : null,
+    blocked: UPDATE_BLOCKERS.includes(o.blocked) ? o.blocked : null,
+    justUpdated: j ? { from: isStr(j.from, 32) && SEMVER_RE.test(j.from) ? j.from : '', to: j.to } : null,
+  };
+}
+
+/** {ok:true} | {ok:false, code, message}: nothing else crosses to the renderer. */
+function sanitizeUpdateResult(r) {
+  if (isObj(r) && r.ok === true) return { ok: true };
+  const code = isObj(r) && isStr(r.code, 32) && ERROR_CODE_RE.test(r.code) ? r.code : 'UNKNOWN';
+  return { ok: false, code, message: clean(isObj(r) ? r.message : '', 500) || 'The update failed.' };
+}
+
+/**
+ * pairing:start. The QR code and the details shown next to it come from the link itself, so the
+ * dialog can only ever show what a phone will read: a link without a MagicDNS name (n:'') gives
+ * host.name '' and the dialog shows the address the phone will show, never this machine's own name.
+ */
+function startPairing() {
+  const refuse = (code) => ({ ok: false, code });
+  if (hostSessionActive()) return refuse('SESSION_ACTIVE');
+  const host = getHost();
+  if (!host || typeof host.startPairing !== 'function' || !ctx.settings.get().hostEnabled) return refuse('HOSTING_OFF');
+  let offer;
+  try {
+    offer = host.startPairing();
+  } catch (err) {
+    if (err && PAIRING_CODES.includes(err.code)) return refuse(err.code);
+    console.error('[ipc] pairing:start failed:', err && err.message);
+    return refuse('HOSTING_OFF');
+  }
+  try {
+    const d = pairing.parseLink(offer.link);
+    const code = qr.encode(offer.link);
+    return {
+      ok: true,
+      offerId: offer.offerId,
+      link: offer.link,
+      qr: { size: code.size, bits: code.bits },
+      expiresAt: offer.expiresAt,
+      fingerprint: pairing.fingerprint(pairing.decodeB64url(d.k, pairing.KEY_BYTES)),
+      host: { name: d.n, ips: [...d.a], port: d.p },
+    };
+  } catch (err) {
+    // An offer nobody can be shown must not stay usable.
+    console.error('[ipc] pairing:start: link not displayable:', err && err.message);
+    try { host.cancelPairing(offer.offerId, 'cancelled'); } catch { /* ignore */ }
+    return refuse('HOSTING_OFF');
+  }
+}
+
+/** Withdraw whatever offer is live: it was made for (and its link shows) the previous key. */
+function cancelOfferFor(reason) {
+  const host = getHost();
+  if (!host || typeof host.cancelPairing !== 'function') return;
+  try { host.cancelPairing(null, reason); } catch (err) { console.error('[ipc] cancelPairing failed:', err && err.message); }
 }
 
 function viewerRec(entry) {
@@ -1007,8 +1179,9 @@ function register(context) {
   handle('settings:update', ['main'], (_e, partial) => {
     if (isObj(partial)) {
       const copy = {};
-      // password: setPassword only; loginItemApplied: main-process bookkeeping (index.js).
-      for (const k of Object.keys(partial)) if (k !== 'password' && k !== 'version' && k !== 'loginItemApplied') copy[k] = partial[k];
+      // password: setPassword only; loginItemApplied / lastUpdateCheckAt: main-process bookkeeping
+      // (index.js, updater.js).
+      for (const k of Object.keys(partial)) if (!RENDERER_READONLY_SETTINGS.includes(k)) copy[k] = partial[k];
       // A remote controller drives this machine's real mouse/keyboard: while a session is active
       // the security settings stay as they are (theme, quality, port … still apply).
       if (hostSessionActive() && touchesLockedSettings(copy, settings.get())) throw new Error(SETTINGS_LOCKED_MESSAGE);
@@ -1047,6 +1220,55 @@ function register(context) {
     if (hostSessionActive()) return null;
     settings.update({ downloadDir: r.filePaths[0] });
     return settings.effectiveDownloadDir();
+  });
+
+  /* ---------------- pairing a phone + identity (mobile DECISIONS D4, D7) ---------------- */
+
+  handle('pairing:start', ['main'], () => startPairing());
+
+  // Only the offer the dialog opened: a stale dialog closing never cancels a newer one.
+  handle('pairing:cancel', ['main'], (_e, offerId) => {
+    if (!isStr(offerId, 64, 1)) return { ok: false };
+    const host = getHost();
+    if (!host || typeof host.cancelPairing !== 'function') return { ok: false };
+    return { ok: host.cancelPairing(offerId, 'cancelled') === true };
+  });
+
+  handle('security:identity', ['main'], () => identityInfo());
+
+  // Locked during an incoming session like the security settings: a remote controller must not
+  // be able to make this computer's paired phones distrust it (or pair again) on its own.
+  handle('security:reset-identity', ['main'], () => {
+    const id = ctx.identity;
+    if (!id) return { ok: false, code: 'NO_IDENTITY', ...identityInfo() };
+    const host = getHost();
+    if (hostSessionActive() || (host && host.activeSession)) {
+      // `error` belongs to IdentityInfo (the key's error code while it is unavailable, which is
+      // exactly when the banner offers Reset identity…): the sentence goes in `message`.
+      return { ok: false, code: 'SESSION_ACTIVE', message: SETTINGS_LOCKED_MESSAGE, ...identityInfo() };
+    }
+    const r = id.reset({ sessionActive: false });
+    if (!r || !r.ok) {
+      const code = r && r.error === 'SESSION_ACTIVE' ? 'SESSION_ACTIVE' : 'WRITE_FAILED';
+      console.error(`[ipc] identity reset failed: ${code}`);
+      return { ok: false, code, ...identityInfo() };
+    }
+    cancelOfferFor('identity-reset');
+    console.log(`[main] identity reset: ${id.fingerprint()}`);
+    ctx.stateChanged();
+    return { ok: true, ...identityInfo() };
+  });
+
+  handle('security:retry-identity', ['main'], () => {
+    const id = ctx.identity;
+    if (!id) return identityInfo();
+    const before = id.fingerprint();
+    id.retry();
+    const after = id.fingerprint();
+    if (after !== before) cancelOfferFor('identity-reset');
+    if (after) console.log(`[main] identity loaded on retry: ${after}`);
+    ctx.stateChanged();
+    return identityInfo();
   });
 
   handle('permissions:request', ['main'], async (_e, kind) => {
@@ -1107,6 +1329,49 @@ function register(context) {
   });
 
   on('app:quit', ['main'], () => ctx.quit());
+
+  /* ---------------- in-app updates (DECISIONS U2-U6; updater.js) ---------------- */
+
+  const upd = () => ctx.updater || null;
+  const updateState = () => sanitizeUpdateState(upd() ? upd().getState() : { status: 'idle' });
+
+  handle('update:get-state', ['main'], () => updateState());
+
+  // "Check now" is always allowed (autoUpdateCheck only governs the daily check), also during a
+  // session: it only reads the signed manifest from GitHub.
+  handle('update:check', ['main'], async () => {
+    if (upd()) await upd().check();
+    return updateState();
+  });
+
+  // Resolves when the download is verified (or failed); progress arrives through update:state.
+  handle('update:download', ['main'], async () => sanitizeUpdateResult(upd() ? await upd().download() : NO_UPDATER));
+
+  // Stops a running download; the pending update:download then answers {ok:false, code:'CANCELLED'}.
+  handle('update:cancel', ['main'], () => sanitizeUpdateResult(upd() && typeof upd().cancelDownload === 'function' ? upd().cancelDownload() : NO_UPDATER));
+
+  // Only from this click, never on its own. updater.js refuses during an incoming session, a
+  // pending incoming request or an outgoing session, and checks again right before it starts
+  // anything; on success Tunnelview quits for the installer / helper.
+  handle('update:install', ['main'], async () => sanitizeUpdateResult(upd() ? await upd().install() : NO_UPDATER));
+
+  // Locked during an incoming session like the security settings (settings:update does the same
+  // through LOCKED_SETTING_KEYS).
+  handle('update:set-auto', ['main'], (_e, enabled) => {
+    if (typeof enabled !== 'boolean') return { ok: false, code: 'BAD_REQUEST', message: 'Invalid value.' };
+    if (hostSessionActive() && enabled !== settings.get().autoUpdateCheck) {
+      return { ok: false, code: 'SETTINGS_LOCKED', message: SETTINGS_LOCKED_MESSAGE };
+    }
+    settings.update({ autoUpdateCheck: enabled });
+    return { ok: true };
+  });
+
+  handle('update:reveal', ['main'], () => sanitizeUpdateResult(upd() ? upd().reveal() : NO_UPDATER));
+
+  handle('update:open-releases', ['main'], async () => {
+    await E().shell.openExternal(RELEASES_URL);
+    return { ok: true };
+  });
 
   /* ---------------- shared: files / clipboard / notify ---------------- */
 
@@ -1412,6 +1677,9 @@ module.exports = {
   sanitizeInput,
   sanitizePermissions: perms,
   sanitizeStatus,
+  sanitizePairingEvent,
+  sanitizeUpdateState,
+  sanitizeUpdateResult,
   verifiedName,
   fetchInfo,
   clean,

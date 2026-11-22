@@ -28,7 +28,12 @@ Examples of what counts:
 
 - getting screen, input, clipboard, files or audio from a host without the host user accepting,
   a valid password, or a device the host chose to trust;
-- connecting from outside the host's tailnet, or traffic leaving the Tailscale tunnel;
+- connecting from outside the host's tailnet, or traffic leaving the Tailscale tunnel, other than
+  the documented update check ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §1, item 10);
+- making Tunnelview offer, download or install an update that is not signed with a key in
+  `src/main/update-keys.js`, contact a host outside the updater's allow-list, send anything about
+  the user, the computer or the tailnet with the update check, or install while a session or a
+  connection request is active;
 - bypassing *Who can connect*, the password lockouts or the approval prompt;
 - a viewer driving the host's session panel or prompt directly with its clicks or keystrokes
   (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §1, item 7, for what the session-panel guard

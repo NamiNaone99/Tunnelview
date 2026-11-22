@@ -1,0 +1,2152 @@
+{
+  "about": "What a viewer accepts from a host, from src/renderer/viewer/validate.js: signaling relayed from the host and control data-channel messages. null = ignore the message. limits: maxima the module enforces (lengths in UTF-16 units), measured by probing it; the cases stay below them. Regenerate with node scripts/make-mobile-fixtures.js.",
+  "format": 1,
+  "functions": {
+    "sanitizeSdp": {
+      "about": "sanitizeSdp(sdp, isAllowedCandidate): drops every a=candidate line whose address is not a Tailscale IP; lines are joined with CRLF. A non-string gives \"\".",
+      "cases": [
+        {
+          "args": [
+            "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=mid:0\r\na=candidate:1 1 udp 2122260223 100.101.102.103 47810 typ host generation 0\r\na=candidate:2 1 udp 2122194687 192.168.1.20 47811 typ host generation 0\r\na=candidate:3 1 udp 2122129151 fd7a:115c:a1e0::1234 47812 typ host generation 0\r\na=candidate:4 1 udp 2122063615 3f2a1c4e-aaaa-bbbb-cccc-0123456789ab.local 47813 typ host generation 0\r\na=candidate:5 1 udp 1686052607 203.0.113.9 47814 typ srflx raddr 0.0.0.0 rport 0\r\na=end-of-candidates\r\n"
+          ],
+          "result": "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=mid:0\r\na=candidate:1 1 udp 2122260223 100.101.102.103 47810 typ host generation 0\r\na=candidate:3 1 udp 2122129151 fd7a:115c:a1e0::1234 47812 typ host generation 0\r\na=end-of-candidates\r\n"
+        },
+        {
+          "args": [
+            "v=0\no=- 1 2 IN IP4 127.0.0.1\ns=-\nt=0 0\nm=video 9 UDP/TLS/RTP/SAVPF 96\na=mid:0\na=candidate:1 1 udp 2122260223 100.101.102.103 47810 typ host generation 0\na=candidate:2 1 udp 2122194687 192.168.1.20 47811 typ host generation 0\na=candidate:3 1 udp 2122129151 fd7a:115c:a1e0::1234 47812 typ host generation 0\na=candidate:4 1 udp 2122063615 3f2a1c4e-aaaa-bbbb-cccc-0123456789ab.local 47813 typ host generation 0\na=candidate:5 1 udp 1686052607 203.0.113.9 47814 typ srflx raddr 0.0.0.0 rport 0\na=end-of-candidates\n"
+          ],
+          "note": "LF in, CRLF out",
+          "result": "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=mid:0\r\na=candidate:1 1 udp 2122260223 100.101.102.103 47810 typ host generation 0\r\na=candidate:3 1 udp 2122129151 fd7a:115c:a1e0::1234 47812 typ host generation 0\r\na=end-of-candidates\r\n"
+        },
+        {
+          "args": [
+            "v=0\r\na=candidate:bogus\r\na=mid:0"
+          ],
+          "result": "v=0\r\na=mid:0"
+        },
+        {
+          "args": [
+            ""
+          ],
+          "result": ""
+        },
+        {
+          "args": [
+            42
+          ],
+          "result": ""
+        }
+      ]
+    },
+    "validateControl": {
+      "about": "validateControl(msg) -> the clean control-channel message from the host, or null. Types a viewer only sends (select-display, quality) and unknown types -> null.",
+      "cases": [
+        {
+          "args": [
+            {
+              "current": "2528732444",
+              "displays": [
+                {
+                  "height": 2160,
+                  "id": "2528732444",
+                  "name": "DELL U2720Q",
+                  "primary": true,
+                  "scaleFactor": 1.5,
+                  "width": 3840
+                },
+                {
+                  "height": 1600,
+                  "id": "2779098405",
+                  "name": "Built-in Retina Display",
+                  "primary": false,
+                  "scaleFactor": 2,
+                  "width": 2560
+                }
+              ],
+              "t": "displays"
+            }
+          ],
+          "result": {
+            "current": "2528732444",
+            "displays": [
+              {
+                "height": 2160,
+                "id": "2528732444",
+                "name": "DELL U2720Q",
+                "primary": true,
+                "scaleFactor": 1.5,
+                "width": 3840
+              },
+              {
+                "height": 1600,
+                "id": "2779098405",
+                "name": "Built-in Retina Display",
+                "primary": false,
+                "scaleFactor": 2,
+                "width": 2560
+              }
+            ],
+            "t": "displays"
+          }
+        },
+        {
+          "args": [
+            {
+              "current": 2,
+              "displays": [
+                {
+                  "height": 1080,
+                  "id": 1,
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": 2,
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                }
+              ],
+              "t": "displays"
+            }
+          ],
+          "note": "numeric ids become strings",
+          "result": {
+            "current": "2",
+            "displays": [
+              {
+                "height": 1080,
+                "id": "1",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "2",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              }
+            ],
+            "t": "displays"
+          }
+        },
+        {
+          "args": [
+            {
+              "current": "a",
+              "displays": [
+                {
+                  "height": 1080,
+                  "id": "a",
+                  "name": "first",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "a",
+                  "name": "second",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                }
+              ],
+              "t": "displays"
+            }
+          ],
+          "note": "duplicate ids: the first wins",
+          "result": {
+            "current": "a",
+            "displays": [
+              {
+                "height": 1080,
+                "id": "a",
+                "name": "first",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              }
+            ],
+            "t": "displays"
+          }
+        },
+        {
+          "args": [
+            {
+              "current": "ok",
+              "displays": [
+                null,
+                {
+                  "height": 1080,
+                  "id": "",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": 9007199254740992,
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": true,
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "id": "ok"
+                }
+              ],
+              "t": "displays"
+            }
+          ],
+          "note": "unusable entries are skipped; default names count the kept ones",
+          "result": {
+            "current": "ok",
+            "displays": [
+              {
+                "height": 0,
+                "id": "ok",
+                "name": "Display 1",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 0
+              }
+            ],
+            "t": "displays"
+          }
+        },
+        {
+          "args": [
+            {
+              "current": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+              "displays": [
+                {
+                  "height": 1080,
+                  "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                }
+              ],
+              "t": "displays"
+            }
+          ],
+          "result": {
+            "current": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "displays": [
+              {
+                "height": 1080,
+                "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              }
+            ],
+            "t": "displays"
+          }
+        },
+        {
+          "args": [
+            {
+              "current": "w0",
+              "displays": [
+                {
+                  "height": -5,
+                  "id": "w0",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 0
+                },
+                {
+                  "height": 65536,
+                  "id": "w1",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 65537
+                },
+                {
+                  "height": "1080",
+                  "id": "w2",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920.6
+                },
+                {
+                  "height": 1080,
+                  "id": "s0",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 0.2,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "s1",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 0.25,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "s2",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 8,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "s3",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 8.5,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "s4",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": "2",
+                  "width": 1920
+                }
+              ],
+              "t": "displays"
+            }
+          ],
+          "result": {
+            "current": "w0",
+            "displays": [
+              {
+                "height": 0,
+                "id": "w0",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 0
+              },
+              {
+                "height": 65536,
+                "id": "w1",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 0
+              },
+              {
+                "height": 0,
+                "id": "w2",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1921
+              },
+              {
+                "height": 1080,
+                "id": "s0",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "s1",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 0.25,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "s2",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 8,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "s3",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "s4",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              }
+            ],
+            "t": "displays"
+          }
+        },
+        {
+          "args": [
+            {
+              "current": "n3",
+              "displays": [
+                {
+                  "height": 1080,
+                  "id": "n0",
+                  "name": "Evil\u202eDisplay",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "n1",
+                  "name": "Tab\tName\u0000\u200b",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "n2",
+                  "name": "  padded  ",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "n3",
+                  "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "n4",
+                  "name": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "n5",
+                  "name": "\u202e\u200f",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "n6",
+                  "name": 42,
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "n7",
+                  "name": null,
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "n8",
+                  "name": "Display",
+                  "primary": "true",
+                  "scaleFactor": 1,
+                  "width": 1920
+                }
+              ],
+              "t": "displays"
+            }
+          ],
+          "result": {
+            "current": "n3",
+            "displays": [
+              {
+                "height": 1080,
+                "id": "n0",
+                "name": "EvilDisplay",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "n1",
+                "name": "TabName",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "n2",
+                "name": "padded",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "n3",
+                "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\u2026",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "n4",
+                "name": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\u2026",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "n5",
+                "name": "Display 6",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "n6",
+                "name": "42",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "n7",
+                "name": "Display 8",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "n8",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              }
+            ],
+            "t": "displays"
+          }
+        },
+        {
+          "args": [
+            {
+              "current": "d0",
+              "displays": [
+                {
+                  "height": 1080,
+                  "id": "d0",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d1",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d2",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d3",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d4",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d5",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d6",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d7",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d8",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d9",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d10",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d11",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d12",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d13",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d14",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d15",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d16",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d17",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d18",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d19",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d20",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d21",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d22",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d23",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d24",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d25",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d26",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d27",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d28",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d29",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d30",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d31",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                },
+                {
+                  "height": 1080,
+                  "id": "d32",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                }
+              ],
+              "t": "displays"
+            }
+          ],
+          "note": "at most 32 displays",
+          "result": {
+            "current": "d0",
+            "displays": [
+              {
+                "height": 1080,
+                "id": "d0",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d1",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d2",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d3",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d4",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d5",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d6",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d7",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d8",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d9",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d10",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d11",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d12",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d13",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d14",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d15",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d16",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d17",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d18",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d19",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d20",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d21",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d22",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d23",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d24",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d25",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d26",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d27",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d28",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d29",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d30",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              },
+              {
+                "height": 1080,
+                "id": "d31",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              }
+            ],
+            "t": "displays"
+          }
+        },
+        {
+          "args": [
+            {
+              "current": "missing",
+              "displays": [
+                {
+                  "height": 1080,
+                  "id": "a",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                }
+              ],
+              "t": "displays"
+            }
+          ],
+          "result": {
+            "current": null,
+            "displays": [
+              {
+                "height": 1080,
+                "id": "a",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              }
+            ],
+            "t": "displays"
+          }
+        },
+        {
+          "args": [
+            {
+              "current": null,
+              "displays": [
+                {
+                  "height": 1080,
+                  "id": "a",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                }
+              ],
+              "t": "displays"
+            }
+          ],
+          "result": {
+            "current": null,
+            "displays": [
+              {
+                "height": 1080,
+                "id": "a",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              }
+            ],
+            "t": "displays"
+          }
+        },
+        {
+          "args": [
+            {
+              "displays": [
+                {
+                  "height": 1080,
+                  "id": "a",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                }
+              ],
+              "t": "displays"
+            }
+          ],
+          "result": {
+            "current": null,
+            "displays": [
+              {
+                "height": 1080,
+                "id": "a",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              }
+            ],
+            "t": "displays"
+          }
+        },
+        {
+          "args": [
+            {
+              "current": {
+                "id": "a"
+              },
+              "displays": [
+                {
+                  "height": 1080,
+                  "id": "a",
+                  "name": "Display",
+                  "primary": false,
+                  "scaleFactor": 1,
+                  "width": 1920
+                }
+              ],
+              "t": "displays"
+            }
+          ],
+          "result": {
+            "current": null,
+            "displays": [
+              {
+                "height": 1080,
+                "id": "a",
+                "name": "Display",
+                "primary": false,
+                "scaleFactor": 1,
+                "width": 1920
+              }
+            ],
+            "t": "displays"
+          }
+        },
+        {
+          "args": [
+            {
+              "current": "a",
+              "displays": "a",
+              "t": "displays"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "t": "displays"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "kind": "text",
+              "t": "clipboard",
+              "text": "hello"
+            }
+          ],
+          "result": {
+            "kind": "text",
+            "t": "clipboard",
+            "text": "hello"
+          }
+        },
+        {
+          "args": [
+            {
+              "kind": "text",
+              "t": "clipboard",
+              "text": ""
+            }
+          ],
+          "result": {
+            "kind": "text",
+            "t": "clipboard",
+            "text": ""
+          }
+        },
+        {
+          "args": [
+            {
+              "extra": 1,
+              "kind": "text",
+              "t": "clipboard",
+              "text": "hello"
+            }
+          ],
+          "note": "unknown fields are dropped",
+          "result": {
+            "kind": "text",
+            "t": "clipboard",
+            "text": "hello"
+          }
+        },
+        {
+          "args": [
+            {
+              "kind": "image",
+              "t": "clipboard",
+              "text": "x"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "t": "clipboard",
+              "text": "x"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "kind": "text",
+              "t": "clipboard",
+              "text": 42
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "kind": "text",
+              "part": {
+                "extra": 1,
+                "id": "abc_-9",
+                "last": false,
+                "seq": 0
+              },
+              "t": "clipboard",
+              "text": "part"
+            }
+          ],
+          "result": {
+            "kind": "text",
+            "part": {
+              "id": "abc_-9",
+              "last": false,
+              "seq": 0
+            },
+            "t": "clipboard",
+            "text": "part"
+          }
+        },
+        {
+          "args": [
+            {
+              "kind": "text",
+              "part": {
+                "id": "abc_-9",
+                "last": true,
+                "seq": 15
+              },
+              "t": "clipboard",
+              "text": "part"
+            }
+          ],
+          "result": {
+            "kind": "text",
+            "part": {
+              "id": "abc_-9",
+              "last": true,
+              "seq": 15
+            },
+            "t": "clipboard",
+            "text": "part"
+          }
+        },
+        {
+          "args": [
+            {
+              "kind": "text",
+              "part": {
+                "id": "abc_-9",
+                "last": true,
+                "seq": 16
+              },
+              "t": "clipboard",
+              "text": "part"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "kind": "text",
+              "part": {
+                "id": "abc_-9",
+                "last": true,
+                "seq": -1
+              },
+              "t": "clipboard",
+              "text": "part"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "kind": "text",
+              "part": {
+                "id": "abc_-9",
+                "last": true,
+                "seq": 1.5
+              },
+              "t": "clipboard",
+              "text": "part"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "kind": "text",
+              "part": {
+                "id": "",
+                "last": true,
+                "seq": 0
+              },
+              "t": "clipboard",
+              "text": "part"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "kind": "text",
+              "part": {
+                "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "last": true,
+                "seq": 0
+              },
+              "t": "clipboard",
+              "text": "part"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "kind": "text",
+              "part": {
+                "id": "a b",
+                "last": true,
+                "seq": 0
+              },
+              "t": "clipboard",
+              "text": "part"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "kind": "text",
+              "part": {
+                "id": "abc_-9",
+                "last": "true",
+                "seq": 0
+              },
+              "t": "clipboard",
+              "text": "part"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "kind": "text",
+              "part": {
+                "id": "abc_-9",
+                "last": true,
+                "seq": 0
+              },
+              "t": "clipboard",
+              "text": ""
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "kind": "text",
+              "part": null,
+              "t": "clipboard",
+              "text": "part"
+            }
+          ],
+          "note": "a part that is present must be valid",
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "t": "chat",
+              "text": "hi",
+              "ts": 1700000000000
+            }
+          ],
+          "result": {
+            "t": "chat",
+            "text": "hi",
+            "ts": 1700000000000
+          }
+        },
+        {
+          "args": [
+            {
+              "t": "chat",
+              "text": "  hi  ",
+              "ts": 0
+            }
+          ],
+          "result": {
+            "t": "chat",
+            "text": "hi",
+            "ts": null
+          }
+        },
+        {
+          "args": [
+            {
+              "t": "chat",
+              "text": "\r\nline1\r\nline2\t\u0007",
+              "ts": -1
+            }
+          ],
+          "result": {
+            "t": "chat",
+            "text": "line1\nline2",
+            "ts": null
+          }
+        },
+        {
+          "args": [
+            {
+              "t": "chat",
+              "text": "bidi \u202eevil\u2066",
+              "ts": "1"
+            }
+          ],
+          "result": {
+            "t": "chat",
+            "text": "bidi evil",
+            "ts": null
+          }
+        },
+        {
+          "args": [
+            {
+              "t": "chat",
+              "text": "   "
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "t": "chat",
+              "text": 42
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "audio": true,
+              "controlAllowed": false,
+              "inputBlocked": null,
+              "t": "host-state"
+            }
+          ],
+          "result": {
+            "audio": true,
+            "controlAllowed": false,
+            "inputBlocked": null,
+            "t": "host-state"
+          }
+        },
+        {
+          "args": [
+            {
+              "audio": false,
+              "controlAllowed": true,
+              "inputBlocked": "secure-desktop",
+              "t": "host-state"
+            }
+          ],
+          "result": {
+            "audio": false,
+            "controlAllowed": true,
+            "inputBlocked": "secure-desktop",
+            "t": "host-state"
+          }
+        },
+        {
+          "args": [
+            {
+              "inputBlocked": "elevated-window",
+              "t": "host-state"
+            }
+          ],
+          "result": {
+            "inputBlocked": "elevated-window",
+            "t": "host-state"
+          }
+        },
+        {
+          "args": [
+            {
+              "audio": "yes",
+              "controlAllowed": 1,
+              "inputBlocked": "other",
+              "t": "host-state"
+            }
+          ],
+          "result": {
+            "t": "host-state"
+          }
+        },
+        {
+          "args": [
+            {
+              "t": "host-state"
+            }
+          ],
+          "result": {
+            "t": "host-state"
+          }
+        },
+        {
+          "args": [
+            {
+              "id": "1",
+              "t": "select-display"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "preset": "speed",
+              "t": "quality"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "t": "unknown"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "t": 5
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {}
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            null
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            []
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            "displays"
+          ],
+          "result": null
+        }
+      ]
+    },
+    "validateSignal": {
+      "about": "validateSignal(msg) -> the clean message or null. The viewer is always the answerer: only offers are accepted. Shapes only; addresses are filtered by isAllowedCandidate.",
+      "cases": [
+        {
+          "args": [
+            {
+              "description": {
+                "sdp": "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=mid:0\r\na=candidate:1 1 udp 2122260223 100.101.102.103 47810 typ host generation 0\r\na=candidate:2 1 udp 2122194687 192.168.1.20 47811 typ host generation 0\r\na=candidate:3 1 udp 2122129151 fd7a:115c:a1e0::1234 47812 typ host generation 0\r\na=candidate:4 1 udp 2122063615 3f2a1c4e-aaaa-bbbb-cccc-0123456789ab.local 47813 typ host generation 0\r\na=candidate:5 1 udp 1686052607 203.0.113.9 47814 typ srflx raddr 0.0.0.0 rport 0\r\na=end-of-candidates\r\n",
+                "type": "offer"
+              },
+              "t": "sdp"
+            }
+          ],
+          "result": {
+            "description": {
+              "sdp": "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=mid:0\r\na=candidate:1 1 udp 2122260223 100.101.102.103 47810 typ host generation 0\r\na=candidate:2 1 udp 2122194687 192.168.1.20 47811 typ host generation 0\r\na=candidate:3 1 udp 2122129151 fd7a:115c:a1e0::1234 47812 typ host generation 0\r\na=candidate:4 1 udp 2122063615 3f2a1c4e-aaaa-bbbb-cccc-0123456789ab.local 47813 typ host generation 0\r\na=candidate:5 1 udp 1686052607 203.0.113.9 47814 typ srflx raddr 0.0.0.0 rport 0\r\na=end-of-candidates\r\n",
+              "type": "offer"
+            },
+            "t": "sdp"
+          }
+        },
+        {
+          "args": [
+            {
+              "description": {
+                "extra": 1,
+                "sdp": "v=0\r\n",
+                "type": "offer"
+              },
+              "extra": true,
+              "t": "sdp"
+            }
+          ],
+          "note": "unknown fields are dropped",
+          "result": {
+            "description": {
+              "sdp": "v=0\r\n",
+              "type": "offer"
+            },
+            "t": "sdp"
+          }
+        },
+        {
+          "args": [
+            {
+              "description": {
+                "sdp": "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=mid:0\r\na=candidate:1 1 udp 2122260223 100.101.102.103 47810 typ host generation 0\r\na=candidate:2 1 udp 2122194687 192.168.1.20 47811 typ host generation 0\r\na=candidate:3 1 udp 2122129151 fd7a:115c:a1e0::1234 47812 typ host generation 0\r\na=candidate:4 1 udp 2122063615 3f2a1c4e-aaaa-bbbb-cccc-0123456789ab.local 47813 typ host generation 0\r\na=candidate:5 1 udp 1686052607 203.0.113.9 47814 typ srflx raddr 0.0.0.0 rport 0\r\na=end-of-candidates\r\n",
+                "type": "answer"
+              },
+              "t": "sdp"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "description": {
+                "sdp": "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=mid:0\r\na=candidate:1 1 udp 2122260223 100.101.102.103 47810 typ host generation 0\r\na=candidate:2 1 udp 2122194687 192.168.1.20 47811 typ host generation 0\r\na=candidate:3 1 udp 2122129151 fd7a:115c:a1e0::1234 47812 typ host generation 0\r\na=candidate:4 1 udp 2122063615 3f2a1c4e-aaaa-bbbb-cccc-0123456789ab.local 47813 typ host generation 0\r\na=candidate:5 1 udp 1686052607 203.0.113.9 47814 typ srflx raddr 0.0.0.0 rport 0\r\na=end-of-candidates\r\n",
+                "type": "pranswer"
+              },
+              "t": "sdp"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "description": {
+                "sdp": "x",
+                "type": "offer"
+              },
+              "t": "sdp"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "description": {
+                "sdp": " v=0",
+                "type": "offer"
+              },
+              "t": "sdp"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "description": {
+                "sdp": "",
+                "type": "offer"
+              },
+              "t": "sdp"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "description": {
+                "sdp": 42,
+                "type": "offer"
+              },
+              "t": "sdp"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "description": "v=0",
+              "t": "sdp"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "t": "sdp"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "candidate": null,
+              "t": "ice"
+            }
+          ],
+          "result": {
+            "candidate": null,
+            "t": "ice"
+          }
+        },
+        {
+          "args": [
+            {
+              "t": "ice"
+            }
+          ],
+          "note": "a missing candidate is end of candidates",
+          "result": {
+            "candidate": null,
+            "t": "ice"
+          }
+        },
+        {
+          "args": [
+            {
+              "candidate": {
+                "candidate": "candidate:1 1 udp 1 100.64.0.1 47801 typ host",
+                "extra": "x",
+                "sdpMLineIndex": 0,
+                "sdpMid": "0",
+                "usernameFragment": "abcd"
+              },
+              "t": "ice"
+            }
+          ],
+          "note": "unknown fields are dropped",
+          "result": {
+            "candidate": {
+              "candidate": "candidate:1 1 udp 1 100.64.0.1 47801 typ host",
+              "sdpMLineIndex": 0,
+              "sdpMid": "0",
+              "usernameFragment": "abcd"
+            },
+            "t": "ice"
+          }
+        },
+        {
+          "args": [
+            {
+              "candidate": {
+                "candidate": "candidate:1 1 udp 1 100.64.0.1 47801 typ host",
+                "sdpMid": "0"
+              },
+              "t": "ice"
+            }
+          ],
+          "note": "usernameFragment defaults to null",
+          "result": {
+            "candidate": {
+              "candidate": "candidate:1 1 udp 1 100.64.0.1 47801 typ host",
+              "sdpMLineIndex": null,
+              "sdpMid": "0",
+              "usernameFragment": null
+            },
+            "t": "ice"
+          }
+        },
+        {
+          "args": [
+            {
+              "candidate": {
+                "candidate": "candidate:1 1 udp 1 100.64.0.1 47801 typ host",
+                "sdpMLineIndex": 0,
+                "sdpMid": null
+              },
+              "t": "ice"
+            }
+          ],
+          "result": {
+            "candidate": {
+              "candidate": "candidate:1 1 udp 1 100.64.0.1 47801 typ host",
+              "sdpMLineIndex": 0,
+              "sdpMid": null,
+              "usernameFragment": null
+            },
+            "t": "ice"
+          }
+        },
+        {
+          "args": [
+            {
+              "candidate": {
+                "candidate": "candidate:1 1 udp 1 100.64.0.1 47801 typ host"
+              },
+              "t": "ice"
+            }
+          ],
+          "note": "neither sdpMid nor sdpMLineIndex: unroutable",
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "candidate": {
+                "candidate": ""
+              },
+              "t": "ice"
+            }
+          ],
+          "note": "end of candidates of one generation",
+          "result": {
+            "candidate": {
+              "candidate": "",
+              "sdpMLineIndex": null,
+              "sdpMid": null,
+              "usernameFragment": null
+            },
+            "t": "ice"
+          }
+        },
+        {
+          "args": [
+            {
+              "candidate": {
+                "candidate": "candidate:2 1 udp 2122194687 192.168.1.20 47811 typ host generation 0",
+                "sdpMLineIndex": 0,
+                "sdpMid": "0",
+                "usernameFragment": "abcd"
+              },
+              "t": "ice"
+            }
+          ],
+          "note": "shape only: the address filter is separate",
+          "result": {
+            "candidate": {
+              "candidate": "candidate:2 1 udp 2122194687 192.168.1.20 47811 typ host generation 0",
+              "sdpMLineIndex": 0,
+              "sdpMid": "0",
+              "usernameFragment": "abcd"
+            },
+            "t": "ice"
+          }
+        },
+        {
+          "args": [
+            {
+              "candidate": {
+                "candidate": 5,
+                "sdpMLineIndex": 0,
+                "sdpMid": "0",
+                "usernameFragment": "abcd"
+              },
+              "t": "ice"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "candidate": {
+                "candidate": "candidate:1 1 udp 1 100.64.0.1 47801 typ host",
+                "sdpMLineIndex": -1,
+                "sdpMid": "0",
+                "usernameFragment": "abcd"
+              },
+              "t": "ice"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "candidate": {
+                "candidate": "candidate:1 1 udp 1 100.64.0.1 47801 typ host",
+                "sdpMLineIndex": 1.5,
+                "sdpMid": "0",
+                "usernameFragment": "abcd"
+              },
+              "t": "ice"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "candidate": {
+                "candidate": "candidate:1 1 udp 1 100.64.0.1 47801 typ host",
+                "sdpMLineIndex": "0",
+                "sdpMid": "0",
+                "usernameFragment": "abcd"
+              },
+              "t": "ice"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "candidate": {
+                "candidate": "candidate:1 1 udp 1 100.64.0.1 47801 typ host",
+                "sdpMLineIndex": 0,
+                "sdpMid": 7,
+                "usernameFragment": "abcd"
+              },
+              "t": "ice"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "candidate": {
+                "candidate": "candidate:1 1 udp 1 100.64.0.1 47801 typ host",
+                "sdpMLineIndex": 0,
+                "sdpMid": "0",
+                "usernameFragment": 7
+              },
+              "t": "ice"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "candidate": "candidate:1 1 udp 1 100.64.0.1 47801 typ host",
+              "t": "ice"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "candidate": [],
+              "t": "ice"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "reason": "x",
+              "t": "bye"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            {
+              "description": {
+                "sdp": "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=mid:0\r\na=candidate:1 1 udp 2122260223 100.101.102.103 47810 typ host generation 0\r\na=candidate:2 1 udp 2122194687 192.168.1.20 47811 typ host generation 0\r\na=candidate:3 1 udp 2122129151 fd7a:115c:a1e0::1234 47812 typ host generation 0\r\na=candidate:4 1 udp 2122063615 3f2a1c4e-aaaa-bbbb-cccc-0123456789ab.local 47813 typ host generation 0\r\na=candidate:5 1 udp 1686052607 203.0.113.9 47814 typ srflx raddr 0.0.0.0 rport 0\r\na=end-of-candidates\r\n",
+                "type": "offer"
+              },
+              "t": "SDP"
+            }
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            null
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            []
+          ],
+          "result": null
+        },
+        {
+          "args": [
+            "sdp"
+          ],
+          "result": null
+        }
+      ]
+    }
+  },
+  "limits": {
+    "candidateMaxLength": 2048,
+    "chatMaxLength": 4000,
+    "clipboardMaxParts": 16,
+    "clipboardPartTextMaxLength": 40000,
+    "clipboardTextMaxLength": 200000,
+    "displayIdMaxLength": 128,
+    "displayNameMaxCodePoints": 60,
+    "displaysMax": 32,
+    "sdpMLineIndexMax": 255,
+    "sdpMaxLength": 1048576,
+    "sdpMidMaxLength": 64,
+    "usernameFragmentMaxLength": 256
+  }
+}
