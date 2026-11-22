@@ -53,9 +53,15 @@ class TouchInput {
   ViewTransform view = ViewTransform.identity;
 
   /// How much of the bottom of [viewport] the keyboard (and its extra keys)
-  /// covers. While it is not zero the picture can be moved up by that much,
-  /// and two fingers move the picture instead of scrolling.
+  /// covers. While it covers part of the picture, the picture can be moved
+  /// up until its bottom edge meets the keyboard, and two fingers move the
+  /// picture instead of scrolling.
   double bottomInset = 0;
+
+  // Whether the keyboard covers enough of the picture for a lift to be
+  // worth taking the two-finger scroll away for.
+  bool get _canLift =>
+      liftRoom(view.scale, viewport, bottomInset, fit) > touchSlop;
 
   final Map<int, Offset> _pointers = {};
   _Mode _mode = _Mode.idle;
@@ -128,7 +134,7 @@ class TouchInput {
         if (_twoStartDistance > 0 && (d / _twoStartDistance - 1).abs() > 0.12) {
           _mode = _Mode.zoom;
         } else if ((c - _twoStartCentroid).distance > touchSlop) {
-          if (view.isZoomed || bottomInset > 0) {
+          if (view.isZoomed || _canLift) {
             _mode = _Mode.zoom;
           } else {
             _mode = _Mode.scroll;

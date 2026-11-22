@@ -51,6 +51,7 @@ class _SessionScreenState extends State<SessionScreen> {
   bool _showPassword = false;
   String? _passwordError;
   bool _immersive = false;
+  bool _couldControl = false;
 
   String get _hostName => widget.host.displayName;
 
@@ -87,6 +88,7 @@ class _SessionScreenState extends State<SessionScreen> {
     _showPassword = false;
     _passwordError = null;
     _mods.clear();
+    _couldControl = false;
     _kbBuffer = KeyboardBuffer();
     _setKeyboardField(_kbBuffer.sentinel);
     unawaited(_session.start());
@@ -121,12 +123,17 @@ class _SessionScreenState extends State<SessionScreen> {
       );
       unawaited(keepScreenOn(live));
     }
+    // Touches are forgotten when the session stops being live and at the
+    // moment control is lost, not on every notification: zooming and moving
+    // the picture must keep working in a view-only session.
+    final can = live && _session.canControl;
     if (!live) {
       _touch.reset();
       if (_kbFocus.hasFocus) _kbFocus.unfocus();
-    } else if (!_session.canControl) {
+    } else if (_couldControl && !can) {
       _touch.reset();
     }
+    _couldControl = can;
     if (_session.phase == SessionPhase.password && _session.remaining != null) {
       _passwordError = SessionStrings.passwordError(
         'wrong',
@@ -560,7 +567,14 @@ class _SessionScreenState extends State<SessionScreen> {
               controller: _kb,
               focusNode: _kbFocus,
               autocorrect: false,
-              enableSuggestions: false,
+              // Suggestions stay ON: Flutter turns "no suggestions" into a
+              // visible-password field on Android, and keyboards offer only
+              // Latin layouts there, so Thai (or any other script) could not
+              // be typed. Words being composed are followed edit by edit.
+              // ignore: avoid_redundant_argument_values
+              enableSuggestions: true,
+              // Never offered to autofill, which replaces the whole text.
+              autofillHints: null,
               enableInteractiveSelection: false,
               keyboardType: TextInputType.multiline,
               textInputAction: TextInputAction.newline,

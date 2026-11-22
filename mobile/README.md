@@ -4,9 +4,11 @@ The phone app views and controls a Windows or Mac computer running Tunnelview, *
 Tailscale tailnet only**. It is a viewer: it never shares the phone's screen and never listens
 for connections. Android first; iOS builds from the same code later.
 
-Status: pairing, viewing and control are implemented and unit-tested against a scripted host;
-**they have not been run on a real phone against a real computer yet**. Not there yet: clipboard
-sync, file transfer, chat, a biometric prompt before auto-accepted sessions.
+Status: pairing, viewing and control are implemented. The signaling side (upgrade, signed hello,
+pairing, password, signal relay) is tested against the desktop's real `HostServer` over loopback.
+**The app has not been run on a real phone yet**, so the camera, the keyboard, the picture and
+touch control are untried on a device. Not there yet: clipboard sync, file transfer, chat, a
+biometric prompt before auto-accepted sessions.
 
 ## Using it
 
@@ -18,25 +20,49 @@ sync, file transfer, chat, a biometric prompt before auto-accepted sessions.
 3. Tap the computer. Someone there allows the session, or you type its password. Pairing admits
    nothing by itself: every session goes through the computer's own rules.
 4. In the session: tap = click, two quick taps = double click, touch and hold = right click, drag =
-   drag with the left button, two fingers = scroll (or move the picture while zoomed), pinch =
-   zoom. The keyboard button opens the phone's keyboard with a row of extra keys (Esc, Tab, Ctrl,
-   Alt, arrows, F1-F12); the menu has key combinations, the display and the quality.
+   drag with the left button, two fingers = scroll (or move the picture while it is zoomed, or
+   while the keyboard covers part of it), pinch = zoom. Touches on the black bars around the
+   picture do nothing. The keyboard button opens the phone's keyboard with a row of extra keys
+   (Esc, Tab, Ctrl, Alt, arrows, F1-F12); the menu has key combinations, the display and the
+   quality.
 
 ## How a session is protected (`lib/proto`, `lib/session`)
 
 - The phone only dials the Tailscale addresses stored when it paired, as IP literals (no DNS), and
-  only after the Tailscale check and the WebRTC self-test passed (`session_gate.dart`).
+  only after the Tailscale check and the WebRTC self-test passed (`session_gate.dart`; the
+  session asks again before it dials and before WebRTC starts).
+- The signaling socket is bound to the phone's own Tailscale address of the dialed family before
+  it connects (`transport.dart`). dart:io cannot report an outgoing socket's local address
+  (`Socket.address` is the destination), so the address is bound instead of read back; the OS
+  refuses the bind unless the address is on this device. The process is also bound to the
+  Tailscale network (below).
 - Every connection carries a fresh client nonce. Before the phone sends anything, the computer's
   hello must be signed by the identity key pinned at pairing, for this connection, this host ID
-  and this phone's node ID (`link.dart`, `pairing.dart` `verifyIdent`), and the socket's local
-  address must be one of the phone's own Tailscale addresses.
+  and this phone's node ID (`link.dart`, `pairing.dart` `verifyIdent`).
 - Password proofs are bound to the two node IDs the computer signed; the password never leaves the
-  phone. KDF parameters from the hello are validated before scrypt runs (`auth.dart`).
-- ICE candidates outside the tailnet are dropped in both directions and stripped from SDP, and the
-  selected candidate pair is checked once connected; a path outside Tailscale ends the session
-  (`signal.dart`, `remote_session.dart`).
-- The Dart ports are checked against the desktop's shared vectors in `../test/vectors`
-  (`test/proto_vectors_test.dart`, `test/signal_vectors_test.dart`).
+  phone. KDF parameters from the hello are validated before scrypt runs (`auth.dart`). The
+  password is normalised to Unicode NFC first, as on the desktop (Android's `Normalizer`).
+- ICE candidates outside the tailnet are dropped in both directions and stripped from SDP. A
+  candidate line must be plain single-space fields with a bare IP literal, because libwebrtc
+  splits on single spaces and resolves anything else as a host name (stricter than the desktop).
+  The selected candidate pair is checked when connected and every 5 s after; a path outside
+  Tailscale ends the session (`signal.dart`, `remote_session.dart`).
+- A WebSocket frame, and a message split over frames, is limited to 1 MiB (`transport.dart`).
+
+## Tests
+
+- `test/proto_vectors_test.dart`, `test/signal_vectors_test.dart`: the Dart ports against the
+  desktop's shared vectors in `../test/vectors`.
+- `test/interop_real_host_test.dart`: the app's real transport, pairing flow and session state
+  machine against the desktop's real `HostServer`, which `../test/support/mobile-interop-host.js`
+  runs with node on 127.0.0.1 (a fake tailnet; nothing touches the real one). It needs node and
+  `npm ci` in the repository root, and is skipped without them; CI requires it
+  (`TUNNELVIEW_INTEROP=required`).
+- `test/transport_test.dart`: the real transport against a hand-made WebSocket server (the upgrade
+  request, refusals, the size limits).
+- `test/session_test.dart`, `test/screens_test.dart`, `test/input_test.dart`: the session logic,
+  the screens and the touch / keyboard input against a scripted host.
+- Not covered by any test: the WebRTC media path, the camera, real keyboards. Those need a device.
 
 ## Building
 

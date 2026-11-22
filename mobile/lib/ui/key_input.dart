@@ -210,17 +210,21 @@ class KeyboardEdit {
 /// keyboard made just before it arrives is still based on the OLD text.
 /// Comparing such an edit with the new filler would re-type or delete text
 /// on the computer. Therefore every filler starts with a marker letter that
-/// changes with each reset, and the buffer remembers the last text of the
-/// few most recent fillers: an edit is always compared with the last text
-/// that carried the same marker.
+/// changes with each reset, and the buffer remembers the last text of every
+/// filler that can still be in play: an edit is always compared with the
+/// last text that carried the same marker.
+///
+/// A filler stops being in play on evidence, not by count: Android applies
+/// the resets in the order they were sent and reports edits in order, so
+/// once a text of one filler arrives, no later edit can be based on an older
+/// filler.
 class KeyboardBuffer {
   KeyboardBuffer() {
-    _last[_marker(_epoch)] = sentinel;
+    _open();
   }
 
-  /// How many marker letters there are; only the 3 newest are remembered.
-  static const int markers = 8;
-  static const int _kept = 3;
+  /// The marker letters, a to z, used in turn.
+  static const int markers = 26;
   static const String _filler = '       ';
 
   /// Texts shorter than this, or longer than [high], cause a reset.
@@ -228,13 +232,29 @@ class KeyboardBuffer {
   static const int high = 200;
 
   int _epoch = 0;
+
+  // The last text of each filler in play and the epoch it was issued in, by
+  // marker letter.
   final Map<String, String> _last = {};
+  final Map<String, int> _epochOf = {};
 
   static String _marker(int epoch) =>
       String.fromCharCode(0x61 + epoch % markers);
 
   /// What the field holds after a reset (and at the start).
   String get sentinel => '${_marker(_epoch)}$_filler';
+
+  void _open() {
+    final m = _marker(_epoch);
+    _last[m] = sentinel;
+    _epochOf[m] = _epoch;
+  }
+
+  String _refill() {
+    _epoch++;
+    _open();
+    return sentinel;
+  }
 
   /// The field's text is now [text]. [composing]: the keyboard is in the
   /// middle of composing a word (no reset then). [modifiers]: the latched
@@ -245,25 +265,34 @@ class KeyboardBuffer {
     required List<String> modifiers,
   }) {
     final marker = text.isEmpty ? null : text[0];
-    final known = marker != null && _last.containsKey(marker);
-    final String base;
-    if (known) {
-      base = _last[marker]!;
-    } else {
-      // The marker is gone (everything was deleted in one go) or is not one
-      // of ours. Compare with the shortest remembered text, so that too few
-      // rather than too many Backspaces are sent.
-      base = _last.values.reduce((a, b) => a.length <= b.length ? a : b);
+    if (marker != null && _last.containsKey(marker)) {
+      // Older fillers are out of play from here on.
+      final seen = _epochOf[marker]!;
+      _epochOf.removeWhere((m, epoch) {
+        if (epoch >= seen) return false;
+        _last.remove(m);
+        return true;
+      });
+      final base = _last[marker]!;
+      if (text == base) return const KeyboardEdit([]);
+      final r = messagesForEdit(base, text, modifiers);
+      _last[marker] = text;
+      if (composing || (text.length >= low && text.length <= high)) {
+        return KeyboardEdit(r.messages, used: r.used);
+      }
+      return KeyboardEdit(r.messages, used: r.used, resetTo: _refill());
     }
-    if (known && text == base) return const KeyboardEdit([]);
-    final r = messagesForEdit(base, text, modifiers);
-    if (known) _last[marker] = text;
-    final reset =
-        !known || (!composing && (text.length < low || text.length > high));
-    if (!reset) return KeyboardEdit(r.messages, used: r.used);
-    _epoch++;
-    _last[_marker(_epoch)] = sentinel;
-    if (_epoch >= _kept) _last.remove(_marker(_epoch - _kept));
-    return KeyboardEdit(r.messages, used: r.used, resetTo: sentinel);
+    if (text.isEmpty) {
+      // Everything was deleted in one go, the marker included. Count against
+      // the shortest text in play: too few rather than too many Backspaces.
+      final base = _last.values.reduce((a, b) => a.length <= b.length ? a : b);
+      final r = messagesForEdit(base, text, modifiers);
+      return KeyboardEdit(r.messages, used: r.used, resetTo: _refill());
+    }
+    // The text does not start with a marker in play (something was typed at
+    // the very start of the field, or its filler is long gone). There is
+    // nothing sound to compare it with: send nothing and start over, rather
+    // than delete or type the wrong thing on the computer.
+    return KeyboardEdit(const [], resetTo: _refill());
   }
 }

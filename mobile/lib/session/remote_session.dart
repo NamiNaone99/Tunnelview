@@ -502,10 +502,19 @@ class RemoteSession extends ChangeNotifier {
       return; // as on the desktop: a failing getStats proves nothing
     }
     if (_closed != null) return;
+    final before = _path;
     _path = check;
     if (!check.ok) {
       _end('non-tailnet-path');
-    } else {
+    } else if (before == null ||
+        before.pair != check.pair ||
+        before.local != check.local ||
+        before.remote != check.remote ||
+        before.protocol != check.protocol ||
+        before.localType != check.localType ||
+        before.remoteType != check.remoteType) {
+      // Only a change is news: the periodic re-check must not make the
+      // screen rebuild (and drop a gesture) every few seconds.
       _notify();
     }
   }

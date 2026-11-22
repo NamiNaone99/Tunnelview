@@ -37,6 +37,7 @@ on:
       - "src/main/host-server.js"
       - "src/main/pairing.js"
       - "src/main/auth.js"
+      - "src/main/tailscale.js"
       - "src/shared/protocol.js"
       - "test/support/**"
   pull_request:
@@ -50,6 +51,7 @@ on:
       - "src/main/host-server.js"
       - "src/main/pairing.js"
       - "src/main/auth.js"
+      - "src/main/tailscale.js"
       - "src/shared/protocol.js"
       - "test/support/**"
   workflow_call:

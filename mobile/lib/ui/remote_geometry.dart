@@ -24,6 +24,18 @@ Rect fitRect(Size viewport, Size video) {
   return Rect.fromLTWH(left > 0 ? left : 0, top > 0 ? top : 0, w, h);
 }
 
+/// How far the picture may be moved up beyond its normal limit at zoom
+/// [scale], because the keyboard covers the bottom [bottomInset] of
+/// [viewport]: until the picture's bottom edge ([fit] is its place at zoom
+/// 1) reaches the top of the keyboard. Zero when the keyboard does not reach
+/// the picture.
+double liftRoom(double scale, Size viewport, double bottomInset, Rect? fit) {
+  if (bottomInset <= 0) return 0;
+  final bottom = fit == null || fit.isEmpty ? viewport.height : fit.bottom;
+  final room = bottomInset - scale * (viewport.height - bottom);
+  return room > 0 ? room : 0;
+}
+
 /// The user's zoom and pan of the fitted picture: a screen point is
 /// `fitted * scale + offset`.
 class ViewTransform {
@@ -46,12 +58,8 @@ class ViewTransform {
   ViewTransform clamped(Size viewport, {double bottomInset = 0, Rect? fit}) {
     final s = scale.clamp(1.0, maxZoom);
     final minX = viewport.width * (1 - s);
-    var minY = viewport.height * (1 - s);
-    if (bottomInset > 0) {
-      final bottom = fit == null || fit.isEmpty ? viewport.height : fit.bottom;
-      final lifted = viewport.height - bottomInset - bottom * s;
-      if (lifted < minY) minY = lifted;
-    }
+    final minY =
+        viewport.height * (1 - s) - liftRoom(s, viewport, bottomInset, fit);
     return ViewTransform(
       scale: s,
       offset: Offset(offset.dx.clamp(minX, 0.0), offset.dy.clamp(minY, 0.0)),

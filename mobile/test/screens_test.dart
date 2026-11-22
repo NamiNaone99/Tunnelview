@@ -351,6 +351,71 @@ void main() {
     expect(find.text('office-pc is busy'), findsOneWidget);
   });
 
+  testWidgets('a view-only session can still zoom, also while the session '
+      'reports changes', (tester) async {
+    await tester.runAsync(() async => id = await TestIdentity.create());
+    storage.value = jsonEncode([record()]);
+    await boot(tester);
+    await tester.tap(find.byKey(const Key('host-$hostNodeId')));
+    await tester.pump();
+    await step(tester);
+    host.last.push({
+      't': 'accepted',
+      'sessionId': 's1',
+      'permissions': {'control': false},
+      'via': 'prompt',
+    });
+    await step(tester);
+    final p = peer!;
+    p.statsReport = statsFor(tunIp, hostIp);
+    p.events.onState(PeerState.connected);
+    p.openChannel('input');
+    p.size.value = const Size(1000, 2000);
+    await step(tester);
+    expect(
+      tester.widget<Text>(find.byKey(const Key('control-banner'))).data,
+      startsWith('View only'),
+    );
+
+    final video = find.byKey(const Key('fake-video'));
+    final start = tester.getSize(video);
+    final centre = tester.getCenter(find.byKey(const Key('remote-view')));
+    final a = await tester.startGesture(
+      centre - const Offset(60, 0),
+      pointer: 7,
+    );
+    final b = await tester.startGesture(
+      centre + const Offset(60, 0),
+      pointer: 8,
+    );
+    await a.moveBy(const Offset(-60, 0));
+    await b.moveBy(const Offset(60, 0));
+    await tester.pump();
+    final midway = tester.getSize(video);
+    expect(midway.width, greaterThan(start.width));
+
+    // The session reports something while the fingers are still down.
+    p.events.onControl(jsonEncode({'t': 'host-state', 'audio': true}));
+    await tester.pump();
+    await a.moveBy(const Offset(-80, 0));
+    await b.moveBy(const Offset(80, 0));
+    await tester.pump();
+    expect(
+      tester.getSize(video).width,
+      greaterThan(midway.width),
+      reason: 'the pinch goes on after the update',
+    );
+    await a.up();
+    await b.up();
+    expect(p.sentOn('input'), isEmpty, reason: 'view only: nothing is sent');
+
+    await tester.tap(find.byKey(const Key('session-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('menu-disconnect')));
+    await tester.pumpAndSettle();
+    await step(tester);
+  });
+
   testWidgets('a password-only computer asks for its password', (tester) async {
     await tester.runAsync(() async => id = await TestIdentity.create());
     storage.value = jsonEncode([record()]);

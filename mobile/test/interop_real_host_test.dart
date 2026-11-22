@@ -36,8 +36,21 @@ String? unavailable() {
   if (!File('../node_modules/ws/package.json').existsSync()) {
     return 'the desktop dependencies are not installed (npm ci)';
   }
+  // node must run, and 127.0.0.2 must work as a source address: the host
+  // tells the phone from itself by it. Windows and Linux have the whole
+  // 127.0.0.0/8 on loopback; stock macOS only has 127.0.0.1.
+  const probe =
+      "const net=require('net');"
+      "const s=net.createServer(c=>c.destroy()).listen(0,'127.0.0.1',()=>{"
+      "const c=net.connect({port:s.address().port,host:'127.0.0.1',"
+      "localAddress:'127.0.0.2'});"
+      "c.on('connect',()=>{c.destroy();s.close();process.exit(0)});"
+      "c.on('error',()=>{s.close();process.exit(3)});});";
   try {
-    final r = Process.runSync('node', ['--version']);
+    final r = Process.runSync('node', ['-e', probe]);
+    if (r.exitCode == 3) {
+      return '127.0.0.2 cannot be used as a source address on this machine';
+    }
     if (r.exitCode != 0) return 'node does not run';
   } on ProcessException {
     return 'node is not installed';
@@ -161,6 +174,9 @@ String? _text(Object? address) => switch (address) {
   _ => address.toString(),
 };
 
+/// dart:io as it really is: the base class forwards to the real sockets.
+final class RealIo extends IOOverrides {}
+
 /// Runs [body] with every socket the app opens sent to 127.0.0.1 from
 /// 127.0.0.2, recording the addresses the app asked for in [dials].
 Future<T> onLoopback<T>(List<Dial> dials, Future<T> Function() body) =>
@@ -172,13 +188,17 @@ Future<T> onLoopback<T>(List<Dial> dials, Future<T> Function() body) =>
           source: _text(sourceAddress),
           port: port,
         ));
-        // The real connect, outside this override.
-        return Zone.root.run(
+        // The real connect. It stays in this zone tree (an error raised in
+        // the root zone would never reach the app's code), with the override
+        // switched off for this one call (a nested runZoned would inherit
+        // it and call itself).
+        return IOOverrides.runWithIOOverrides(
           () => Socket.startConnect(
             InternetAddress.loopbackIPv4,
             port,
             sourceAddress: InternetAddress('127.0.0.2'),
           ),
+          RealIo(),
         );
       },
     );

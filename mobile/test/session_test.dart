@@ -843,6 +843,35 @@ void main() {
       expect(host.last.sent.last, {'t': 'bye', 'reason': 'non-tailnet-path'});
     });
 
+    test('a path re-check that finds nothing new tells nobody', () async {
+      final h = sessionWith(
+        host,
+        id,
+        pathRecheck: const Duration(milliseconds: 15),
+      );
+      await accept(host);
+      final peer = h.peer!;
+      peer.statsReport = statsFor(phoneIp, hostIp);
+      peer.events.onState(PeerState.connected);
+      peer.size.value = const Size(1920, 1080);
+      await settle();
+      var notified = 0;
+      h.session.addListener(() => notified++);
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(
+        notified,
+        0,
+        reason: 'several re-checks ran, none changed a thing',
+      );
+      // A change of the path (still inside the tailnet) is told once.
+      peer.statsReport = statsFor(phoneIp, '100.64.9.9');
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(notified, 1);
+      expect(h.session.path!.remote, '100.64.9.9');
+      h.session.close();
+      await h.done;
+    });
+
     test('a non-ASCII password is normalised before hashing; ASCII is not '
         'touched', () async {
       const salt = 'AAECAwQFBgcICQoLDA0ODw==';

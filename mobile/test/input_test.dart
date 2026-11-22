@@ -183,6 +183,25 @@ void main() {
       expect(r.view.clamped(const Size(1000, 500)).offset, Offset.zero);
     });
 
+    test('a keyboard that does not reach the picture leaves two fingers '
+        'scrolling', () {
+      final r = Rig()..touch.bottomInset = 100;
+      // A wide picture in the middle (y 125..375); the keyboard starts at
+      // y 400, so there is nothing to lift.
+      r.touch.fit = fitRect(const Size(1000, 500), const Size(4000, 1000));
+      r.touch.down(1, const Offset(400, 300));
+      r.touch.down(2, const Offset(600, 300));
+      for (var y = 280.0; y >= 200; y -= 20) {
+        r.touch.move(1, Offset(400, y));
+        r.touch.move(2, Offset(600, y));
+      }
+      r.touch.up(1, const Offset(400, 200));
+      r.touch.up(2, const Offset(600, 200));
+      expect(r.types.first, 'mm');
+      expect(r.types.skip(1).toSet(), {'wh'});
+      expect(r.view.offset, Offset.zero);
+    });
+
     test('a double tap clicks twice on the SAME remote point', () {
       final r = Rig();
       r.touch.down(1, const Offset(250, 125));
@@ -520,10 +539,58 @@ void main() {
       ]);
     });
 
-    test('only the three newest fillers are remembered', () {
+    test('many edits made before the first refill lands are all compared with '
+        'the old text, however many there are', () {
+      final b = KeyboardBuffer();
+      for (final t in ['a      ', 'a     ', 'a    ', 'a   ']) {
+        edit(b, t);
+      }
+      expect(edit(b, 'a  ').resetTo, 'b       ');
+      // The main thread stalled: more repeats of the held Backspace were
+      // already on their way, each based on the old text. Each is exactly one
+      // Backspace (each also asks for a refill, with a new marker).
+      var e = edit(b, 'a ');
+      expect(e.messages, bs);
+      expect(e.resetTo, 'c       ');
+      e = edit(b, 'a');
+      expect(e.messages, bs);
+      expect(e.resetTo, 'd       ');
+      // The marker itself is deleted: counted against the shortest text.
+      e = edit(b, '');
+      expect(e.messages, bs);
+      expect(e.resetTo, 'e       ');
+      // Android applies the refills in order; an edit may land on any of
+      // them before the next one arrives. Every one is a single Backspace.
+      for (final marker in ['b', 'c', 'd', 'e']) {
+        expect(edit(b, '$marker      ').messages, bs, reason: marker);
+      }
+      // An older filler is out of play once a newer one was seen.
+      e = edit(b, 'c     ');
+      expect(e.messages, isEmpty);
+      expect(e.resetTo, 'f       ');
+    });
+
+    test('a text that does not start with a marker in play sends nothing and '
+        'starts over', () {
+      final b = KeyboardBuffer();
+      // Typed at the very start of the field.
+      var e = edit(b, 'ก${b.sentinel}');
+      expect(e.messages, isEmpty);
+      expect(e.resetTo, 'b       ');
+      // A marker that was never issued.
+      e = edit(b, 'q       hello');
+      expect(e.messages, isEmpty);
+      expect(e.resetTo, 'c       ');
+      // And typing goes on normally from the new filler.
+      expect(edit(b, 'c       ok').messages, [
+        {'t': 'txt', 'text': 'ok'},
+      ]);
+    });
+
+    test('the markers go round the alphabet', () {
       final b = KeyboardBuffer();
       final seen = <String>{b.sentinel};
-      for (var i = 0; i < 20; i++) {
+      for (var i = 0; i < 60; i++) {
         final s = b.sentinel;
         final e = edit(b, s.substring(0, 3));
         expect(e.messages, hasLength(10), reason: 'round $i');
@@ -531,6 +598,7 @@ void main() {
         seen.add(e.resetTo!);
       }
       expect(seen, hasLength(KeyboardBuffer.markers));
+      expect(KeyboardBuffer.markers, 26);
     });
   });
 

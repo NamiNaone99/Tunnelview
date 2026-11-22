@@ -19,6 +19,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
 
@@ -183,16 +184,22 @@ class IoSignalTransport implements SignalTransport {
         client.close(force: true);
         throw const DialFailure('not-tunnelview');
       }
-      final socket = await response.detachSocket();
-      // No compression was negotiated. A frame above the limit fails at its
-      // length header instead of being buffered.
+      // Two limits. maxPayloadLength makes one frame above the limit fail at
+      // its length header. dart:io has no limit for a MESSAGE, which may be
+      // split over any number of frames and is buffered until its last one,
+      // so the bytes are also counted below the WebSocket ([_MeteredSocket]).
+      // No compression was negotiated.
+      final metered = _MeteredSocket(
+        await response.detachSocket(),
+        maxFrameLength + _messageSlack,
+      );
       final ws = WebSocket.fromUpgradedSocket(
-        socket,
+        metered,
         serverSide: false,
         compression: CompressionOptions.compressionOff,
         maxPayloadLength: maxFrameLength,
       )..pingInterval = pingInterval;
-      return _IoConnection(ws, own);
+      return _IoConnection(ws, own, metered.messageDelivered);
     } on DialFailure {
       rethrow;
     } on TimeoutException {
@@ -211,10 +218,118 @@ class IoSignalTransport implements SignalTransport {
   }
 }
 
+// Room for frame headers, control frames and one read chunk on top of the
+// largest message.
+const int _messageSlack = 128 * 1024;
+
+/// The upgraded socket with a byte counter under the WebSocket parser: when
+/// more than the limit arrives without a whole message having been delivered,
+/// the socket is destroyed. Everything else is passed straight through.
+class _MeteredSocket extends Stream<Uint8List> implements Socket {
+  _MeteredSocket(this._inner, this._limit);
+
+  final Socket _inner;
+  final int _limit;
+  int _sinceMessage = 0;
+  bool _tripped = false;
+
+  /// A whole message reached the application: count from zero again. The
+  /// WebSocket delivers synchronously, so this runs while the chunk that
+  /// completed the message is still being handled.
+  void messageDelivered() => _sinceMessage = 0;
+
+  @override
+  StreamSubscription<Uint8List> listen(
+    void Function(Uint8List event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) => _inner.listen(
+    (data) {
+      if (_tripped) return;
+      _sinceMessage += data.length;
+      if (_sinceMessage > _limit) {
+        _tripped = true;
+        _inner.destroy();
+        return;
+      }
+      onData?.call(data);
+    },
+    onError: onError,
+    onDone: onDone,
+    cancelOnError: cancelOnError,
+  );
+
+  @override
+  Encoding get encoding => _inner.encoding;
+
+  @override
+  set encoding(Encoding value) => _inner.encoding = value;
+
+  @override
+  void add(List<int> data) => _inner.add(data);
+
+  @override
+  void write(Object? object) => _inner.write(object);
+
+  @override
+  void writeAll(Iterable<dynamic> objects, [String separator = '']) =>
+      _inner.writeAll(objects, separator);
+
+  @override
+  void writeln([Object? object = '']) => _inner.writeln(object);
+
+  @override
+  void writeCharCode(int charCode) => _inner.writeCharCode(charCode);
+
+  @override
+  void addError(Object error, [StackTrace? stackTrace]) =>
+      _inner.addError(error, stackTrace);
+
+  @override
+  Future<dynamic> addStream(Stream<List<int>> stream) =>
+      _inner.addStream(stream);
+
+  @override
+  Future<dynamic> flush() => _inner.flush();
+
+  @override
+  Future<dynamic> close() => _inner.close();
+
+  @override
+  Future<dynamic> get done => _inner.done;
+
+  @override
+  void destroy() => _inner.destroy();
+
+  @override
+  bool setOption(SocketOption option, bool enabled) =>
+      _inner.setOption(option, enabled);
+
+  @override
+  Uint8List getRawOption(RawSocketOption option) => _inner.getRawOption(option);
+
+  @override
+  void setRawOption(RawSocketOption option) => _inner.setRawOption(option);
+
+  @override
+  int get port => _inner.port;
+
+  @override
+  int get remotePort => _inner.remotePort;
+
+  @override
+  InternetAddress get address => _inner.address;
+
+  @override
+  InternetAddress get remoteAddress => _inner.remoteAddress;
+}
+
 class _IoConnection implements SignalConnection {
-  _IoConnection(this._ws, this.localAddress) {
+  _IoConnection(this._ws, this.localAddress, void Function() onMessage) {
     _sub = _ws.listen(
       (data) {
+        onMessage();
         if (data is String && data.length <= maxFrameLength) {
           _frames.add(data);
         } else {
