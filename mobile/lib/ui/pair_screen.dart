@@ -10,23 +10,33 @@ import '../session/hosts.dart';
 import '../session/pair_flow.dart';
 import 'session_strings.dart';
 
-/// Builds the camera view that reports scanned text. Tests replace it.
+/// Builds the camera view that reports scanned text, or that the camera
+/// cannot be used. Tests replace it.
 typedef ScannerBuilder = Widget Function(
   BuildContext context,
   void Function(String text) onText,
+  void Function() onCameraError,
 );
 
-Widget _zxingScanner(BuildContext context, void Function(String) onText) =>
-    ReaderWidget(
-      codeFormat: Format.qrCode,
-      showGallery: false,
-      showToggleCamera: false,
-      tryHarder: true,
-      onScan: (code) {
-        final text = code.text;
-        if (code.isValid && text != null) onText(text);
-      },
-    );
+Widget _zxingScanner(
+  BuildContext context,
+  void Function(String) onText,
+  void Function() onCameraError,
+) => ReaderWidget(
+  codeFormat: Format.qrCode,
+  showGallery: false,
+  showToggleCamera: false,
+  tryHarder: true,
+  // Called with an error when the permission is refused or the camera cannot
+  // be opened; the widget itself would only stay black.
+  onControllerCreated: (_, error) {
+    if (error != null) onCameraError();
+  },
+  onScan: (code) {
+    final text = code.text;
+    if (code.isValid && text != null) onText(text);
+  },
+);
 
 /// Pair a computer: scan the QR code its "Pair a phone" dialog shows, or
 /// paste the link. Pops with the new [PairedHost] on success.
@@ -89,7 +99,11 @@ class _PairScreenState extends State<PairScreen> {
         now: services.now,
       );
       await services.hosts.save(host);
-      if (mounted) Navigator.of(context).pop(host);
+      // Only while this screen is still the one in front: if the user went
+      // back meanwhile, a pop here would remove the home screen instead.
+      if (mounted && (ModalRoute.of(context)?.isCurrent ?? false)) {
+        Navigator.of(context).pop(host);
+      }
     } on PairFailure catch (e) {
       if (mounted) {
         setState(() {
@@ -138,6 +152,13 @@ class _PairScreenState extends State<PairScreen> {
                     child: widget.scannerBuilder(
                       context,
                       (text) => unawaited(_pair(text)),
+                      () {
+                        if (!mounted) return;
+                        setState(() {
+                          _scanning = false;
+                          _error = SessionStrings.cameraUnavailable;
+                        });
+                      },
                     ),
                   ),
                 )

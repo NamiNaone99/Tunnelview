@@ -252,6 +252,7 @@ const int maxControlMessageLength = 2 * 1024 * 1024;
 class _EnginePeer implements ViewerPeer {
   _EnginePeer(this._pc, this._renderer, this._events) {
     _renderer.onResize = _onResize;
+    _renderer.onFirstFrameRendered = _onResize;
     _pc.onIceCandidate = _onIceCandidate;
     _pc.onIceConnectionState = _onIceState;
     _pc.onDataChannel = _onDataChannel;
@@ -361,9 +362,14 @@ class _EnginePeer implements ViewerPeer {
     return sdp;
   }
 
+  // Never a null mid: on Android a null string reaches libwebrtc's native
+  // code and aborts the app. With an empty mid libwebrtc goes by the m-line
+  // index (the plugin reads a missing index as 0; everything is bundled on
+  // one transport anyway).
   @override
-  Future<void> addCandidate(SignalCandidate c) =>
-      _pc.addCandidate(RTCIceCandidate(c.candidate, c.sdpMid, c.sdpMLineIndex));
+  Future<void> addCandidate(SignalCandidate c) => _pc.addCandidate(
+    RTCIceCandidate(c.candidate, c.sdpMid ?? '', c.sdpMLineIndex),
+  );
 
   @override
   bool send(String label, String text) {
@@ -404,6 +410,7 @@ class _EnginePeer implements ViewerPeer {
     if (_closed) return;
     _closed = true;
     _renderer.onResize = null;
+    _renderer.onFirstFrameRendered = null;
     try {
       _renderer.srcObject = null;
     } catch (_) {

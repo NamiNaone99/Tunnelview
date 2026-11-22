@@ -152,11 +152,93 @@ void main() {
       r.touch.move(2, const Offset(600, 260));
       r.touch.up(1, const Offset(400, 260));
       r.touch.up(2, const Offset(600, 260));
-      expect(r.types.toSet(), {'wh'});
-      final dy = r.sent.fold<double>(0, (a, m) => a + (m['dy']! as double));
+      // First the remote pointer goes under the fingers (the wheel acts at
+      // the pointer), then only wheel messages.
+      expect(r.sent.first, {'t': 'mm', 'x': 0.5, 'y': 0.6});
+      final wheel = r.sent.skip(1).toList();
+      expect(wheel, isNotEmpty);
+      expect(wheel.every((m) => m['t'] == 'wh'), isTrue);
+      final dy = wheel.fold<double>(0, (a, m) => a + (m['dy']! as double));
       expect(dy, greaterThan(0));
-      expect(r.sent.every((m) => m['dx'] == 0), isTrue);
+      expect(wheel.every((m) => m['dx'] == 0), isTrue);
       expect(r.view.scale, 1);
+    });
+
+    test('while the keyboard covers the bottom, two fingers move the picture '
+        'up to the keyboard and send nothing', () {
+      final r = Rig()..touch.bottomInset = 300;
+      r.touch.down(1, const Offset(400, 150));
+      r.touch.down(2, const Offset(600, 150));
+      for (var y = 130.0; y >= -400; y -= 20) {
+        r.touch.move(1, Offset(400, y));
+        r.touch.move(2, Offset(600, y));
+      }
+      r.touch.up(1, const Offset(400, -400));
+      r.touch.up(2, const Offset(600, -400));
+      expect(r.sent, isEmpty);
+      expect(r.view.scale, 1);
+      // Lifted until the picture's bottom edge sits on the keyboard, no more.
+      expect(r.view.offset, const Offset(0, -300));
+      // Without the keyboard the same view snaps back.
+      expect(r.view.clamped(const Size(1000, 500)).offset, Offset.zero);
+    });
+
+    test('a double tap clicks twice on the SAME remote point', () {
+      final r = Rig();
+      r.touch.down(1, const Offset(250, 125));
+      r.touch.up(1, const Offset(250, 125));
+      r.clock = r.clock.add(const Duration(milliseconds: 150));
+      r.touch.down(2, const Offset(262, 131)); // a finger never hits twice
+      r.touch.up(2, const Offset(262, 131));
+      r.clock = r.clock.add(const Duration(milliseconds: 150));
+      r.touch.down(3, const Offset(240, 120));
+      r.touch.up(3, const Offset(240, 120));
+      expect(r.sent.map((m) => m['n']), [1, 1, 2, 2, 3, 3]);
+      for (final m in r.sent) {
+        expect(m['x'], 0.25);
+        expect(m['y'], 0.25);
+      }
+      // A fourth quick tap starts over, at its own point.
+      r.clock = r.clock.add(const Duration(milliseconds: 150));
+      r.touch.down(4, const Offset(260, 130));
+      r.touch.up(4, const Offset(260, 130));
+      expect(r.sent.last['n'], 1);
+      expect(r.sent.last['x'], 0.26);
+    });
+
+    testWidgets('touches on the bars around the picture do nothing', (
+      tester,
+    ) async {
+      final r = Rig();
+      // A square picture in the middle: bars left and right of x 250..750.
+      r.touch.fit = fitRect(const Size(1000, 500), const Size(500, 500));
+      r.touch.down(1, const Offset(100, 250));
+      r.touch.up(1, const Offset(100, 250));
+      r.touch.down(2, const Offset(900, 250));
+      await tester.pump(const Duration(milliseconds: 700)); // no hold either
+      r.touch.up(2, const Offset(900, 250));
+      r.touch.down(3, const Offset(100, 250));
+      r.touch.move(3, const Offset(500, 250)); // no drag from a bar
+      r.touch.up(3, const Offset(500, 250));
+      expect(r.sent, isEmpty);
+      expect(r.holds, 0);
+      // A drag that starts on the picture and leaves it is clamped.
+      r.touch.down(4, const Offset(500, 250));
+      r.touch.move(4, const Offset(900, 250));
+      r.touch.up(4, const Offset(900, 250));
+      expect(r.types, ['md', 'mm', 'mu']);
+      expect(r.sent.last['x'], 1);
+      // Two fingers that start on a bar can still pinch.
+      r.sent.clear();
+      r.touch.down(5, const Offset(100, 250));
+      r.touch.down(6, const Offset(300, 250));
+      r.touch.move(5, const Offset(50, 250));
+      r.touch.move(6, const Offset(500, 250));
+      r.touch.up(5, const Offset(50, 250));
+      r.touch.up(6, const Offset(500, 250));
+      expect(r.sent, isEmpty);
+      expect(r.view.scale, greaterThan(1));
+      r.touch.dispose();
     });
 
     test('a pinch zooms the picture and sends nothing', () {
@@ -183,12 +265,14 @@ void main() {
       );
     });
 
-    test('a second finger ends a drag by releasing the button', () {
+    test('a second finger ends a drag where the drag is, not under itself', () {
       final r = Rig();
       r.touch.down(1, const Offset(100, 100));
       r.touch.move(1, const Offset(300, 100));
       r.touch.down(2, const Offset(600, 300));
       expect(r.types, ['md', 'mm', 'mu']);
+      expect(r.sent.last['x'], 0.3);
+      expect(r.sent.last['y'], 0.2);
       r.touch.dispose();
     });
 
@@ -305,6 +389,189 @@ void main() {
       expect(codeForChar('7'), 'Digit7');
       expect(codeForChar(' '), 'Space');
       expect(codeForChar('é'), isNull);
+    });
+  });
+
+  group('keyboard buffer', () {
+    const bs = [
+      {'t': 'kd', 'code': 'Backspace', 'key': 'Backspace', 'rep': false},
+      {'t': 'ku', 'code': 'Backspace', 'key': 'Backspace'},
+    ];
+    KeyboardEdit edit(
+      KeyboardBuffer b,
+      String text, {
+      bool composing = false,
+    }) => b.edit(text, composing: composing, modifiers: const []);
+
+    test('typing appends, nothing is reset', () {
+      final b = KeyboardBuffer();
+      final s = b.sentinel;
+      expect(s, 'a       ');
+      var e = edit(b, '${s}h');
+      expect(e.messages, [
+        {'t': 'txt', 'text': 'h'},
+      ]);
+      expect(e.resetTo, isNull);
+      e = edit(b, '${s}hi สวัสดี');
+      expect(e.messages, [
+        {'t': 'txt', 'text': 'i สวัสดี'},
+      ]);
+      // A caret move changes nothing.
+      expect(edit(b, '${s}hi สวัสดี').messages, isEmpty);
+      expect(b.sentinel, s);
+    });
+
+    test('Backspace eats the filler, which is refilled when it gets short', () {
+      final b = KeyboardBuffer();
+      var text = b.sentinel;
+      var presses = 0;
+      String? reset;
+      while (reset == null) {
+        text = text.substring(0, text.length - 1);
+        final e = edit(b, text);
+        expect(e.messages, bs);
+        presses++;
+        reset = e.resetTo;
+      }
+      expect(presses, 5); // 8 characters down to 3
+      expect(reset, 'b       ');
+      expect(b.sentinel, 'b       ');
+      // And on from the fresh filler.
+      expect(edit(b, 'b      ').messages, bs);
+    });
+
+    test('an edit made before the keyboard saw the refill is compared with '
+        'the OLD text: no extra Backspaces, nothing typed twice', () {
+      final b = KeyboardBuffer();
+      // Held Backspace: a..3 characters left, the field is refilled to b.
+      for (final t in ['a      ', 'a     ', 'a    ', 'a   ']) {
+        edit(b, t);
+      }
+      final refill = edit(b, 'a  ');
+      expect(refill.resetTo, 'b       ');
+      // The next repeat was already on its way, based on the old text.
+      final stale = edit(b, 'a ');
+      expect(stale.messages, bs, reason: 'one Backspace, not six');
+      // That text is short too: another refill follows.
+      expect(stale.resetTo, 'c       ');
+      // Android applies the refills in order; an edit in between is based on
+      // the first one.
+      expect(edit(b, 'b      ').messages, bs);
+      // And then on the second.
+      expect(edit(b, 'c       ok').messages, [
+        {'t': 'txt', 'text': 'ok'},
+      ]);
+    });
+
+    test('a long buffer is refilled; text typed before the keyboard saw it is '
+        'not sent again', () {
+      final b = KeyboardBuffer();
+      final long = '${b.sentinel}${'x' * 190}';
+      expect(edit(b, long).resetTo, isNull);
+      final over = '$long\nmore';
+      final e = edit(b, over);
+      expect(e.messages.map((m) => m['t']), ['kd', 'ku', 'txt']);
+      expect(e.resetTo, 'b       ');
+      // Based on the old text: only the new character goes out.
+      expect(edit(b, '$over!').messages, [
+        {'t': 'txt', 'text': '!'},
+      ]);
+      // Based on the refill.
+      expect(edit(b, 'b       ?').messages, [
+        {'t': 'txt', 'text': '?'},
+      ]);
+    });
+
+    test('no refill in the middle of a composition', () {
+      final b = KeyboardBuffer();
+      final long = '${b.sentinel}${'x' * 250}';
+      expect(edit(b, long, composing: true).resetTo, isNull);
+      expect(edit(b, '${long}y').resetTo, 'b       ');
+    });
+
+    test('everything deleted at once: few Backspaces rather than many', () {
+      final b = KeyboardBuffer();
+      var e = edit(b, '');
+      expect(e.messages, hasLength(16)); // the 8 characters of the filler
+      expect(e.resetTo, 'b       ');
+      // With a shorter old text still remembered, that one counts.
+      final c = KeyboardBuffer();
+      for (final t in ['a      ', 'a     ', 'a    ', 'a   ', 'a  ']) {
+        edit(c, t);
+      }
+      e = edit(c, '');
+      expect(e.messages, hasLength(6)); // 3 characters, not 8
+      expect(e.resetTo, 'c       ');
+    });
+
+    test('a latched modifier makes a combination and is reported as used', () {
+      final b = KeyboardBuffer();
+      final e = b.edit(
+        '${b.sentinel}c',
+        composing: false,
+        modifiers: const ['ControlLeft'],
+      );
+      expect(e.used, isTrue);
+      expect(e.messages, [
+        {
+          't': 'combo',
+          'codes': ['ControlLeft', 'KeyC'],
+        },
+      ]);
+    });
+
+    test('only the three newest fillers are remembered', () {
+      final b = KeyboardBuffer();
+      final seen = <String>{b.sentinel};
+      for (var i = 0; i < 20; i++) {
+        final s = b.sentinel;
+        final e = edit(b, s.substring(0, 3));
+        expect(e.messages, hasLength(10), reason: 'round $i');
+        expect(e.resetTo, isNot(s));
+        seen.add(e.resetTo!);
+      }
+      expect(seen, hasLength(KeyboardBuffer.markers));
+    });
+  });
+
+  group('geometry with the keyboard open', () {
+    const viewport = Size(1000, 500);
+
+    test('isInsidePicture', () {
+      final fit = fitRect(viewport, const Size(500, 500)); // x 250..750
+      const id = ViewTransform.identity;
+      expect(isInsidePicture(const Offset(500, 250), fit, id), isTrue);
+      expect(isInsidePicture(const Offset(100, 250), fit, id), isFalse);
+      expect(isInsidePicture(const Offset(800, 250), fit, id), isFalse);
+      expect(isInsidePicture(const Offset(1, 1), Rect.zero, id), isFalse);
+      // Zoomed 2x from the top-left corner the picture covers x 500..1500.
+      const zoomed = ViewTransform(scale: 2);
+      expect(isInsidePicture(const Offset(400, 250), fit, zoomed), isFalse);
+      expect(isInsidePicture(const Offset(600, 250), fit, zoomed), isTrue);
+    });
+
+    test('the picture can be lifted until its bottom meets the keyboard', () {
+      const far = ViewTransform(offset: Offset(0, -9999));
+      // A picture that fills the height: lifted by the whole keyboard.
+      final full = fitRect(viewport, const Size(2000, 1000));
+      expect(
+        far.clamped(viewport, bottomInset: 300, fit: full).offset,
+        const Offset(0, -300),
+      );
+      // A wide picture in the middle (y 125..375) with a 100 px keyboard: its
+      // bottom is already above the keyboard, so it stays.
+      final wide = fitRect(viewport, const Size(4000, 1000));
+      expect(
+        far.clamped(viewport, bottomInset: 100, fit: wide).offset,
+        Offset.zero,
+      );
+      // With a 300 px keyboard it is lifted by the covered 175 px only.
+      expect(
+        far.clamped(viewport, bottomInset: 300, fit: wide).offset,
+        const Offset(0, -175),
+      );
+      // No keyboard: as before.
+      expect(far.clamped(viewport).offset, Offset.zero);
     });
   });
 }

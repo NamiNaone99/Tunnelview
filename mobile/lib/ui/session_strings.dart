@@ -33,7 +33,11 @@ abstract final class SessionStrings {
   static const startingPicture = 'Starting the picture…';
   static const gestureHelp =
       'Tap to click · touch and hold to right-click · drag to drag · two '
-      'fingers to scroll · pinch to zoom';
+      'fingers to scroll · pinch to zoom. While the keyboard is open, two '
+      'fingers move the picture.';
+  static const cameraUnavailable =
+      "Tunnelview can't use the camera. Allow the camera for Tunnelview in "
+      "the phone's settings, or paste the pairing link instead.";
 
   /// "Waiting for someone at office-pc to allow this."
   static String waiting(String host) =>
@@ -50,7 +54,8 @@ abstract final class SessionStrings {
             '"Pair a phone" on the computer.';
       case 'expired':
         return 'This pairing code has expired. Show a new one on the '
-            'computer.';
+            'computer. If that keeps happening, check that the clocks of the '
+            'phone and the computer are right.';
       case 'refused':
         return "The computer didn't accept the code. It may have been used "
             'already or replaced. Show a new one on the computer.';
@@ -113,6 +118,10 @@ abstract final class SessionStrings {
     int? retryAfterSec,
     String? hostReason,
   }) {
+    // The session gate refused: 'gate:' + a SessionRefusal code.
+    if (reason.startsWith('gate:')) {
+      return CardText("Can't connect", cannotConnect(reason.substring(5)));
+    }
     switch (reason) {
       case 'local':
         return const CardText('Disconnected', 'You ended the session.');

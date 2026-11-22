@@ -38,10 +38,20 @@ class ViewTransform {
 
   /// The same transform kept inside its limits: zoom 1..[maxZoom], and the
   /// picture never leaves [viewport] further than needed.
-  ViewTransform clamped(Size viewport) {
+  ///
+  /// While the keyboard covers the bottom [bottomInset] of the viewport, the
+  /// picture ([fit], its place at zoom 1) may also be moved up until its
+  /// bottom edge reaches the top of the keyboard, so what is being typed
+  /// into can be seen.
+  ViewTransform clamped(Size viewport, {double bottomInset = 0, Rect? fit}) {
     final s = scale.clamp(1.0, maxZoom);
     final minX = viewport.width * (1 - s);
-    final minY = viewport.height * (1 - s);
+    var minY = viewport.height * (1 - s);
+    if (bottomInset > 0) {
+      final bottom = fit == null || fit.isEmpty ? viewport.height : fit.bottom;
+      final lifted = viewport.height - bottomInset - bottom * s;
+      if (lifted < minY) minY = lifted;
+    }
     return ViewTransform(
       scale: s,
       offset: Offset(offset.dx.clamp(minX, 0.0), offset.dy.clamp(minY, 0.0)),
@@ -54,15 +64,24 @@ class ViewTransform {
     Offset focal,
     double factor,
     Offset pan,
-    Size viewport,
-  ) {
+    Size viewport, {
+    double bottomInset = 0,
+    Rect? fit,
+  }) {
     final s = (scale * factor).clamp(1.0, maxZoom);
     final applied = s / scale;
     return ViewTransform(
       scale: s,
       offset: focal - (focal - offset) * applied + pan,
-    ).clamped(viewport);
+    ).clamped(viewport, bottomInset: bottomInset, fit: fit);
   }
+}
+
+/// Whether the screen point [local] is on the remote picture (not on the
+/// bars around it).
+bool isInsidePicture(Offset local, Rect fit, ViewTransform view) {
+  if (fit.isEmpty) return false;
+  return fit.contains((local - view.offset) / view.scale);
 }
 
 /// The point of the remote display under the screen point [local], as x and

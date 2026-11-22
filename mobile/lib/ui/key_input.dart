@@ -91,8 +91,9 @@ List<KeyCombo> combosFor(String hostOs) => hostOs == 'macos'
         KeyCombo('Cmd + Q', ['MetaLeft', 'KeyQ']),
         KeyCombo('Cmd + Option + Esc', ['MetaLeft', 'AltLeft', 'Escape']),
       ]
+    // No Ctrl + Alt + Del: Windows ignores an injected one, so it would be a
+    // menu entry that does nothing (the desktop viewer leaves it out too).
     : const [
-        KeyCombo('Ctrl + Alt + Del', ['ControlLeft', 'AltLeft', 'Delete']),
         KeyCombo('Alt + Tab', ['AltLeft', 'Tab']),
         KeyCombo('Windows key', ['MetaLeft']),
         KeyCombo('Win + D (desktop)', ['MetaLeft', 'KeyD']),
@@ -184,4 +185,85 @@ List<String> chunkText(String text, [int max = maxTextUnits]) {
     }
   }
   return (messages: out, used: false);
+}
+
+/// What [KeyboardBuffer.edit] found.
+class KeyboardEdit {
+  const KeyboardEdit(this.messages, {this.used = false, this.resetTo});
+
+  /// The `input` messages to send, in order.
+  final List<Map<String, Object?>> messages;
+
+  /// The latched modifiers were used: unlatch them.
+  final bool used;
+
+  /// When not null: set the text field to this value (caret at its end).
+  final String? resetTo;
+}
+
+/// Follows the hidden text field the phone's keyboard types into and turns
+/// each change into `input` messages.
+///
+/// The field always starts with a short filler, so Backspace has something to
+/// delete; when the text gets short or long the field is set back to a fresh
+/// filler. That reset travels to Android asynchronously, so an edit the
+/// keyboard made just before it arrives is still based on the OLD text.
+/// Comparing such an edit with the new filler would re-type or delete text
+/// on the computer. Therefore every filler starts with a marker letter that
+/// changes with each reset, and the buffer remembers the last text of the
+/// few most recent fillers: an edit is always compared with the last text
+/// that carried the same marker.
+class KeyboardBuffer {
+  KeyboardBuffer() {
+    _last[_marker(_epoch)] = sentinel;
+  }
+
+  /// How many marker letters there are; only the 3 newest are remembered.
+  static const int markers = 8;
+  static const int _kept = 3;
+  static const String _filler = '       ';
+
+  /// Texts shorter than this, or longer than [high], cause a reset.
+  static const int low = 4;
+  static const int high = 200;
+
+  int _epoch = 0;
+  final Map<String, String> _last = {};
+
+  static String _marker(int epoch) =>
+      String.fromCharCode(0x61 + epoch % markers);
+
+  /// What the field holds after a reset (and at the start).
+  String get sentinel => '${_marker(_epoch)}$_filler';
+
+  /// The field's text is now [text]. [composing]: the keyboard is in the
+  /// middle of composing a word (no reset then). [modifiers]: the latched
+  /// modifier key codes.
+  KeyboardEdit edit(
+    String text, {
+    required bool composing,
+    required List<String> modifiers,
+  }) {
+    final marker = text.isEmpty ? null : text[0];
+    final known = marker != null && _last.containsKey(marker);
+    final String base;
+    if (known) {
+      base = _last[marker]!;
+    } else {
+      // The marker is gone (everything was deleted in one go) or is not one
+      // of ours. Compare with the shortest remembered text, so that too few
+      // rather than too many Backspaces are sent.
+      base = _last.values.reduce((a, b) => a.length <= b.length ? a : b);
+    }
+    if (known && text == base) return const KeyboardEdit([]);
+    final r = messagesForEdit(base, text, modifiers);
+    if (known) _last[marker] = text;
+    final reset =
+        !known || (!composing && (text.length < low || text.length > high));
+    if (!reset) return KeyboardEdit(r.messages, used: r.used);
+    _epoch++;
+    _last[_marker(_epoch)] = sentinel;
+    if (_epoch >= _kept) _last.remove(_marker(_epoch - _kept));
+    return KeyboardEdit(r.messages, used: r.used, resetTo: sentinel);
+  }
 }

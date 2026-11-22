@@ -1,6 +1,7 @@
 // Pairing and the session state machine against a scripted host whose hello
 // is really signed (test/support/fake_host.dart). No network, no WebRTC.
 import 'dart:convert';
+import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tunnelview_mobile/proto/auth.dart';
@@ -41,10 +42,16 @@ PairedHost recordFor(TestIdentity id) => PairedHost(
   pairedAt: 1,
 );
 
-Future<PairedHost> pair(FakeHost host, PairLink link) => pairWithLink(
+const String phoneIp6 = 'fd7a:115c:a1e0::2';
+
+Future<PairedHost> pair(
+  FakeHost host,
+  PairLink link, {
+  List<String> selfAddrs = const [phoneIp],
+}) => pairWithLink(
   link,
   transport: host,
-  selfAddrs: const [phoneIp],
+  selfAddrs: selfAddrs,
   deviceName: 'Pixel',
   appVersion: '0.3.0',
   now: () => now,
@@ -59,7 +66,15 @@ class Harness {
   late Future<void> done;
 }
 
-Harness sessionWith(FakeHost host, TestIdentity id) {
+Harness sessionWith(
+  FakeHost host,
+  TestIdentity id, {
+  String? Function()? gate,
+  Future<String> Function(String)? normalizePassword,
+  Duration mediaTimeout = const Duration(seconds: 30),
+  Duration disconnectGrace = const Duration(seconds: 35),
+  Duration pathRecheck = const Duration(seconds: 5),
+}) {
   late Harness h;
   final session = RemoteSession(
     host: recordFor(id),
@@ -68,10 +83,31 @@ Harness sessionWith(FakeHost host, TestIdentity id) {
     selfAddrs: const [phoneIp],
     deviceName: 'Pixel',
     appVersion: '0.3.0',
+    gate: gate,
+    normalizePassword: normalizePassword,
+    mediaTimeout: mediaTimeout,
+    disconnectGrace: disconnectGrace,
+    pathRecheck: pathRecheck,
   );
   h = Harness(host, session);
   h.done = session.start();
   return h;
+}
+
+/// Sends `accepted` once the request is out.
+Future<void> accept(
+  FakeHost host, {
+  Map<String, Object?> permissions = const {'control': true},
+}) async {
+  await settle();
+  await host.last.sentOf('request');
+  host.last.push({
+    't': 'accepted',
+    'sessionId': 's1',
+    'permissions': permissions,
+    'via': 'prompt',
+  });
+  await settle();
 }
 
 /// Lets queued microtasks and stream events run.
@@ -147,8 +183,11 @@ void main() {
       expect(again!.toJson(), record.toJson());
     });
 
-    test('an expired link dials nothing', () async {
-      final link = linkFor(id, expiresAt: now.millisecondsSinceEpoch ~/ 1000);
+    test('a link far past its expiry dials nothing', () async {
+      final link = linkFor(
+        id,
+        expiresAt: now.millisecondsSinceEpoch ~/ 1000 - 301,
+      );
       await expectLater(
         pair(host, link),
         throwsA(
@@ -156,6 +195,38 @@ void main() {
         ),
       );
       expect(host.dialed, isEmpty);
+    });
+
+    test('the computer decides about a link that is only a little past its '
+        'expiry by the phone\'s clock', () async {
+      // The phone's clock is 3 minutes ahead: the code looks expired here but
+      // is still good on the computer.
+      final link = linkFor(
+        id,
+        expiresAt: now.millisecondsSinceEpoch ~/ 1000 - 180,
+      );
+      final accepted = pair(host, link);
+      await settle();
+      await host.last.sentOf('pair');
+      host.last.push({
+        't': 'pair-result',
+        'ok': true,
+        'hostId': hostNodeId,
+        'viewerId': phoneNodeId,
+      });
+      expect((await accepted).hostId, hostNodeId);
+
+      // The same link refused by the computer: it really did run out.
+      final refused = pair(host, link);
+      await settle();
+      await host.last.sentOf('pair');
+      host.last.push({'t': 'pair-result', 'ok': false, 'reason': 'failed'});
+      await expectLater(
+        refused,
+        throwsA(
+          isA<PairFailure>().having((e) => e.reason, 'reason', 'expired'),
+        ),
+      );
     });
 
     test('a hello signed by another key: nothing is sent', () async {
@@ -233,7 +304,40 @@ void main() {
       );
     });
 
-    test('an unreachable IPv4 address falls back to IPv6', () async {
+    test('an unreachable IPv4 address falls back to IPv6, each dial bound to '
+        'the phone address of that family', () async {
+      host.dialFailure = const DialFailure('unreachable');
+      await expectLater(
+        pair(
+          host,
+          linkFor(id, addresses: const [hostIp, 'fd7a:115c:a1e0::1234']),
+          selfAddrs: const ['FD7A:115C:A1E0:0::2', phoneIp],
+        ),
+        throwsA(
+          isA<PairFailure>().having((e) => e.reason, 'reason', 'unreachable'),
+        ),
+      );
+      expect(host.dialed, [hostIp, 'fd7a:115c:a1e0::1234']);
+      expect(host.bound, [phoneIp, phoneIp6]);
+    });
+
+    test('every dial is bound to the phone\'s own Tailscale address', () async {
+      final future = pair(host, linkFor(id));
+      await settle();
+      expect(host.bound, [phoneIp]);
+      host.last.push({
+        't': 'pair-result',
+        'ok': true,
+        'hostId': hostNodeId,
+        'viewerId': phoneNodeId,
+      });
+      await future;
+    });
+
+    test('an address family the phone has no Tailscale address for is not '
+        'dialed', () async {
+      // IPv4-only phone, IPv4 unreachable: IPv6 is skipped, not dialed
+      // unbound.
       host.dialFailure = const DialFailure('unreachable');
       await expectLater(
         pair(
@@ -244,7 +348,35 @@ void main() {
           isA<PairFailure>().having((e) => e.reason, 'reason', 'unreachable'),
         ),
       );
-      expect(host.dialed, [hostIp, 'fd7a:115c:a1e0::1234']);
+      expect(host.dialed, [hostIp]);
+
+      // No Tailscale address of the host's only family: nothing is dialed.
+      final other = FakeHost(id);
+      await expectLater(
+        pair(other, linkFor(id), selfAddrs: const [phoneIp6, '192.168.1.20']),
+        throwsA(
+          isA<PairFailure>().having(
+            (e) => e.reason,
+            'reason',
+            'not-tailnet-route',
+          ),
+        ),
+      );
+      expect(other.dialed, isEmpty);
+    });
+
+    test('bindAddressFor', () {
+      expect(bindAddressFor(hostIp, const [phoneIp6, phoneIp]), phoneIp);
+      expect(
+        bindAddressFor('fd7a:115c:a1e0::9', const [phoneIp, phoneIp6]),
+        phoneIp6,
+      );
+      expect(
+        bindAddressFor(hostIp, const ['192.168.1.20', '10.0.0.1']),
+        isNull,
+      );
+      expect(bindAddressFor(hostIp, const []), isNull);
+      expect(bindAddressFor('office-pc', const [phoneIp]), isNull);
     });
 
     test('HTTP refusals', () async {
@@ -271,8 +403,13 @@ void main() {
         () => readPairLink('https://example.com', now),
         throwsA(isA<PairFailure>().having((e) => e.reason, 'reason', 'link')),
       );
+      // One minute of validity plus the five minutes of clock slack.
       expect(
-        () => readPairLink(text, now.add(const Duration(minutes: 5))),
+        readPairLink(text, now.add(const Duration(minutes: 5))).hostId,
+        hostNodeId,
+      );
+      expect(
+        () => readPairLink(text, now.add(const Duration(minutes: 7))),
         throwsA(
           isA<PairFailure>().having((e) => e.reason, 'reason', 'expired'),
         ),
@@ -578,15 +715,12 @@ void main() {
     test(
       'losing the media path stops input, and gives up after the grace',
       () async {
-        final h = sessionWithGrace(host, id);
-        await settle();
-        await host.last.sentOf('request');
-        host.last.push({
-          't': 'accepted',
-          'sessionId': 's1',
-          'permissions': {'control': true},
-        });
-        await settle();
+        final h = sessionWith(
+          host,
+          id,
+          disconnectGrace: const Duration(milliseconds: 50),
+        );
+        await accept(host);
         final peer = h.peer!;
         peer.statsReport = statsFor(phoneIp, hostIp);
         peer.events.onState(PeerState.connected);
@@ -616,6 +750,150 @@ void main() {
       h.session.close();
       await h.done;
     });
+
+    test('the gate is asked before dialing', () async {
+      final h = sessionWith(host, id, gate: () => 'self-test-failed');
+      await h.done;
+      expect(h.session.closeReason!.reason, 'gate:self-test-failed');
+      expect(host.dialed, isEmpty);
+    });
+
+    test('the gate is asked again before WebRTC starts', () async {
+      String? refusal;
+      final h = sessionWith(host, id, gate: () => refusal);
+      await settle();
+      await host.last.sentOf('request');
+      // Tailscale goes away while the request waits to be accepted.
+      refusal = 'tailscale-off';
+      host.last.push({
+        't': 'accepted',
+        'sessionId': 's1',
+        'permissions': {'control': true},
+      });
+      await h.done.timeout(const Duration(seconds: 5), onTimeout: () {});
+      await settle();
+      expect(h.session.closeReason!.reason, 'gate:tailscale-off');
+      expect(h.peer, isNull, reason: 'no peer connection was created');
+      expect(host.last.sent.last, {'t': 'bye', 'reason': 'viewer-closed'});
+    });
+
+    test(
+      'no picture in time ends the session, even with ICE connected',
+      () async {
+        final h = sessionWith(
+          host,
+          id,
+          mediaTimeout: const Duration(milliseconds: 80),
+        );
+        await accept(host);
+        final peer = h.peer!;
+        peer.statsReport = statsFor(phoneIp, hostIp);
+        peer.events.onState(PeerState.connected);
+        peer.openChannel('input');
+        await settle();
+        expect(h.session.media, MediaState.connected);
+        expect(h.session.hasPicture, isFalse);
+        await Future<void>.delayed(const Duration(milliseconds: 160));
+        await settle();
+        expect(h.session.closeReason!.reason, 'media-timeout');
+        expect(host.last.sent.last, {'t': 'bye', 'reason': 'media-timeout'});
+      },
+    );
+
+    test('the first frame stops the picture deadline', () async {
+      final h = sessionWith(
+        host,
+        id,
+        mediaTimeout: const Duration(milliseconds: 80),
+      );
+      await accept(host);
+      final peer = h.peer!;
+      peer.statsReport = statsFor(phoneIp, hostIp);
+      peer.events.onState(PeerState.connected);
+      peer.size.value = const Size(1920, 1080);
+      await settle();
+      expect(h.session.hasPicture, isTrue);
+      await Future<void>.delayed(const Duration(milliseconds: 160));
+      await settle();
+      expect(h.session.phase, SessionPhase.live);
+      h.session.close();
+      await h.done;
+    });
+
+    test('the path is checked again later: a switch off the tailnet ends the '
+        'session', () async {
+      final h = sessionWith(
+        host,
+        id,
+        pathRecheck: const Duration(milliseconds: 30),
+      );
+      await accept(host);
+      final peer = h.peer!;
+      peer.statsReport = statsFor(phoneIp, hostIp);
+      peer.events.onState(PeerState.connected);
+      peer.size.value = const Size(1920, 1080);
+      await settle();
+      expect(h.session.path!.ok, isTrue);
+      expect(h.session.phase, SessionPhase.live);
+      // ICE moves to another candidate pair while still "connected".
+      peer.statsReport = statsFor(phoneIp, '203.0.113.5');
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      await settle();
+      expect(h.session.closeReason!.reason, 'non-tailnet-path');
+      expect(host.last.sent.last, {'t': 'bye', 'reason': 'non-tailnet-path'});
+    });
+
+    test('a non-ASCII password is normalised before hashing; ASCII is not '
+        'touched', () async {
+      const salt = 'AAECAwQFBgcICQoLDA0ODw==';
+      const kdf = {'N': 16384, 'r': 8, 'p': 1, 'keylen': 32};
+      host.auth = {
+        ...host.auth,
+        'passwordSet': true,
+        'acceptMode': 'password-only',
+        'salt': salt,
+        'kdf': kdf,
+      };
+      final asked = <String>[];
+      final h = sessionWith(
+        host,
+        id,
+        // Stands in for Android's NFC: maps the typed text to another one.
+        normalizePassword: (text) async {
+          asked.add(text);
+          return 'normalised-form';
+        },
+      );
+      await settle();
+      expect(await h.session.submitPassword('รหัส-typed'), isNull);
+      final request = await host.last.sentOf('request');
+      expect(asked, ['รหัส-typed']);
+      expect(
+        request['proof'],
+        await computeProof(
+          'normalised-form',
+          {'salt': salt, 'kdf': kdf},
+          helloNonce,
+          {'hostId': hostNodeId, 'viewerId': phoneNodeId},
+        ),
+      );
+      host.last.push({'t': 'auth-failed', 'remaining': 2});
+      await settle();
+      expect(await h.session.submitPassword('plain-ascii-1'), isNull);
+      final auth = await host.last.sentOf('auth');
+      expect(asked, hasLength(1), reason: 'ASCII is already NFC');
+      expect(
+        auth['proof'],
+        await computeProof(
+          'plain-ascii-1',
+          {'salt': salt, 'kdf': kdf},
+          helloNonce,
+          {'hostId': hostNodeId, 'viewerId': phoneNodeId},
+        ),
+      );
+      h.session.close();
+      await h.done;
+    }, timeout: const Timeout(Duration(minutes: 3)));
   });
 
   test('localPathOk', () {
@@ -644,20 +922,4 @@ void main() {
     expect(hasIdentities('1.0.0'), isTrue);
     expect(hasIdentities('junk'), isFalse);
   });
-}
-
-Harness sessionWithGrace(FakeHost host, TestIdentity id) {
-  late Harness h;
-  final session = RemoteSession(
-    host: recordFor(id),
-    transport: host,
-    peerFactory: (events) async => h.peer = FakePeer(events),
-    selfAddrs: const [phoneIp],
-    deviceName: 'Pixel',
-    appVersion: '0.3.0',
-    disconnectGrace: const Duration(milliseconds: 50),
-  );
-  h = Harness(host, session);
-  h.done = session.start();
-  return h;
 }

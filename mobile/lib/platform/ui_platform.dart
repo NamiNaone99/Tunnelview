@@ -53,3 +53,19 @@ Future<bool> keepScreenOn(bool on) async {
     return false;
   }
 }
+
+/// The Unicode NFC form of [text] (a typed password): the desktop hashes the
+/// NFC form, and Dart has no normaliser of its own. Android normalises it in
+/// this process (`java.text.Normalizer`); nothing is stored or logged. Where
+/// there is no helper, or it fails, [text] comes back unchanged (keyboards
+/// produce NFC for almost everything).
+Future<String> normalizeNfc(String text) async {
+  if (defaultTargetPlatform != TargetPlatform.android) return text;
+  try {
+    return await _channel.invokeMethod<String>('nfc', {'text': text}) ?? text;
+  } on PlatformException {
+    return text;
+  } on MissingPluginException {
+    return text;
+  }
+}

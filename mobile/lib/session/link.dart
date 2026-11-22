@@ -170,9 +170,10 @@ class HostLink {
   bool _closed = false;
 
   /// Dials [addresses] in order and returns after hello passed every check:
-  /// the socket runs over this phone's Tailscale address, the hello is a
-  /// Tunnelview v2 hello, and its `ident` is signed by [key] for this very
-  /// connection, for [hostId] (and for [viewerId] when given).
+  /// the socket is bound to this phone's own Tailscale address of the same
+  /// family ([selfAddrs]), the hello is a Tunnelview v2 hello, and its
+  /// `ident` is signed by [key] for this very connection, for [hostId] (and
+  /// for [viewerId] when given).
   ///
   /// Nothing but the upgrade request is sent before that. Throws
   /// [LinkFailure].
@@ -185,18 +186,29 @@ class HostLink {
     required List<String> selfAddrs,
     String? viewerId,
   }) async {
-    LinkFailure last = const LinkFailure('unreachable');
+    // What to report when no address answered. A family this phone has no
+    // Tailscale address for is only the reason when nothing else was tried.
+    LinkFailure? last;
     for (final ip in addresses) {
+      final bind = bindAddressFor(ip, selfAddrs);
+      if (bind == null) {
+        last ??= const LinkFailure('not-tailnet-route');
+        continue;
+      }
       final cnonce = newClientNonce();
       final SignalConnection conn;
       try {
-        conn = await transport.dial(ip, port, cnonce);
+        conn = await transport.dial(ip, port, cnonce, bindAddress: bind);
       } on DialFailure catch (e) {
         if (e.reason == 'http') throw LinkFailure(reasonForStatus(e.status));
         if (e.reason == 'not-tunnelview') {
           throw const LinkFailure('not-tunnelview');
         }
-        last = LinkFailure(e.reason);
+        if (e.reason == 'not-tailnet-route') {
+          last ??= const LinkFailure('not-tailnet-route');
+        } else {
+          last = LinkFailure(e.reason);
+        }
         continue; // unreachable or timeout: try the other address family
       }
       try {
@@ -214,7 +226,7 @@ class HostLink {
         rethrow;
       }
     }
-    throw last;
+    throw last ?? const LinkFailure('unreachable');
   }
 
   static Future<HostLink> _verify(

@@ -2,9 +2,17 @@
 ///
 /// The upgrade is done by hand (instead of `WebSocket.connect`) for three
 /// reasons: the HTTP status of a refusal is needed (403, 429, 503 mean
-/// different things), the socket's local address is needed (it must be one of
-/// this phone's Tailscale addresses), and the address is always an IP literal,
-/// so nothing is ever resolved through DNS.
+/// different things), the socket must be bound to one of this phone's own
+/// Tailscale addresses, and the address is always an IP literal, so nothing
+/// is ever resolved through DNS.
+///
+/// About the local address: dart:io cannot report it for an outgoing socket
+/// (`Socket.address` is the address that was connected TO). So the socket is
+/// bound to the phone's Tailscale address before it connects; the OS refuses
+/// that bind unless the address is on this device. Together with the process
+/// being bound to the Tailscale network (TailnetPlugin) and the signed hello
+/// (link.dart), this is the phone's form of the desktop's local-address
+/// check.
 library;
 
 import 'dart:async';
@@ -22,14 +30,22 @@ const String protocolHeader = 'x-tunnelview-protocol';
 const int protocolVersion = 2;
 const int maxFrameLength = 1024 * 1024;
 const Duration handshakeTimeout = Duration(seconds: 8);
-const Duration pingInterval = Duration(seconds: 15);
+
+/// dart:io sends a ping this long after the last pong and closes the socket
+/// when its pong is not back within the same time again. It must be longer
+/// than a session's disconnect grace (35 s), so a short stall is left to the
+/// media timers and to the host, which can restart ICE. 40 s is the desktop
+/// viewer's liveness window too; the host drops a dead phone by its own
+/// pings.
+const Duration pingInterval = Duration(seconds: 40);
 const String _wsGuid = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 /// Why a dial failed before a WebSocket existed.
 class DialFailure implements Exception {
   const DialFailure(this.reason, {this.status});
 
-  /// 'unreachable' | 'timeout' | 'http' (see [status]) | 'not-tunnelview'.
+  /// 'unreachable' | 'timeout' | 'http' (see [status]) | 'not-tunnelview' |
+  /// 'not-tailnet-route' (no usable Tailscale address to bind).
   final String reason;
   final int? status;
 
@@ -39,7 +55,7 @@ class DialFailure implements Exception {
 
 /// An open signaling connection.
 abstract interface class SignalConnection {
-  /// This end's address of the socket, or null when unknown.
+  /// The address this end of the socket is bound to, or null when unknown.
   String? get localAddress;
 
   /// Text frames from the host. Done when the socket closes; a binary or
@@ -57,8 +73,32 @@ abstract interface class SignalConnection {
 /// Opens signaling connections.
 abstract interface class SignalTransport {
   /// Connects to `ws://ip:port/tunnelview/v1` with the protocol header and
-  /// the client nonce. Throws [DialFailure].
-  Future<SignalConnection> dial(String ip, int port, String cnonce);
+  /// the client nonce, from a socket bound to [bindAddress]: one of this
+  /// phone's own Tailscale addresses, of the same family as [ip]. Throws
+  /// [DialFailure].
+  Future<SignalConnection> dial(
+    String ip,
+    int port,
+    String cnonce, {
+    required String bindAddress,
+  });
+}
+
+/// The entry of [selfAddrs] to bind for a connection to [ip]: this phone's
+/// first Tailscale address of the same family, in canonical form. Null when
+/// there is none.
+String? bindAddressFor(String ip, List<String> selfAddrs) {
+  final target = canonicalAddress(ip);
+  if (target == null) return null;
+  for (final a in selfAddrs) {
+    final own = canonicalAddress(a);
+    if (own != null &&
+        isTailscaleAddress(own) &&
+        own.contains(':') == target.contains(':')) {
+      return own;
+    }
+  }
+  return null;
 }
 
 /// 32 fresh random bytes as canonical base64: a client nonce.
@@ -74,7 +114,12 @@ class IoSignalTransport implements SignalTransport {
   const IoSignalTransport();
 
   @override
-  Future<SignalConnection> dial(String ip, int port, String cnonce) async {
+  Future<SignalConnection> dial(
+    String ip,
+    int port,
+    String cnonce, {
+    required String bindAddress,
+  }) async {
     final canonical = canonicalAddress(ip);
     // Only Tailscale addresses are ever dialed.
     if (canonical == null || !isTailscaleAddress(canonical)) {
@@ -82,21 +127,23 @@ class IoSignalTransport implements SignalTransport {
     }
     final address = InternetAddress.tryParse(canonical);
     if (address == null) throw const DialFailure('unreachable');
+    // And only from this phone's own Tailscale address of the same family.
+    final own = canonicalAddress(bindAddress);
+    if (own == null ||
+        !isTailscaleAddress(own) ||
+        own.contains(':') != canonical.contains(':')) {
+      throw const DialFailure('not-tailnet-route');
+    }
+    final source = InternetAddress.tryParse(own);
+    if (source == null) throw const DialFailure('not-tailnet-route');
     final client = HttpClient()
       ..connectionTimeout = handshakeTimeout
       ..userAgent = null
       ..findProxy = (_) => 'DIRECT';
-    String? local;
-    client.connectionFactory = (uri, proxyHost, proxyPort) async {
-      final task = await Socket.startConnect(address, port);
-      return ConnectionTask.fromSocket(
-        task.socket.then((s) {
-          local = s.address.address;
-          return s;
-        }),
-        task.cancel,
-      );
-    };
+    // Bind, then connect. The bind fails (a SocketException, reported as
+    // unreachable) when the address is no longer on this device.
+    client.connectionFactory = (uri, proxyHost, proxyPort) =>
+        Socket.startConnect(address, port, sourceAddress: source);
     final random = Random.secure();
     final key = base64.encode([
       for (var i = 0; i < 16; i++) random.nextInt(256),
@@ -137,9 +184,15 @@ class IoSignalTransport implements SignalTransport {
         throw const DialFailure('not-tunnelview');
       }
       final socket = await response.detachSocket();
-      final ws = WebSocket.fromUpgradedSocket(socket, serverSide: false)
-        ..pingInterval = pingInterval;
-      return _IoConnection(ws, local);
+      // No compression was negotiated. A frame above the limit fails at its
+      // length header instead of being buffered.
+      final ws = WebSocket.fromUpgradedSocket(
+        socket,
+        serverSide: false,
+        compression: CompressionOptions.compressionOff,
+        maxPayloadLength: maxFrameLength,
+      )..pingInterval = pingInterval;
+      return _IoConnection(ws, own);
     } on DialFailure {
       rethrow;
     } on TimeoutException {

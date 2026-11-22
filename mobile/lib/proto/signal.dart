@@ -47,16 +47,34 @@ String _jsString(Object value) {
   return value.toString();
 }
 
+// Printable ASCII fields separated by single spaces. Only for this shape do
+// this filter (which splits on any white space) and libwebrtc's parser
+// (which splits on single spaces) see the same fields: with a TAB inside the
+// first field, a line could show a Tailscale address here and another
+// address, or a host name, to libwebrtc.
+final RegExp _candidateShapeRe = RegExp(r'^[!-~]+(?: [!-~]+)*$');
+
 /// ICE candidate init (a decoded JSON value). Null, or a missing or empty
 /// candidate line (end of candidates) is allowed; otherwise the address must
 /// be a Tailscale IP.
+///
+/// Stricter than the desktop's filter of the same name in two ways, both
+/// about what libwebrtc would do with the line: the line must be plain
+/// single-space separated fields, and the address must be a bare IP literal
+/// (no brackets, no zone id), because libwebrtc treats anything else as a
+/// host name to resolve.
 bool isAllowedCandidate(Object? init) {
   if (init == null) return true;
   if (init is! Map) return false;
   final c = init['candidate'];
   if (c == null || c == '') return true;
-  if (c is! String) return false;
-  return isTailscaleAddress(candidateAddress(c));
+  if (c is! String || !_candidateShapeRe.hasMatch(c)) return false;
+  final address = candidateAddress(c);
+  if (address == null ||
+      (parseIPv4(address) == null && parseIPv6(address) == null)) {
+    return false;
+  }
+  return isTailscaleAddress(address);
 }
 
 /// A clean ICE candidate from the host.

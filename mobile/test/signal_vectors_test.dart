@@ -94,4 +94,60 @@ void main() {
       );
     }
   });
+
+  // Stricter than the desktop on purpose: the phone hands the line to
+  // libwebrtc, which splits on single spaces and resolves anything that is
+  // not an IP literal as a host name.
+  group('candidate lines only libwebrtc would read differently', () {
+    bool ok(String line) => isAllowedCandidate({'candidate': line});
+    const good =
+        'candidate:1 1 udp 2122260223 100.64.0.1 47810 typ host generation 0';
+
+    test('a normal Tailscale candidate passes', () {
+      expect(ok(good), isTrue);
+      expect(ok('a=$good'), isTrue);
+      expect(ok('candidate:1 1 udp 1 fd7a:115c:a1e0::1234 9 typ host'), isTrue);
+    });
+
+    test('a TAB-separated decoy in front of the real fields is refused', () {
+      // Split on any white space, field 5 is 100.64.0.1; split on single
+      // spaces (libwebrtc), it is 203.0.113.5.
+      const decoy =
+          'candidate:F\t1\tudp\t1\t100.64.0.1\t9\ttyp\thost 1 udp 2130706431 '
+          '203.0.113.5 3478 typ host';
+      expect(ok(decoy), isFalse);
+      expect(
+        ok(
+          'candidate:F\t1\tudp\t1\t100.64.0.1\t9\ttyp\thost 1 udp 1 '
+          'evil.example 3478 typ host',
+        ),
+        isFalse,
+      );
+      // The same line inside an offer is dropped from the SDP.
+      expect(
+        sanitizeSdp('v=0\r\na=$decoy\r\na=$good\r\n'),
+        'v=0\r\na=$good\r\n',
+      );
+    });
+
+    test('other white space, double spaces and control characters', () {
+      expect(ok(good.replaceFirst(' udp ', '  udp ')), isFalse);
+      expect(ok(' $good'), isFalse);
+      expect(ok('$good '), isFalse);
+      expect(ok(good.replaceFirst(' udp ', '\u00a0udp ')), isFalse);
+      expect(ok('$good\r'), isFalse);
+      expect(ok('$good\u0000'), isFalse);
+    });
+
+    test('an address that is not a bare IP literal', () {
+      String withAddress(String a) =>
+          'candidate:1 1 udp 2122260223 $a 47810 typ host';
+      expect(ok(withAddress('100.64.0.1')), isTrue);
+      expect(ok(withAddress('[fd7a:115c:a1e0::1]')), isFalse);
+      expect(ok(withAddress('fd7a:115c:a1e0::1%wlan0')), isFalse);
+      expect(ok(withAddress('100.64.0.1%1')), isFalse);
+      expect(ok(withAddress('office-pc.tail1234.ts.net')), isFalse);
+      expect(ok(withAddress('abcd.local')), isFalse);
+    });
+  });
 }

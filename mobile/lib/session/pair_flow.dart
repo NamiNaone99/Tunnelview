@@ -19,7 +19,19 @@ class PairFailure implements Exception {
   String toString() => 'PairFailure($reason)';
 }
 
-/// Parses scanned or pasted text into a link that has not expired.
+/// The computer decides whether a pairing code is still valid, by its own
+/// clock (codes live 2 minutes). The phone only refuses a code unseen when
+/// it is this far past its expiry by the phone's clock, so a clock that is a
+/// few minutes off on either side does not make pairing impossible.
+const Duration pairClockSkew = Duration(minutes: 5);
+
+bool _pastExpiry(
+  PairLink link,
+  DateTime now, [
+  Duration slack = Duration.zero,
+]) => now.millisecondsSinceEpoch > link.expiresAt * 1000 + slack.inMilliseconds;
+
+/// Parses scanned or pasted text into a link that is not clearly expired.
 PairLink readPairLink(String text, DateTime now) {
   final PairLink link;
   try {
@@ -27,7 +39,7 @@ PairLink readPairLink(String text, DateTime now) {
   } on Exception {
     throw const PairFailure('link');
   }
-  if (link.expiresAt * 1000 <= now.millisecondsSinceEpoch) {
+  if (_pastExpiry(link, now, pairClockSkew)) {
     throw const PairFailure('expired');
   }
   return link;
@@ -48,9 +60,13 @@ Future<PairedHost> pairWithLink(
   required String appVersion,
   required DateTime Function() now,
 }) async {
-  if (link.expiresAt * 1000 <= now().millisecondsSinceEpoch) {
+  if (_pastExpiry(link, now(), pairClockSkew)) {
     throw const PairFailure('expired');
   }
+  // What a refusal most likely means: the code ran out, or it was used,
+  // replaced or closed.
+  PairFailure refused() =>
+      PairFailure(_pastExpiry(link, now()) ? 'expired' : 'refused');
   final HostLink conn;
   try {
     conn = await HostLink.open(
@@ -85,12 +101,12 @@ Future<PairedHost> pairWithLink(
       } on Exception {
         throw const PairFailure('timeout');
       }
-      if (msg == null) throw const PairFailure('refused');
+      if (msg == null) throw refused();
       if (msg['t'] != 'pair-result') continue; // unknown frames are ignored
       if (msg['ok'] != true ||
           msg['hostId'] != conn.hostId ||
           msg['viewerId'] != conn.viewerId) {
-        throw const PairFailure('refused');
+        throw refused();
       }
       final name = conn.hello.hostname.isNotEmpty
           ? conn.hello.hostname

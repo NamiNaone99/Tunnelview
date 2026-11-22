@@ -52,12 +52,22 @@ class TouchInput {
   Size viewport = Size.zero;
   ViewTransform view = ViewTransform.identity;
 
+  /// How much of the bottom of [viewport] the keyboard (and its extra keys)
+  /// covers. While it is not zero the picture can be moved up by that much,
+  /// and two fingers move the picture instead of scrolling.
+  double bottomInset = 0;
+
   final Map<int, Offset> _pointers = {};
   _Mode _mode = _Mode.idle;
   Offset _start = Offset.zero;
   Timer? _holdTimer;
   DateTime? _lastTapAt;
   Offset _lastTapPos = Offset.zero;
+
+  // The remote point of the first tap of a double or triple click. Windows
+  // only counts a double click when both presses land on (almost) the same
+  // pixel, which a finger never does, so later clicks reuse this point.
+  Offset? _tapAnchor;
   int _clicks = 0;
   bool _buttonDown = false;
   Offset _twoCentroid = Offset.zero;
@@ -70,13 +80,23 @@ class TouchInput {
   void down(int pointer, Offset position) {
     _pointers[pointer] = position;
     if (_pointers.length == 1) {
-      _mode = _Mode.pending;
       _start = position;
       _holdTimer?.cancel();
+      // A touch on the black bars around the picture is not a click on the
+      // edge of the remote screen: no tap, no hold and no drag starts there.
+      // (A second finger can still join it for a pinch or a scroll.)
+      if (!isInsidePicture(position, fit, view)) {
+        _mode = _Mode.done;
+        return;
+      }
+      _mode = _Mode.pending;
       _holdTimer = Timer(longPress, _onHold);
     } else if (_pointers.length == 2) {
       _holdTimer?.cancel();
-      _releaseButton(position);
+      // End a drag where the dragging finger is, not under the new finger.
+      for (final e in _pointers.entries) {
+        if (e.key != pointer) _releaseButton(e.value);
+      }
       _mode = _Mode.two;
       _twoStartCentroid = _twoCentroid = _centroid();
       _twoStartDistance = _twoDistance = _distance();
@@ -108,7 +128,16 @@ class TouchInput {
         if (_twoStartDistance > 0 && (d / _twoStartDistance - 1).abs() > 0.12) {
           _mode = _Mode.zoom;
         } else if ((c - _twoStartCentroid).distance > touchSlop) {
-          _mode = view.isZoomed ? _Mode.zoom : _Mode.scroll;
+          if (view.isZoomed || bottomInset > 0) {
+            _mode = _Mode.zoom;
+          } else {
+            _mode = _Mode.scroll;
+            // The wheel acts where the remote pointer is: put it under the
+            // fingers first.
+            if (isInsidePicture(_twoStartCentroid, fit, view)) {
+              _moveTo(_twoStartCentroid);
+            }
+          }
         } else {
           return;
         }
@@ -118,7 +147,14 @@ class TouchInput {
         final c = _centroid();
         final d = _distance();
         final factor = _twoDistance > 0 ? d / _twoDistance : 1.0;
-        view = view.zoomedAt(c, factor, c - _twoCentroid, viewport);
+        view = view.zoomedAt(
+          c,
+          factor,
+          c - _twoCentroid,
+          viewport,
+          bottomInset: bottomInset,
+          fit: fit,
+        );
         _twoCentroid = c;
         _twoDistance = d;
         onView(view);
@@ -189,15 +225,21 @@ class TouchInput {
   }
 
   void _tap(Offset position) {
-    final p = _remote(position);
-    if (p == null) return;
+    final here = _remote(position);
+    if (here == null) return;
     final at = _now();
     final last = _lastTapAt;
+    final anchor = _tapAnchor;
     final again =
         last != null &&
+        anchor != null &&
+        _clicks < 3 &&
         at.difference(last) <= doubleTapWindow &&
         (position - _lastTapPos).distance <= doubleTapDistance;
-    _clicks = again && _clicks < 3 ? _clicks + 1 : 1;
+    _clicks = again ? _clicks + 1 : 1;
+    // Clicks 2 and 3 go to the first tap's remote point (see _tapAnchor).
+    final p = again ? anchor : here;
+    _tapAnchor = p;
     _lastTapAt = at;
     _lastTapPos = position;
     if (send(_button('md', 0, p, _clicks))) {

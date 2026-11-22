@@ -15,9 +15,8 @@ import 'remote_geometry.dart';
 import 'session_strings.dart';
 import 'touch_input.dart';
 
-// What the hidden text field holds between edits, so Backspace always has
-// something to delete.
-const String _kbSentinel = '        ';
+// The height of the row of extra keys above the phone's keyboard.
+const double _keysBarHeight = 48;
 
 /// Views and controls one paired computer. The phone only ever views: it
 /// never shares its own screen.
@@ -45,8 +44,8 @@ class _SessionScreenState extends State<SessionScreen> {
   final FocusNode _kbFocus = FocusNode();
   final TextEditingController _kb = TextEditingController();
   final TextEditingController _password = TextEditingController();
-  String _kbPrev = _kbSentinel;
-  bool _kbResetting = false;
+  KeyboardBuffer _kbBuffer = KeyboardBuffer();
+  bool _kbSetting = false;
   final List<String> _mods = [];
   ViewTransform _view = ViewTransform.identity;
   bool _showPassword = false;
@@ -63,7 +62,6 @@ class _SessionScreenState extends State<SessionScreen> {
       onView: (view) => setState(() => _view = view),
       onLongPress: () => unawaited(HapticFeedback.mediumImpact()),
     );
-    _resetKeyboardBuffer();
     _kb.addListener(_onKeyboardEdit);
     _kbFocus.addListener(_onFocus);
     _startSession();
@@ -80,15 +78,32 @@ class _SessionScreenState extends State<SessionScreen> {
           ? 'Android phone'
           : controller.deviceName,
       appVersion: widget.info.version,
+      // Asked again inside the session: before it dials, and before WebRTC
+      // starts.
+      gate: () => controller.sessionRefusalCode,
+      normalizePassword: normalizeNfc,
     )..addListener(_onSession);
     _view = ViewTransform.identity;
     _showPassword = false;
     _passwordError = null;
     _mods.clear();
+    _kbBuffer = KeyboardBuffer();
+    _setKeyboardField(_kbBuffer.sentinel);
     unawaited(_session.start());
   }
 
   void _reconnect() {
+    // The same gate as on the home screen: Tailscale is up and WebRTC was
+    // seen to use only this phone's Tailscale addresses.
+    final refusal = widget.controller.sessionRefusalCode;
+    if (refusal != null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text(SessionStrings.cannotConnect(refusal))),
+        );
+      return;
+    }
     final old = _session..removeListener(_onSession);
     setState(_startSession);
     old.dispose();
@@ -143,31 +158,45 @@ class _SessionScreenState extends State<SessionScreen> {
 
   // ---- keyboard ----
 
-  void _resetKeyboardBuffer() {
-    _kbResetting = true;
-    _kb.value = const TextEditingValue(
-      text: _kbSentinel,
-      selection: TextSelection.collapsed(offset: _kbSentinel.length),
+  // Sets the hidden field without treating it as typing.
+  void _setKeyboardField(String text) {
+    _kbSetting = true;
+    _kb.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
     );
-    _kbPrev = _kbSentinel;
-    _kbResetting = false;
+    _kbSetting = false;
   }
 
   void _onKeyboardEdit() {
-    if (_kbResetting) return;
-    final text = _kb.text;
-    if (text == _kbPrev) return;
-    final edit = messagesForEdit(_kbPrev, text, _mods);
-    _kbPrev = text;
+    if (_kbSetting) return;
+    final value = _kb.value;
+    final composing = value.composing.isValid && !value.composing.isCollapsed;
+    final edit = _kbBuffer.edit(
+      value.text,
+      composing: composing,
+      modifiers: _mods,
+    );
     for (final msg in edit.messages) {
       _session.sendInput(msg);
     }
     if (edit.used && _mods.isNotEmpty) setState(_mods.clear);
-    // Refill the buffer between words, never in the middle of a composition.
-    final composing = _kb.value.composing;
-    if ((!composing.isValid || composing.isCollapsed) &&
-        (text.length < 4 || text.length > 200)) {
-      _resetKeyboardBuffer();
+    final resetTo = edit.resetTo;
+    if (resetTo != null) {
+      _setKeyboardField(resetTo);
+      return;
+    }
+    // The caret always stays at the end: the keyboard can move it (cursor
+    // keys or gestures), and typing in the middle of the buffer would turn
+    // into deletions on the computer.
+    final end = value.text.length;
+    final selection = value.selection;
+    if (!composing &&
+        selection.isValid &&
+        (selection.baseOffset != end || selection.extentOffset != end)) {
+      _kbSetting = true;
+      _kb.selection = TextSelection.collapsed(offset: end);
+      _kbSetting = false;
     }
   }
 
@@ -495,11 +524,23 @@ class _SessionScreenState extends State<SessionScreen> {
       session.controlBlock,
       session.inputBlocked,
     );
+    final keysShown = _kbFocus.hasFocus && session.canControl;
+    // What the keyboard and the extra keys cover. The picture is not refitted
+    // for it; it can be moved up by this much instead.
+    final covered = insets.bottom > 0
+        ? insets.bottom + (keysShown ? _keysBarHeight : 0)
+        : 0.0;
     return Stack(
       fit: StackFit.expand,
       children: [
-        if (peer != null) _RemoteView(peer: peer, touch: _touch, view: _view),
-        if (peer == null || session.media == MediaState.starting)
+        if (peer != null)
+          _RemoteView(
+            peer: peer,
+            touch: _touch,
+            view: _view,
+            bottomInset: covered,
+          ),
+        if (peer == null || !session.hasPicture)
           const Center(
             child: Text(
               SessionStrings.startingPicture,
@@ -576,7 +617,7 @@ class _SessionScreenState extends State<SessionScreen> {
             ],
           ),
         ),
-        if (_kbFocus.hasFocus && session.canControl)
+        if (keysShown)
           Positioned(
             left: 0,
             right: 0,
@@ -598,11 +639,15 @@ class _RemoteView extends StatelessWidget {
     required this.peer,
     required this.touch,
     required this.view,
+    required this.bottomInset,
   });
 
   final ViewerPeer peer;
   final TouchInput touch;
   final ViewTransform view;
+
+  /// How much of the bottom the keyboard covers.
+  final double bottomInset;
 
   @override
   Widget build(BuildContext context) {
@@ -612,10 +657,11 @@ class _RemoteView extends StatelessWidget {
         builder: (context, _) {
           final viewport = constraints.biggest;
           final fit = fitRect(viewport, peer.videoSize);
-          final v = view.clamped(viewport);
+          final v = view.clamped(viewport, bottomInset: bottomInset, fit: fit);
           touch
             ..viewport = viewport
             ..fit = fit
+            ..bottomInset = bottomInset
             ..view = v;
           final rect = fit.isEmpty
               ? Offset.zero & viewport
@@ -691,7 +737,7 @@ class _KeysBar extends StatelessWidget {
     return Material(
       color: scheme.surfaceContainerHigh,
       child: SizedBox(
-        height: 48,
+        height: _keysBarHeight,
         child: ListView(
           key: const Key('keys-bar'),
           scrollDirection: Axis.horizontal,

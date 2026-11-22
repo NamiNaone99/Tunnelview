@@ -112,7 +112,10 @@ class FakeHost implements SignalTransport {
 
   /// Fails every dial with this.
   DialFailure? dialFailure;
-  String? localAddress = phoneIp;
+
+  /// What the connection reports as its local address. Null (the default):
+  /// the address the phone asked to bind, as the real transport does.
+  String? localAddress;
   String viewerId = phoneNodeId;
   String hostId = hostNodeId;
   bool sendIdent = true;
@@ -128,16 +131,25 @@ class FakeHost implements SignalTransport {
   };
 
   final List<String> dialed = [];
+
+  /// The bind address of every dial, in order.
+  final List<String> bound = [];
   final List<FakeConnection> connections = [];
 
   FakeConnection get last => connections.last;
 
   @override
-  Future<SignalConnection> dial(String ip, int port, String cnonce) async {
+  Future<SignalConnection> dial(
+    String ip,
+    int port,
+    String cnonce, {
+    required String bindAddress,
+  }) async {
     dialed.add(ip);
+    bound.add(bindAddress);
     final failure = dialFailure;
     if (failure != null) throw failure;
-    final conn = FakeConnection(localAddress, cnonce);
+    final conn = FakeConnection(localAddress ?? bindAddress, cnonce);
     connections.add(conn);
     final hello = <String, Object?>{
       't': 'hello',

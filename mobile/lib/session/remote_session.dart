@@ -63,8 +63,11 @@ class RemoteSession extends ChangeNotifier {
     required this.selfAddrs,
     required this.deviceName,
     required this.appVersion,
+    this.gate,
+    this.normalizePassword,
     this.mediaTimeout = const Duration(seconds: 30),
     this.disconnectGrace = const Duration(seconds: 35),
+    this.pathRecheck = const Duration(seconds: 5),
   });
 
   final PairedHost host;
@@ -74,12 +77,24 @@ class RemoteSession extends ChangeNotifier {
   final String deviceName;
   final String appVersion;
 
-  /// How long media may take to connect after the session was accepted.
+  /// The session gate (`sessionRefusal`): null when a session may run, else
+  /// its refusal code. Asked before dialing and again before WebRTC starts.
+  final String? Function()? gate;
+
+  /// Unicode NFC normalisation for a typed password (the desktop hashes the
+  /// NFC form). Dart has none built in; Android supplies it.
+  final Future<String> Function(String text)? normalizePassword;
+
+  /// How long the first picture may take after the session was accepted.
   final Duration mediaTimeout;
 
   /// How long a lost connection may take to come back. Longer than the
   /// host's 30 s, so the host, which can restart ICE, decides first.
   final Duration disconnectGrace;
+
+  /// How often the selected ICE path is checked again while connected (the
+  /// host does the same): ICE can move to another candidate pair later.
+  final Duration pathRecheck;
 
   SessionPhase _phase = SessionPhase.connecting;
   HostLink? _link;
@@ -99,8 +114,10 @@ class RemoteSession extends ChangeNotifier {
   String? _currentDisplay;
   String _quality = 'balanced';
   PathCheck? _path;
+  bool _hasPicture = false;
   Timer? _mediaTimer;
   Timer? _graceTimer;
+  Timer? _pathTimer;
   Future<void> _signalQueue = Future.value();
 
   SessionPhase get phase => _phase;
@@ -130,6 +147,9 @@ class RemoteSession extends ChangeNotifier {
   /// The checked media path, once connected.
   PathCheck? get path => _path;
 
+  /// True once the first frame of the remote picture arrived.
+  bool get hasPicture => _hasPicture;
+
   /// 'secure-desktop' | 'elevated-window' while the computer's OS refuses
   /// remote input.
   String? get inputBlocked => _inputBlocked;
@@ -150,6 +170,11 @@ class RemoteSession extends ChangeNotifier {
 
   /// Dials the computer and runs the session until it ends.
   Future<void> start() async {
+    final refusal = gate?.call();
+    if (refusal != null) {
+      _finish(LinkFailure('gate:$refusal'));
+      return;
+    }
     try {
       final link = await HostLink.open(
         transport: transport,
@@ -218,10 +243,23 @@ class RemoteSession extends ChangeNotifier {
     _notify();
     final String proof;
     try {
+      // The desktop hashes the NFC form of the password. ASCII is already
+      // NFC; anything else is normalised first, so the same password typed
+      // with marks in another order still matches.
+      var text = password;
+      final normalize = normalizePassword;
+      if (normalize != null && password.codeUnits.any((c) => c > 0x7f)) {
+        try {
+          text = await normalize(password);
+        } catch (_) {
+          text = password; // most keyboards produce NFC already
+        }
+        if (text.isEmpty || text.length > maxPasswordLength) text = password;
+      }
       // Bound to the node IDs the computer signed in its hello, so a relay
       // cannot use the proof.
       proof = await computeProof(
-        password,
+        text,
         {'salt': hello.salt, 'kdf': hello.kdf},
         hello.nonce,
         link.binding,
@@ -234,6 +272,11 @@ class RemoteSession extends ChangeNotifier {
       }
       _fail(const LinkFailure('protocol'));
       return 'not-connected';
+    } catch (_) {
+      // The hashing isolate could not run: no proof was sent.
+      _computing = false;
+      _notify();
+      return 'invalid';
     }
     _computing = false;
     if (_closed != null || _phase == SessionPhase.live) {
@@ -331,15 +374,39 @@ class RemoteSession extends ChangeNotifier {
     _permissions = Permissions.from(msg['permissions']);
     _remaining = null;
     _media = MediaState.starting;
+    _hasPicture = false;
     _setPhase(SessionPhase.live);
+    // Runs until the first frame, as in the desktop viewer: a connection
+    // that never shows a picture must not stay up, with input enabled, on a
+    // black screen.
     _mediaTimer = Timer(mediaTimeout, () {
-      if (_media == MediaState.starting) _end('media-timeout');
+      if (!_hasPicture) _end('media-timeout');
     });
     _signalQueue = _signalQueue.then((_) => _createPeer());
   }
 
+  void _onVideo() {
+    final peer = _peer;
+    if (_closed != null || peer == null || _hasPicture) return;
+    final size = peer.videoSize;
+    if (size.width > 0 && size.height > 0) {
+      _hasPicture = true;
+      _mediaTimer?.cancel();
+      _mediaTimer = null;
+      _notify();
+    }
+  }
+
   Future<void> _createPeer() async {
     if (_closed != null) return;
+    // The gate again: Tailscale may have gone, or the self-test may have
+    // failed, while the request was waiting to be accepted.
+    final refusal = gate?.call();
+    if (refusal != null) {
+      _link?.send({'t': 'bye', 'reason': 'viewer-closed'});
+      _finish(LinkFailure('gate:$refusal'));
+      return;
+    }
     try {
       final peer = await peerFactory(
         PeerEvents(
@@ -354,6 +421,8 @@ class RemoteSession extends ChangeNotifier {
         return;
       }
       _peer = peer;
+      peer.videoChanges.addListener(_onVideo);
+      _onVideo();
       _notify();
     } catch (_) {
       _end('media-failed');
@@ -401,10 +470,12 @@ class RemoteSession extends ChangeNotifier {
       case PeerState.connected:
         _graceTimer?.cancel();
         _graceTimer = null;
-        _mediaTimer?.cancel();
-        _mediaTimer = null;
         _media = MediaState.connected;
         unawaited(_checkPath());
+        _pathTimer ??= Timer.periodic(
+          pathRecheck,
+          (_) => unawaited(_checkPath()),
+        );
       case PeerState.disconnected:
       case PeerState.failed:
         if (_media == MediaState.connected) {
@@ -423,7 +494,7 @@ class RemoteSession extends ChangeNotifier {
   /// The selected candidate pair must run between Tailscale addresses.
   Future<void> _checkPath() async {
     final peer = _peer;
-    if (peer == null) return;
+    if (peer == null || _closed != null) return;
     final PathCheck check;
     try {
       check = verifyTailnetPath(await peer.stats());
@@ -529,6 +600,7 @@ class RemoteSession extends ChangeNotifier {
     _phase = SessionPhase.closed;
     _mediaTimer?.cancel();
     _graceTimer?.cancel();
+    _pathTimer?.cancel();
     final peer = _peer;
     final link = _link;
     _inputOpen = false;
@@ -536,6 +608,7 @@ class RemoteSession extends ChangeNotifier {
     // The picture stays in the tree until the screen rebuilds without it.
     _notify();
     if (peer != null) {
+      peer.videoChanges.removeListener(_onVideo);
       scheduleMicrotask(() async {
         _peer = null;
         _notify();

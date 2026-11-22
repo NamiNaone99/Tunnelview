@@ -13,6 +13,7 @@ import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.text.Normalizer
 
 /**
  * Small UI helpers the Flutter framework does not offer. Dart side: lib/platform/ui_platform.dart.
@@ -23,6 +24,9 @@ import io.flutter.plugin.common.MethodChannel
  *   history (security.md §8.4). Flutter's Clipboard.setData cannot set this flag.
  * - keepScreenOn(on): sets or clears FLAG_KEEP_SCREEN_ON on the activity's window while a remote
  *   session is shown. A window flag, so no WAKE_LOCK permission is needed.
+ * - nfc(text): the Unicode NFC form of a typed password (java.text.Normalizer). The desktop hashes
+ *   the NFC form, and Dart has no normaliser. The text stays in this process: it is normalised
+ *   and returned, never stored.
  *
  * Nothing here logs the text.
  */
@@ -31,6 +35,7 @@ class UiPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandler {
         private const val METHOD_CHANNEL = "io.github.naminaone99.tunnelview/ui"
         private const val EXTRA_IS_SENSITIVE_LITERAL = "android.content.extra.IS_SENSITIVE"
         private const val MAX_TEXT = 256 * 1024
+        private const val MAX_NFC_TEXT = 4096
     }
 
     private lateinit var context: Context
@@ -86,6 +91,14 @@ class UiPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandler {
                             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                         }
                         result.success(true)
+                    }
+                }
+                "nfc" -> {
+                    val text = call.argument<String>("text")
+                    if (text == null || text.length > MAX_NFC_TEXT) {
+                        result.success(null)
+                    } else {
+                        result.success(Normalizer.normalize(text, Normalizer.Form.NFC))
                     }
                 }
                 else -> result.notImplemented()

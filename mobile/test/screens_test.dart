@@ -13,6 +13,7 @@ import 'package:tunnelview_mobile/rtc/peer.dart';
 import 'package:tunnelview_mobile/session/hosts.dart';
 import 'package:tunnelview_mobile/session/transport.dart';
 import 'package:tunnelview_mobile/ui/home_screen.dart';
+import 'package:tunnelview_mobile/ui/key_input.dart';
 
 import 'support/fake_host.dart';
 import 'support/fake_tailnet.dart';
@@ -41,8 +42,12 @@ class NoTransport implements SignalTransport {
   const NoTransport();
 
   @override
-  Future<SignalConnection> dial(String ip, int port, String cnonce) =>
-      throw const DialFailure('unreachable');
+  Future<SignalConnection> dial(
+    String ip,
+    int port,
+    String cnonce, {
+    required String bindAddress,
+  }) => throw const DialFailure('unreachable');
 }
 
 void main() {
@@ -64,7 +69,7 @@ void main() {
       id = await TestIdentity.create();
       await services.hosts.load();
     });
-    host = FakeHost(id)..localAddress = tunIp;
+    host = FakeHost(id);
     services = AppServices(
       hosts: services.hosts,
       transport: host,
@@ -274,7 +279,7 @@ void main() {
     await tester.tap(find.byKey(const Key('toggle-keyboard')));
     await tester.pump();
     expect(find.byKey(const Key('keys-bar')), findsOneWidget);
-    tester.testTextInput.enterText('        สวัสดี');
+    tester.testTextInput.enterText('${KeyboardBuffer().sentinel}สวัสดี');
     await tester.pump();
     expect(p.sentOn('input').last, {'t': 'txt', 'text': 'สวัสดี'});
     await tester.tap(find.byKey(const Key('key-Escape')));
