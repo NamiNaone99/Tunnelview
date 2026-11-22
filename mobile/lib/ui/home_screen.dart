@@ -1,18 +1,28 @@
 import 'package:flutter/material.dart';
 
 import '../app/connectivity.dart';
+import '../app/services.dart';
 import '../app_info.dart';
 import '../platform/tailnet.dart';
 import '../rtc/engine.dart';
+import 'computers_list.dart';
 import 'diagnostics_screen.dart';
 import 'strings.dart';
 import 'tailscale_pill.dart';
 
-/// Home: the Tailscale pill, Open Tailscale, and the (empty) computers list.
+/// Home: the Tailscale pill, Open Tailscale, and the paired computers.
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key, required this.controller, this.info});
+  const HomeScreen({
+    super.key,
+    required this.controller,
+    this.services,
+    this.info,
+  });
 
   final ConnectivityController controller;
+
+  /// Pairing and sessions; without it the list only shows its empty state.
+  final AppServices? services;
 
   /// Build facts to show; defaults to [AppInfo.current].
   final AppInfo? info;
@@ -89,19 +99,11 @@ class HomeScreen extends StatelessWidget {
             const SizedBox(height: 24),
             Text(Strings.computers, style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
-            const Text(Strings.noComputers),
-            const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: FilledButton.icon(
-                key: const Key('pair-computer'),
-                onPressed: null,
-                icon: const Icon(Icons.qr_code_scanner),
-                label: const Text(Strings.pairComputer),
-              ),
+            ComputersList(
+              controller: controller,
+              services: services,
+              info: app,
             ),
-            const SizedBox(height: 4),
-            Text(Strings.comingSoon, style: theme.textTheme.bodySmall),
             const SizedBox(height: 32),
             const Divider(),
             Text('Version ${app.versionLabel}'),

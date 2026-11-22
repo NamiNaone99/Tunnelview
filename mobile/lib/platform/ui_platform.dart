@@ -38,3 +38,18 @@ Future<bool> copySensitiveText(
   await Clipboard.setData(ClipboardData(text: text));
   return true;
 }
+
+/// Keeps the screen on while a remote session is shown ([on] true), or lets
+/// it time out again. A window flag on Android: no permission is involved.
+/// False when the platform has no helper.
+Future<bool> keepScreenOn(bool on) async {
+  if (defaultTargetPlatform != TargetPlatform.android) return false;
+  try {
+    return await _channel.invokeMethod<bool>('keepScreenOn', {'on': on}) ??
+        false;
+  } on PlatformException {
+    return false;
+  } on MissingPluginException {
+    return false;
+  }
+}

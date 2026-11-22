@@ -4,9 +4,39 @@ The phone app views and controls a Windows or Mac computer running Tunnelview, *
 Tailscale tailnet only**. It is a viewer: it never shares the phone's screen and never listens
 for connections. Android first; iOS builds from the same code later.
 
-Status: milestone M2 (Tailscale detection). The home screen shows the Tailscale pill and Open
-Tailscale; Diagnostics shows what the phone sees and runs the WebRTC self-test. Pairing and
-connecting come in later milestones.
+Status: pairing, viewing and control are implemented and unit-tested against a scripted host;
+**they have not been run on a real phone against a real computer yet**. Not there yet: clipboard
+sync, file transfer, chat, a biometric prompt before auto-accepted sessions.
+
+## Using it
+
+1. On the computer (Tunnelview 0.3 or later): open Tunnelview and choose *Pair a phone*. It shows a
+   QR code for 2 minutes.
+2. On the phone, with Tailscale connected: *Pair a computer*, then scan the code (or paste the
+   link). The computer appears in the list; *Details* shows its identity fingerprint, the same
+   one as in the computer's Settings.
+3. Tap the computer. Someone there allows the session, or you type its password. Pairing admits
+   nothing by itself: every session goes through the computer's own rules.
+4. In the session: tap = click, two quick taps = double click, touch and hold = right click, drag =
+   drag with the left button, two fingers = scroll (or move the picture while zoomed), pinch =
+   zoom. The keyboard button opens the phone's keyboard with a row of extra keys (Esc, Tab, Ctrl,
+   Alt, arrows, F1-F12); the menu has key combinations, the display and the quality.
+
+## How a session is protected (`lib/proto`, `lib/session`)
+
+- The phone only dials the Tailscale addresses stored when it paired, as IP literals (no DNS), and
+  only after the Tailscale check and the WebRTC self-test passed (`session_gate.dart`).
+- Every connection carries a fresh client nonce. Before the phone sends anything, the computer's
+  hello must be signed by the identity key pinned at pairing, for this connection, this host ID
+  and this phone's node ID (`link.dart`, `pairing.dart` `verifyIdent`), and the socket's local
+  address must be one of the phone's own Tailscale addresses.
+- Password proofs are bound to the two node IDs the computer signed; the password never leaves the
+  phone. KDF parameters from the hello are validated before scrypt runs (`auth.dart`).
+- ICE candidates outside the tailnet are dropped in both directions and stripped from SDP, and the
+  selected candidate pair is checked once connected; a path outside Tailscale ends the session
+  (`signal.dart`, `remote_session.dart`).
+- The Dart ports are checked against the desktop's shared vectors in `../test/vectors`
+  (`test/proto_vectors_test.dart`, `test/signal_vectors_test.dart`).
 
 ## Building
 

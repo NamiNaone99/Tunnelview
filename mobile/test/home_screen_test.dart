@@ -135,7 +135,7 @@ void main() {
     expect(find.textContaining("Tailscale isn't installed"), findsOneWidget);
   });
 
-  testWidgets('Pair a computer is disabled and marked coming soon', (
+  testWidgets('without services the list is empty and Pair is disabled', (
     tester,
   ) async {
     await pumpHome(tester);
@@ -143,7 +143,7 @@ void main() {
       find.byKey(const Key('pair-computer')),
     );
     expect(button.onPressed, isNull);
-    expect(find.text('Coming soon'), findsOneWidget);
+    expect(find.textContaining('No computers yet'), findsOneWidget);
   });
 
   testWidgets('a failed self-test shows the blocked card', (tester) async {

@@ -28,10 +28,10 @@ abstract final class Strings {
   static const openTailscale = 'Open Tailscale';
   static const diagnostics = 'Diagnostics';
   static const pairComputer = 'Pair a computer';
-  static const comingSoon = 'Coming soon';
   static const computers = 'Computers';
   static const noComputers =
-      'No computers yet. Pairing with a computer arrives in a later build.';
+      'No computers yet. On the computer, open Tunnelview and choose '
+      '"Pair a phone", then scan the code here.';
   static const tailscaleNotInstalled =
       "Tailscale isn't installed on this phone. Install it from Google Play "
       'or F-Droid, sign in to your tailnet, then come back.';

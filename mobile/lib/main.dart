@@ -5,9 +5,12 @@ import 'package:flutter/material.dart';
 
 import 'app/connectivity.dart';
 import 'app/quiet_errors.dart';
+import 'app/services.dart';
 import 'app_info.dart';
 import 'platform/tailnet.dart';
 import 'rtc/engine.dart';
+import 'session/hosts.dart';
+import 'session/transport.dart';
 import 'ui/home_screen.dart';
 
 Future<void> main() async {
@@ -25,7 +28,13 @@ Future<void> main() async {
   );
   // Finds Tailscale, then runs the WebRTC self-test once.
   unawaited(controller.start());
-  runApp(TunnelviewApp(controller: controller));
+  final services = AppServices(
+    hosts: HostStore(const SecureHostStorage()),
+    transport: const IoSignalTransport(),
+    peerFactory: createEnginePeer,
+  );
+  unawaited(services.hosts.load());
+  runApp(TunnelviewApp(controller: controller, services: services));
 }
 
 /// The app root.
@@ -35,9 +44,15 @@ Future<void> main() async {
 /// platform pushes later are ignored. MainActivity already drops the data of
 /// any Intent another app sends; this is the Dart-side backstop.
 class TunnelviewApp extends StatefulWidget {
-  const TunnelviewApp({super.key, required this.controller, this.info});
+  const TunnelviewApp({
+    super.key,
+    required this.controller,
+    this.services,
+    this.info,
+  });
 
   final ConnectivityController controller;
+  final AppServices? services;
   final AppInfo? info;
 
   @override
@@ -76,8 +91,11 @@ class _TunnelviewAppState extends State<TunnelviewApp>
 
   Route<void> _homeRoute() => MaterialPageRoute<void>(
     settings: const RouteSettings(name: Navigator.defaultRouteName),
-    builder: (_) =>
-        HomeScreen(controller: widget.controller, info: widget.info),
+    builder: (_) => HomeScreen(
+      controller: widget.controller,
+      services: widget.services,
+      info: widget.info,
+    ),
   );
 
   @override

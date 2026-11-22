@@ -5,8 +5,12 @@ import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
+import android.app.Activity
 import android.os.PersistableBundle
+import android.view.WindowManager
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
@@ -17,10 +21,12 @@ import io.flutter.plugin.common.MethodChannel
  *   (ClipDescription.EXTRA_IS_SENSITIVE; the same key as a literal below API 33), so Android 13+
  *   hides the copy preview and keyboards that honour the flag keep it out of their clipboard
  *   history (security.md §8.4). Flutter's Clipboard.setData cannot set this flag.
+ * - keepScreenOn(on): sets or clears FLAG_KEEP_SCREEN_ON on the activity's window while a remote
+ *   session is shown. A window flag, so no WAKE_LOCK permission is needed.
  *
  * Nothing here logs the text.
  */
-class UiPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
+class UiPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandler {
     companion object {
         private const val METHOD_CHANNEL = "io.github.naminaone99.tunnelview/ui"
         private const val EXTRA_IS_SENSITIVE_LITERAL = "android.content.extra.IS_SENSITIVE"
@@ -29,6 +35,23 @@ class UiPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private lateinit var context: Context
     private var methods: MethodChannel? = null
+    private var activity: Activity? = null
+
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        activity = binding.activity
+    }
+
+    override fun onDetachedFromActivityForConfigChanges() {
+        activity = null
+    }
+
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        activity = binding.activity
+    }
+
+    override fun onDetachedFromActivity() {
+        activity = null
+    }
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
@@ -50,6 +73,19 @@ class UiPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         result.success(false)
                     } else {
                         result.success(copySensitive(label, text))
+                    }
+                }
+                "keepScreenOn" -> {
+                    val window = activity?.window
+                    if (window == null) {
+                        result.success(false)
+                    } else {
+                        if (call.argument<Boolean>("on") == true) {
+                            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                        } else {
+                            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                        }
+                        result.success(true)
                     }
                 }
                 else -> result.notImplemented()
