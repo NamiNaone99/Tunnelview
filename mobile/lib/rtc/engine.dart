@@ -11,8 +11,11 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+import '../proto/signal.dart';
+import 'peer.dart';
 import 'self_test.dart';
 
 /// Platforms with their own network mask rules.
@@ -223,4 +226,201 @@ class EngineIceGatherer implements LocalIceGatherer {
 String _describeError(Object e) {
   final s = e is String ? e : e.runtimeType.toString();
   return s.length > 160 ? '${s.substring(0, 160)}…' : s;
+}
+
+/// Creates the real [ViewerPeer]. Throws unless WebRTC was initialised with
+/// the tunnel-only mask.
+Future<ViewerPeer> createEnginePeer(PeerEvents events) async {
+  RtcEngine.ensureReady();
+  final config = peerConnectionConfig();
+  assertNoIceServers(config);
+  final renderer = RTCVideoRenderer();
+  await renderer.initialize();
+  final RTCPeerConnection pc;
+  try {
+    pc = await createPeerConnection(config);
+  } catch (_) {
+    await renderer.dispose();
+    rethrow;
+  }
+  return _EnginePeer(pc, renderer, events);
+}
+
+/// Longest `control` message accepted (UTF-16 units), as on the desktop.
+const int maxControlMessageLength = 2 * 1024 * 1024;
+
+class _EnginePeer implements ViewerPeer {
+  _EnginePeer(this._pc, this._renderer, this._events) {
+    _renderer.onResize = _onResize;
+    _pc.onIceCandidate = _onIceCandidate;
+    _pc.onIceConnectionState = _onIceState;
+    _pc.onDataChannel = _onDataChannel;
+    _pc.onTrack = _onTrack;
+  }
+
+  final RTCPeerConnection _pc;
+  final RTCVideoRenderer _renderer;
+  final PeerEvents _events;
+  final Map<String, RTCDataChannel> _channels = {};
+  final ValueNotifier<Size> _size = ValueNotifier(Size.zero);
+  MediaStream? _ownStream;
+  bool _closed = false;
+
+  void _onResize() {
+    if (_closed) return;
+    _size.value = Size(
+      _renderer.videoWidth.toDouble(),
+      _renderer.videoHeight.toDouble(),
+    );
+  }
+
+  void _onIceCandidate(RTCIceCandidate c) {
+    if (_closed) return;
+    final line = c.candidate;
+    if (line == null || line.isEmpty) return;
+    final init = <String, Object?>{
+      'candidate': line,
+      'sdpMid': c.sdpMid,
+      'sdpMLineIndex': c.sdpMLineIndex,
+    };
+    // Never offer the host an address outside the tunnel.
+    if (!isAllowedCandidate(init)) return;
+    _events.onCandidate(init);
+  }
+
+  void _onIceState(RTCIceConnectionState state) {
+    if (_closed) return;
+    switch (state) {
+      case RTCIceConnectionState.RTCIceConnectionStateConnected:
+      case RTCIceConnectionState.RTCIceConnectionStateCompleted:
+        _events.onState(PeerState.connected);
+      case RTCIceConnectionState.RTCIceConnectionStateDisconnected:
+        _events.onState(PeerState.disconnected);
+      case RTCIceConnectionState.RTCIceConnectionStateFailed:
+        _events.onState(PeerState.failed);
+      case RTCIceConnectionState.RTCIceConnectionStateClosed:
+        _events.onState(PeerState.closed);
+      case RTCIceConnectionState.RTCIceConnectionStateNew:
+      case RTCIceConnectionState.RTCIceConnectionStateChecking:
+      case RTCIceConnectionState.RTCIceConnectionStateCount:
+        _events.onState(PeerState.connecting);
+    }
+  }
+
+  void _onDataChannel(RTCDataChannel channel) {
+    final label = channel.label;
+    if (_closed || label == null) return;
+    _channels[label] = channel;
+    channel.onDataChannelState = (state) {
+      if (_closed) return;
+      if (state == RTCDataChannelState.RTCDataChannelOpen) {
+        _events.onChannel(label, true);
+      } else if (state == RTCDataChannelState.RTCDataChannelClosed) {
+        _events.onChannel(label, false);
+      }
+    };
+    if (label == 'control') {
+      channel.onMessage = (m) {
+        if (_closed || m.isBinary) return;
+        final text = m.text;
+        if (text.length <= maxControlMessageLength) _events.onControl(text);
+      };
+    }
+    if (channel.state == RTCDataChannelState.RTCDataChannelOpen) {
+      _events.onChannel(label, true);
+    }
+  }
+
+  Future<void> _onTrack(RTCTrackEvent event) async {
+    if (_closed || event.track.kind != 'video') return;
+    try {
+      if (event.streams.isNotEmpty) {
+        _renderer.srcObject = event.streams.first;
+        return;
+      }
+      // The host adds its tracks without a stream: wrap the track in one.
+      final stream = _ownStream ??= await createLocalMediaStream(
+        'tunnelview-remote',
+      );
+      await stream.addTrack(event.track, addToNative: true);
+      if (_closed) return;
+      _renderer.srcObject = stream;
+    } catch (_) {
+      // No picture; the session notices that no frame arrives.
+    }
+  }
+
+  @override
+  Future<String> answer(String offerSdp) async {
+    await _pc.setRemoteDescription(
+      RTCSessionDescription(sanitizeSdp(offerSdp), 'offer'),
+    );
+    final answer = await _pc.createAnswer();
+    final sdp = sanitizeSdp(answer.sdp ?? '');
+    await _pc.setLocalDescription(RTCSessionDescription(sdp, 'answer'));
+    return sdp;
+  }
+
+  @override
+  Future<void> addCandidate(SignalCandidate c) =>
+      _pc.addCandidate(RTCIceCandidate(c.candidate, c.sdpMid, c.sdpMLineIndex));
+
+  @override
+  bool send(String label, String text) {
+    final channel = _channels[label];
+    if (_closed ||
+        channel == null ||
+        channel.state != RTCDataChannelState.RTCDataChannelOpen) {
+      return false;
+    }
+    unawaited(
+      channel.send(RTCDataChannelMessage(text)).catchError((Object _) {}),
+    );
+    return true;
+  }
+
+  @override
+  Future<List<Map<dynamic, dynamic>>> stats() async {
+    final report = await _pc.getStats();
+    return [
+      for (final r in report) {...r.values, 'id': r.id, 'type': r.type},
+    ];
+  }
+
+  @override
+  Listenable get videoChanges => _size;
+
+  @override
+  Size get videoSize => _size.value;
+
+  @override
+  Widget buildVideo() => RTCVideoView(
+    _renderer,
+    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+  );
+
+  @override
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    _renderer.onResize = null;
+    try {
+      _renderer.srcObject = null;
+    } catch (_) {
+      // Already detached.
+    }
+    for (final step in <Future<void> Function()>[
+      _pc.close,
+      _pc.dispose,
+      () async => _ownStream?.dispose(),
+      _renderer.dispose,
+    ]) {
+      try {
+        await step();
+      } catch (_) {
+        // Tearing down a connection that already failed.
+      }
+    }
+    _size.dispose();
+  }
 }
